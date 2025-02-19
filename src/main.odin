@@ -5,6 +5,8 @@ import "core:log"
 import "core:math/linalg"
 import "core:fmt"
 import "core:mem"
+import "core:os"
+import "core:strings"
 import sdl "vendor:sdl3"
 
 default_context: runtime.Context
@@ -20,6 +22,7 @@ AppState :: struct {
     ibo: ^sdl.GPUBuffer,
     win_size: [2]i32,
     object: Object,
+    active: uint
 }
 
 UBO :: struct {
@@ -34,10 +37,46 @@ main :: proc() {
     sdl.ReleaseGPUBuffer(state.gpu, state.ibo)
 }
 
+
+load_next_obj :: proc(state: ^AppState) {
+    delete(state.object.mesh.indices)
+    delete(state.object.mesh.verts)
+    sdl.ReleaseGPUBuffer(state.gpu, state.vbo)
+    sdl.ReleaseGPUBuffer(state.gpu, state.ibo)
+
+    assets_handle := os.open("assets") or_else panic("Assets folder not found")
+    assets_dir := os.read_dir(assets_handle, 0) or_else panic("")
+
+    defer state.active = (state.active + 1) % len(assets_dir)
+    defer delete(assets_dir)
+
+    next := strings.concatenate({"assets/", assets_dir[state.active].name})
+    object := load_obj(next)
+
+    // Acquire copy_commands and transferbuffer
+    len_bytes := max((len(object.mesh.indices) * size_of(u16)), len(object.mesh.verts) * size_of(Vertex))
+    transfer_buffer := sdl.CreateGPUTransferBuffer(state.gpu, {
+        usage = sdl.GPUTransferBufferUsage.UPLOAD,
+        size = u32(len_bytes),
+    }); assert(transfer_buffer != nil)
+
+    copy_commands := sdl.AcquireGPUCommandBuffer(state.gpu); assert(copy_commands != nil)
+    copy_pass := sdl.BeginGPUCopyPass(copy_commands); assert(copy_pass != nil)
+    vbo :=  create_buffer_with_data(state.gpu, transfer_buffer, copy_pass, {.VERTEX}, object.mesh.verts[:])
+    ibo := create_buffer_with_data(state.gpu, transfer_buffer, copy_pass, {.INDEX}, object.mesh.indices[:])
+
+    // End copy pass
+    sdl.EndGPUCopyPass(copy_pass)
+    ok := sdl.SubmitGPUCommandBuffer(copy_commands); assert(ok)
+
+    state.vbo = vbo
+    state.ibo = ibo
+    state.object = object
+}
+
 run :: proc(state: ^AppState) {
     last_ticks := sdl.GetTicks();
     main_loop: for {
-
         ev: sdl.Event
         for sdl.PollEvent(&ev) {
             #partial switch ev.type {
@@ -45,6 +84,7 @@ run :: proc(state: ^AppState) {
                     break main_loop
                 case .KEY_DOWN: #partial switch ev.key.scancode {
                     case .ESCAPE: break main_loop
+                    case .SPACE: load_next_obj(state)
                 }
             }
         }
@@ -90,6 +130,7 @@ render :: proc(state: ^AppState) {
 }
 
 init :: proc() -> AppState {
+    state: AppState
     context.logger = log.create_console_logger()
     default_context = context
     sdl.SetLogPriorities(.VERBOSE)
@@ -105,6 +146,8 @@ init :: proc() -> AppState {
     gpu := sdl.CreateGPUDevice({.SPIRV}, true, nil); assert(gpu != nil)
     ok = sdl.ClaimWindowForGPUDevice(gpu, window); assert(ok)
 
+    state.window = window
+    state.gpu = gpu
     vert_shader := load_shader(gpu, vert_shader_code, .VERTEX, 1)
     frag_shader := load_shader(gpu, frag_shader_code, .FRAGMENT, 0)
     
@@ -144,40 +187,28 @@ init :: proc() -> AppState {
             cull_mode = .NONE
         }
     })
-
+    state.pipeline = pipeline
     // Load object from obj-file
-    object := load_obj("assets/monke.obj")
-    
-    // Acquire copy_commands and transferbuffer
-    transfer_buffer := sdl.CreateGPUTransferBuffer(gpu, {
-        usage = sdl.GPUTransferBufferUsage.UPLOAD,
-        size = u32(len(object.mesh.indices) * size_of(u16) + len(object.mesh.verts) * size_of(Vertex)),
-    }); assert(transfer_buffer != nil)
-
-    copy_commands := sdl.AcquireGPUCommandBuffer(gpu); assert(copy_commands != nil)
-    copy_pass := sdl.BeginGPUCopyPass(copy_commands); assert(copy_pass != nil)
-    vbo := create_buffer_with_data(gpu, transfer_buffer, copy_pass, {.VERTEX}, object.mesh.verts[:])
-    ibo := create_buffer_with_data(gpu, transfer_buffer, copy_pass, {.INDEX}, object.mesh.indices[:])
-
-    // End copy pass
-    sdl.EndGPUCopyPass(copy_pass)
-    ok = sdl.SubmitGPUCommandBuffer(copy_commands); assert(ok)
+   
+    load_next_obj(&state)
 
     sdl.ReleaseGPUShader(gpu, vert_shader)
     sdl.ReleaseGPUShader(gpu, frag_shader)
 
     win_size: [2]i32
     ok = sdl.GetWindowSize(window, &win_size.x, &win_size.y); assert(ok)
+    state.win_size = win_size
 
-    return AppState {
-        gpu = gpu,
-        window = window,
-        pipeline = pipeline,
-        win_size = win_size,
-        vbo = vbo,
-        ibo = ibo,
-        object = object
-    }
+    return state
+    // return AppState {
+    //     gpu = gpu,
+    //     window = window,
+    //     pipeline = pipeline,
+    //     win_size = win_size,
+    //     vbo = vbo,
+    //     ibo = ibo,
+    //     object = object
+    // }
 }
 
 load_shader :: proc(device: ^sdl.GPUDevice, code: []u8,
@@ -241,28 +272,6 @@ Object :: struct {
     mesh: Mesh,    
     position: [3]f32,
     rotation: f32,
-}
-
-create_triangle :: proc(object: ^Object)  {
-    verticies: [dynamic]Vertex
-    v: []Vertex = {
-        Vertex {-1, -1, 0},
-        Vertex { 1, -1, 0},
-        Vertex { 0,  1, 0},
-        Vertex { 1,  1, 0}
-    }
-    append(&verticies, ..v[:])
-
-    indices: [dynamic]u16
-    i: []u16 = {0, 1, 2, 2, 1, 3}
-    append(&indices, ..i[:])
-
-    object.mesh = Mesh {
-        verts = verticies,
-        indices = indices
-    }
-    object.position = {0, 0, -5}
-    object.rotation = 0
 }
 
 create_ubo :: proc(state: ^AppState) -> UBO {
