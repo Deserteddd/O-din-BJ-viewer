@@ -7,18 +7,17 @@ import "core:strconv"
 
 load_obj :: proc(path: string) -> Object {
     fmt.printfln("LOADING OBJ: {}", path)
-    file, err := os.read_entire_file_or_err(path); assert(err == nil)
-    defer delete(file)
+    file, err := os.read_entire_file_or_err(path); assert(err == nil); defer delete(file)
     data := string(file)
     verticies: [dynamic]Vertex
     indices: [dynamic]u16
     loop: for line in strings.split_lines_iterator(&data) {
+        if len(line) < 2 do continue
         switch line[0:2] {
             case "v ":
                 append(&verticies, parse_v_pos(line))
             case "f ":
                 parse_indices(line, &indices)
-                // break loop
         }
     }
     return Object {
