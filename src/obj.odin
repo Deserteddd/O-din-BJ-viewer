@@ -9,45 +9,46 @@ load_obj :: proc(path: string) -> Object {
     fmt.printfln("LOADING OBJ: {}", path)
     file, err := os.read_entire_file_or_err(path); assert(err == nil); defer delete(file)
     data := string(file)
-    verticies: [dynamic]Vertex
+    verticies: [dynamic]vec3
     indices: [dynamic]u16
-    loop: for line in strings.split_lines_iterator(&data) {
+    normals: [dynamic]vec3
+    i := 0;
+    for line in strings.split_lines_iterator(&data) {
         if len(line) < 2 do continue
         switch line[0:2] {
             case "v ":
-                append(&verticies, parse_v_pos(line))
+                append(&verticies, parse_vec3(line, 2))
             case "f ":
                 parse_indices(line, &indices)
+            case "vn":
+                append(&normals, parse_vec3(line, 3))
         }
     }
     return Object {
-        mesh = {
+        data = {
             verts = verticies,
-            indices = indices
+            indices = indices,
+            normals = normals
         },
-        position = {0, 0, -2},
+        position = {0, 0, -3},
     }
 }
 
-parse_v_pos :: proc(line: string) -> Vertex {
-    coords: [3]f32
-    start := 2
+parse_vec3 :: proc(line: string, start: int) -> vec3 {
+    vec: vec3
+    start := start
     num := 0
-    for i in 2..<len(line) {
+    for i in start..<len(line) {
         if line[i] == 32 {
             pos, ok := strconv.parse_f32(line[start:i]); assert(ok)
-            coords[num] = pos
+            vec[num] = pos
             num += 1
             start = i+1
         }
     }
-    coords[num] = strconv.parse_f32(line[start:]) or_else panic("parse_v_pos: Parse Error")
+    vec[num] = strconv.parse_f32(line[start:]) or_else panic("parse_v_pos: Parse Error")
     
-    return Vertex {
-        x = coords[0],
-        y = coords[1],
-        z = coords[2],
-    }
+    return vec
 }
 
 parse_indices :: proc(line: string, indices: ^[dynamic]u16) {

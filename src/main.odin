@@ -14,13 +14,14 @@ default_context: runtime.Context
 vert_shader_code := #load("../shaders/spv/triangle.vert.spv")
 frag_shader_code := #load("../shaders/spv/triangle.frag.spv")
 
-width := 1440
-height := 960
+width := 1390
+height := 900
 AppState :: struct {
     gpu: ^sdl.GPUDevice,
     window: ^sdl.Window,
     pipeline: ^sdl.GPUGraphicsPipeline,
     vbo: ^sdl.GPUBuffer,
+    nbo: ^sdl.GPUBuffer,
     ibo: ^sdl.GPUBuffer,
     object: Object,
     active: uint,
@@ -38,6 +39,7 @@ main :: proc() {
     run(&state)
     sdl.ReleaseGPUBuffer(state.gpu, state.vbo)
     sdl.ReleaseGPUBuffer(state.gpu, state.ibo)
+    sdl.ReleaseGPUBuffer(state.gpu, state.nbo)
 }
 
 run :: proc(state: ^AppState) {
@@ -53,7 +55,6 @@ run :: proc(state: ^AppState) {
                     case .SPACE: load_next_obj(state)
                     case .W: {
                         state.wireframe = !state.wireframe
-                        fmt.printfln("kys")
                         state.pipeline = build_pipeline(state)
                     }
                 }
@@ -99,10 +100,15 @@ render :: proc(state: ^AppState) {
     render_pass := sdl.BeginGPURenderPass(cmd_buff, &color_target, 1, &depth_target_info); assert(render_pass != nil)
     sdl.BindGPUGraphicsPipeline(render_pass, state.pipeline)
 
-    sdl.BindGPUVertexBuffers(render_pass, 0, &(sdl.GPUBufferBinding { buffer = state.vbo }), 1)
+    bindings: []sdl.GPUBufferBinding = {
+        sdl.GPUBufferBinding { buffer = state.vbo },
+        sdl.GPUBufferBinding { buffer = state.nbo }
+    } 
+
+    sdl.BindGPUVertexBuffers(render_pass, 0, &bindings[0], 2)
     sdl.BindGPUIndexBuffer(render_pass, { buffer = state.ibo }, ._16BIT)
     sdl.PushGPUVertexUniformData(cmd_buff, 0, &ubo, size_of(UBO))
-    ibo_len := u32(len(state.object.mesh.indices))
+    ibo_len := u32(len(state.object.data.indices))
     sdl.DrawGPUIndexedPrimitives(render_pass, ibo_len, 1, 0, 0, 0)
     sdl.EndGPURenderPass(render_pass)
 
@@ -150,19 +156,36 @@ build_pipeline :: proc(state: ^AppState) -> ^sdl.GPUGraphicsPipeline {
     vert_shader := load_shader(state.gpu, vert_shader_code, .VERTEX, 1); defer sdl.ReleaseGPUShader(state.gpu, vert_shader)
     frag_shader := load_shader(state.gpu, frag_shader_code, .FRAGMENT, 0); defer sdl.ReleaseGPUShader(state.gpu, frag_shader)
     
-    vb_descriptions: []sdl.GPUVertexBufferDescription = {sdl.GPUVertexBufferDescription {
-        slot = 0,
-        pitch = size_of(Vertex),
-        input_rate = .VERTEX,
-        instance_step_rate = 0
-    }}
+    vb_descriptions: []sdl.GPUVertexBufferDescription = {
+        sdl.GPUVertexBufferDescription {
+            slot = 0,
+            pitch = size_of(vec3),
+            input_rate = .VERTEX,
+            instance_step_rate = 0
+        },
+        sdl.GPUVertexBufferDescription {
+            slot = 1,
+            pitch = size_of(vec3),
+            input_rate = .VERTEX,
+            instance_step_rate = 0
+        }
+    }
 
-    vb_attributes: []sdl.GPUVertexAttribute = {sdl.GPUVertexAttribute {
-        location = 0,
-        buffer_slot = 0,
-        format = .FLOAT3,
-        offset = 0
-    }}
+    vb_attributes: []sdl.GPUVertexAttribute = {
+        sdl.GPUVertexAttribute {
+            location = 0,
+            buffer_slot = 0,
+            format = .FLOAT3,
+            offset = 0
+        },
+        sdl.GPUVertexAttribute {
+            location = 1,
+            buffer_slot = 1,
+            format = .FLOAT3,
+            offset = 0
+        },
+    }
+
     fill_mode: sdl.GPUFillMode;
     cull_mode: sdl.GPUCullMode; 
     if state.wireframe {fill_mode = .LINE; cull_mode = .NONE} else {fill_mode = .FILL; cull_mode = .BACK}
@@ -180,9 +203,9 @@ build_pipeline :: proc(state: ^AppState) -> ^sdl.GPUGraphicsPipeline {
         },
         vertex_input_state = {
             vertex_buffer_descriptions = &vb_descriptions[0],
-            num_vertex_buffers = 1,
+            num_vertex_buffers = 2,
             vertex_attributes = &vb_attributes[0],
-            num_vertex_attributes = 1
+            num_vertex_attributes = 2
         },
         rasterizer_state = {
             fill_mode = fill_mode,
@@ -198,8 +221,9 @@ build_pipeline :: proc(state: ^AppState) -> ^sdl.GPUGraphicsPipeline {
 }
 
 load_next_obj :: proc(state: ^AppState) {
-    delete(state.object.mesh.indices)
-    delete(state.object.mesh.verts)
+    delete(state.object.data.indices)
+    delete(state.object.data.verts)
+    delete(state.object.data.normals)
     sdl.ReleaseGPUBuffer(state.gpu, state.vbo)
     sdl.ReleaseGPUBuffer(state.gpu, state.ibo)
 
@@ -213,7 +237,11 @@ load_next_obj :: proc(state: ^AppState) {
     object := load_obj(next)
 
     // Acquire copy_commands and transferbuffer
-    len_bytes := max((len(object.mesh.indices) * size_of(u16)), len(object.mesh.verts) * size_of(Vertex))
+    len_bytes := max(
+        len(object.data.indices) * size_of(u16),
+        len(object.data.verts) * size_of(vec3),
+        len(object.data.normals) * size_of(vec3)
+    )
     transfer_buffer := sdl.CreateGPUTransferBuffer(state.gpu, {
         usage = sdl.GPUTransferBufferUsage.UPLOAD,
         size = u32(len_bytes),
@@ -221,14 +249,16 @@ load_next_obj :: proc(state: ^AppState) {
 
     copy_commands := sdl.AcquireGPUCommandBuffer(state.gpu); assert(copy_commands != nil)
     copy_pass := sdl.BeginGPUCopyPass(copy_commands); assert(copy_pass != nil)
-    vbo :=  create_buffer_with_data(state.gpu, transfer_buffer, copy_pass, {.VERTEX}, object.mesh.verts[:])
-    ibo := create_buffer_with_data(state.gpu, transfer_buffer, copy_pass, {.INDEX}, object.mesh.indices[:])
+    vbo :=  create_buffer_with_data(state.gpu, transfer_buffer, copy_pass, {.VERTEX}, object.data.verts[:])
+    nbo :=  create_buffer_with_data(state.gpu, transfer_buffer, copy_pass, {.VERTEX}, object.data.normals[:])
+    ibo := create_buffer_with_data(state.gpu, transfer_buffer, copy_pass, {.INDEX}, object.data.indices[:])
 
     // End copy pass
     sdl.EndGPUCopyPass(copy_pass)
     ok := sdl.SubmitGPUCommandBuffer(copy_commands); assert(ok)
 
     state.vbo = vbo
+    state.nbo = nbo
     state.ibo = ibo
     state.object = object
 }
@@ -279,19 +309,16 @@ create_buffer_with_data :: proc(
     return buffer
 }
 
-Vertex :: struct {
-    x: f32,
-    y: f32,
-    z: f32
-}
+vec3 :: [3]f32
 
-Mesh :: struct {
-    verts: [dynamic]Vertex,
-    indices: [dynamic]u16
+ObjectData :: struct {
+    verts: [dynamic]vec3,
+    indices: [dynamic]u16,
+    normals: [dynamic]vec3,
 }
 
 Object :: struct {
-    mesh: Mesh,    
+    data: ObjectData,    
     position: [3]f32,
     rotation: f32,
 }
