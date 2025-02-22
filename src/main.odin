@@ -3,6 +3,7 @@ package obj_viewer
 import "base:runtime"
 import "core:log"
 import "core:math/linalg"
+import "core:math"
 import "core:fmt"
 import "core:mem"
 import "core:os"
@@ -14,8 +15,6 @@ default_context: runtime.Context
 vert_shader_code := #load("../shaders/spv/triangle.vert.spv")
 frag_shader_code := #load("../shaders/spv/triangle.frag.spv")
 
-width := 1390
-height := 900
 AppState :: struct {
     gpu: ^sdl.GPUDevice,
     window: ^sdl.Window,
@@ -28,7 +27,6 @@ AppState :: struct {
     depth_texture: ^sdl.GPUTexture,
     wireframe: bool,
     camera: Camera,
-    mb_down: bool
 }
 
 main :: proc() {
@@ -36,6 +34,52 @@ main :: proc() {
     run(&state)
     sdl.ReleaseGPUBuffer(state.gpu, state.vbo)
     sdl.ReleaseGPUBuffer(state.gpu, state.ibo)
+}
+
+init :: proc() -> AppState {
+    state: AppState
+    context.logger = log.create_console_logger()
+    default_context = context
+    sdl.SetLogPriorities(.VERBOSE)
+    sdl.SetLogOutputFunction(
+        proc "c" (userdata: rawptr, category: sdl.LogCategory, priority: sdl.LogPriority, message: cstring) {
+            context = default_context
+            log.debugf("SDL {} [{}]", category, priority, message)
+        }, nil
+    )
+
+    ok := sdl.Init({.VIDEO}); assert(ok)
+    window := sdl.CreateWindow("Hello Odin", 1440, 960, {.MOUSE_GRABBED}); assert(window != nil)
+    ok = sdl.HideCursor(); assert(ok)
+    ok = sdl.SetWindowRelativeMouseMode(window, true); assert(ok)
+    width, height: i32
+    sdl.GetWindowSize(window, &width, &height)
+    gpu := sdl.CreateGPUDevice({.SPIRV}, true, nil); assert(gpu != nil)
+    ok = sdl.ClaimWindowForGPUDevice(gpu, window); assert(ok)
+
+    state.window = window
+    state.gpu = gpu
+    load_next_obj(&state)
+    
+    depth_texture := sdl.CreateGPUTexture(gpu, {
+        type = .D2,
+        width = u32(width),
+        height = u32(height),
+        layer_count_or_depth = 1,
+        num_levels = 1,
+        format = .D16_UNORM,
+        usage = {.SAMPLER, .DEPTH_STENCIL_TARGET}
+    })
+    state.depth_texture = depth_texture
+
+    state.pipeline = build_pipeline(&state)
+    state.object_props.position = {0, 0, -3}
+    state.camera = Camera {
+        position = {0, 0, 0},
+        pitch = 0,
+        yaw = 0
+    }
+    return state
 }
 
 run :: proc(state: ^AppState) {
@@ -48,34 +92,12 @@ run :: proc(state: ^AppState) {
                     break main_loop
                 case .KEY_DOWN: #partial switch ev.key.scancode {
                     case .ESCAPE: break main_loop
-                    case .SPACE: load_next_obj(state)
-                    case .W: 
+                    case .E: load_next_obj(state)
+                    case .Q: 
                         state.wireframe = !state.wireframe
                         sdl.ReleaseGPUGraphicsPipeline(state.gpu, state.pipeline)
                         state.pipeline = build_pipeline(state)
                 }
-                case .MOUSE_BUTTON_DOWN:
-                    if ev.button.button == 1 { // LMB Down
-                        state.mb_down = true
-                    }
-                case .MOUSE_BUTTON_UP:
-                    if ev.button.button == 1 {
-                        state.mb_down = false
-                    }
-                case .MOUSE_WHEEL: 
-                    if ev.wheel.y < 0 && state.camera.fov >= 2 do state.camera.fov -= 2
-                    if ev.wheel.y > 0 && state.camera.fov <= 140 do state.camera.fov += 2
-                case .MOUSE_MOTION: 
-                    if state.mb_down {
-                        x, y: i32
-                        win_size := sdl.GetWindowSize(state.window, &x, &y)
-                        if ev.motion.x >= f32(x)-1 do sdl.WarpMouseInWindow(state.window, 2, ev.motion.y)
-                        else if ev.motion.x <= 1 do sdl.WarpMouseInWindow(state.window, f32(x-2), ev.motion.y)
-
-                        if ev.motion.y >= f32(y)-1 do sdl.WarpMouseInWindow(state.window, ev.motion.x, 2)
-                        else if ev.motion.y <= 1 do sdl.WarpMouseInWindow(state.window, ev.motion.x, f32(y-2))
-                    }
-
             }
         }
         new_ticks := sdl.GetTicks();
@@ -89,6 +111,12 @@ run :: proc(state: ^AppState) {
 update :: proc(state: ^AppState, dt: f32) {
     speed := linalg.to_radians(f32(45.0))
     state.object_props.rotation += speed * dt
+
+    m_pos: [2]f32;
+    _flags := sdl.GetRelativeMouseState(&m_pos.x, &m_pos.y)
+
+    state.camera.yaw += m_pos.x * dt * 30
+    state.camera.pitch += m_pos.y * dt * 30
 }
 
 render :: proc(state: ^AppState) {
@@ -129,46 +157,6 @@ render :: proc(state: ^AppState) {
     sdl.EndGPURenderPass(render_pass)
 
     ok = sdl.SubmitGPUCommandBuffer(cmd_buff); assert(ok)
-}
-
-init :: proc() -> AppState {
-    state: AppState
-    context.logger = log.create_console_logger()
-    default_context = context
-    sdl.SetLogPriorities(.VERBOSE)
-    sdl.SetLogOutputFunction(
-        proc "c" (userdata: rawptr, category: sdl.LogCategory, priority: sdl.LogPriority, message: cstring) {
-            context = default_context
-            log.debugf("SDL {} [{}]", category, priority, message)
-        }, nil
-    ) 
-
-    ok := sdl.Init({.VIDEO}); assert(ok)
-    window := sdl.CreateWindow("Hello Odin", i32(width), i32(height), {}); assert(window != nil)
-    gpu := sdl.CreateGPUDevice({.SPIRV}, true, nil); assert(gpu != nil)
-    ok = sdl.ClaimWindowForGPUDevice(gpu, window); assert(ok)
-    depth_texture := sdl.CreateGPUTexture(gpu, {
-        type = .D2,
-        width = u32(width),
-        height = u32(height),
-        layer_count_or_depth = 1,
-        num_levels = 1,
-        format = .D16_UNORM,
-        usage = {.SAMPLER, .DEPTH_STENCIL_TARGET}
-    })
-
-    state.window = window
-    state.gpu = gpu
-    state.depth_texture = depth_texture
-    state.pipeline = build_pipeline(&state)
-    load_next_obj(&state)
-    state.object_props.position = {0, 0, -3}
-    state.camera = Camera {
-        eye = {0, 0, 0},
-        fwd = {0, 0, -1},
-        fov = 70
-    }
-    return state
 }
 
 build_pipeline :: proc(state: ^AppState) -> ^sdl.GPUGraphicsPipeline {
@@ -334,27 +322,33 @@ ObjectProps :: struct {
 }
 
 UBO :: struct {
-    perspective: matrix[4,4]f32,
     view: matrix[4,4]f32,
-    mat: matrix[4,4]f32
+    proj: matrix[4,4]f32,
+    model: matrix[4,4]f32
 }
 
 Camera :: struct {
-    eye: vec3,
-    fwd: vec3,
-    fov: u8
+    position: vec3,
+    yaw: f32,
+    pitch: f32
+}
+
+create_view_matrix :: proc(camera: ^Camera) -> linalg.Matrix4f32 {
+    yaw_matrix := linalg.matrix4_rotate_f32(math.to_radians(camera.yaw), {0, 1, 0})
+    pitch_matrix := linalg.matrix4_rotate_f32(math.to_radians(camera.pitch), {1, 0, 0})
+    return pitch_matrix * yaw_matrix
 }
 
 create_ubo :: proc(state: ^AppState) -> UBO {
     x, y: i32;
     ok := sdl.GetWindowSize(state.window, &x, &y)
     aspect := f32(x) / f32(y)
-    projection_matrix := linalg.matrix4_perspective_f32(linalg.to_radians(f32(state.camera.fov)), aspect, 0.0001, 1000)
+    projection_matrix := linalg.matrix4_perspective_f32(linalg.to_radians(f32(70)), aspect, 0.0001, 1000)
     model_matrix := linalg.matrix4_translate_f32(state.object_props.position) * linalg.matrix4_rotate_f32(state.object_props.rotation, {0,1,0})
-    view := linalg.matrix4_look_at_from_fru_f32(state.camera.eye, state.camera.fwd, {1, 0, 0}, {0, 1, 0})
+    view := create_view_matrix(&state.camera)
     return UBO {
-        perspective = projection_matrix,
         view = view,
-        mat = model_matrix,
+        proj = projection_matrix,
+        model = model_matrix,
     }
 }
