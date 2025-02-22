@@ -1,17 +1,21 @@
 #version 450
 
-layout (location = 0) in vec3 pos;
+layout (location = 0) in vec3 position;
 layout (location = 1) in vec3 normal;
 
-layout (location = 0) out vec4 v_color;
+layout (location = 0) out vec3 v_position;
+layout (location = 1) out vec3 v_normal;
 
 layout(set=1, binding=0) uniform UBO {
-    mat4 mvp;
+    mat4 perspective;
+    mat4 view;
+    mat4 matrix;
 };
 
 void main() {
-    v_color = vec4(normalize(normal) + 0.5, 1.0);
-    // v_color = vec4(1, 0, 0, 1.0);
-    // gl_Position = mvp * position;
-    gl_Position = mvp * vec4(pos, 1.0);
+    mat4 modelview = view*matrix;
+    v_normal = transpose(inverse(mat3(modelview))) * normal;
+    gl_Position = perspective * modelview * vec4(position, 1.0);
+    v_position = gl_Position.xyz / gl_Position.w;
 }
+
