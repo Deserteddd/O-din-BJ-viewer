@@ -29,14 +29,43 @@ AppState :: struct {
     camera: Camera,
 }
 
+vec2 :: [2]f32
+vec3 :: [3]f32
+
+Vertex :: struct {
+    position: vec3,
+    normal: vec3
+}
+ObjectData :: struct {
+    vertices: []Vertex,
+    indices: []u32
+}
+
+ObjectProps :: struct {
+    position: [3]f32,
+    rotation: f32,
+}
+
+UBO :: struct {
+    view: matrix[4,4]f32,
+    proj: matrix[4,4]f32,
+    model: matrix[4,4]f32
+}
+
+Camera :: struct {
+    position: vec3,
+    yaw: f32,
+    pitch: f32
+}
+
 main :: proc() {
-    state := init()
+    state := init(false) // param: Fullscreen
     run(&state)
     sdl.ReleaseGPUBuffer(state.gpu, state.vbo)
     sdl.ReleaseGPUBuffer(state.gpu, state.ibo)
 }
 
-init :: proc() -> AppState {
+init :: proc(fullscreen: bool) -> AppState {
     state: AppState
     context.logger = log.create_console_logger()
     default_context = context
@@ -49,16 +78,20 @@ init :: proc() -> AppState {
     )
 
     ok := sdl.Init({.VIDEO}); assert(ok)
-    window := sdl.CreateWindow("Hello Odin", 1440, 960, {.MOUSE_GRABBED}); assert(window != nil)
+    win_flags: sdl.WindowFlags
+    if fullscreen {win_flags = {.MOUSE_GRABBED, .FULLSCREEN}} else do win_flags = {.MOUSE_GRABBED}
+    window := sdl.CreateWindow("Hello Odin", 1280, 720, win_flags); assert(window != nil)
     ok = sdl.HideCursor(); assert(ok)
     ok = sdl.SetWindowRelativeMouseMode(window, true); assert(ok)
     width, height: i32
     sdl.GetWindowSize(window, &width, &height)
+
     gpu := sdl.CreateGPUDevice({.SPIRV}, true, nil); assert(gpu != nil)
     ok = sdl.ClaimWindowForGPUDevice(gpu, window); assert(ok)
 
     state.window = window
     state.gpu = gpu
+
     load_next_obj(&state)
     
     depth_texture := sdl.CreateGPUTexture(gpu, {
@@ -73,7 +106,9 @@ init :: proc() -> AppState {
     state.depth_texture = depth_texture
 
     state.pipeline = build_pipeline(&state)
+
     state.object_props.position = {0, 0, -3}
+
     state.camera = Camera {
         position = {0, 0, 0},
         pitch = 0,
@@ -109,14 +144,38 @@ run :: proc(state: ^AppState) {
 }
 
 update :: proc(state: ^AppState, dt: f32) {
-    speed := linalg.to_radians(f32(45.0))
-    state.object_props.rotation += speed * dt
+    process_mouse(&state.camera, dt)
+    process_keyboard(&state.camera, dt)
+}
 
-    m_pos: [2]f32;
-    _flags := sdl.GetRelativeMouseState(&m_pos.x, &m_pos.y)
 
-    state.camera.yaw += m_pos.x * dt * 30
-    state.camera.pitch += m_pos.y * dt * 30
+process_keyboard :: proc(camera: ^Camera, dt: f32) {
+    using sdl.Scancode
+    key_state := sdl.GetKeyboardState(nil)
+    f, b, l, r, u, d: f32
+    if key_state[W] {f = 1}
+    if key_state[S] {b = 1}
+    if key_state[A] {l = 1}
+    if key_state[D] {r = 1}
+    if key_state[LSHIFT] {u = 1}
+    if key_state[SPACE] {d = 1}
+    fb := f-b
+    lr := l-r
+    ud := (u-d) * dt * 2
+    yaw_cos := math.cos(math.to_radians(camera.yaw))
+    yaw_sin := math.sin(math.to_radians(camera.yaw))
+    move_x :=  ((lr * yaw_cos) + (-fb * yaw_sin)) * dt * 2
+    move_z := ((fb*yaw_cos) + (lr * yaw_sin)) * dt * 2
+    camera.position += vec3{move_x, ud, move_z}
+}
+
+process_mouse :: proc(camera: ^Camera, dt: f32) {
+    x, y: f32
+    _flags := sdl.GetRelativeMouseState(&x, &y)
+    camera.yaw   += x * dt * 20
+    camera.pitch += y * dt * 20
+    if camera.pitch >  90 do camera.pitch =  90
+    if camera.pitch < -90 do camera.pitch = -90
 }
 
 render :: proc(state: ^AppState) {
@@ -261,17 +320,25 @@ load_next_obj :: proc(state: ^AppState, recursion: uint = 0) {
     state.ibo = ibo
 }
 
-load_shader :: proc(device: ^sdl.GPUDevice, code: []u8,
-    stage: sdl.GPUShaderStage, num_uniform_buffers: u32
-) -> ^sdl.GPUShader {
-    return sdl.CreateGPUShader(device, {
-        code_size = len(code),
-        code = raw_data(code),
-        entrypoint = "main",
-        format = {.SPIRV},
-        stage = stage,
-        num_uniform_buffers = num_uniform_buffers,
-    })
+create_view_matrix :: proc(camera: ^Camera) -> linalg.Matrix4f32 {
+    yaw_matrix := linalg.matrix4_rotate_f32(math.to_radians(camera.yaw), {0, 1, 0})
+    pitch_matrix := linalg.matrix4_rotate_f32(math.to_radians(camera.pitch), {1, 0, 0})
+    position_matrix := linalg.matrix4_translate_f32(camera.position)
+    return pitch_matrix * yaw_matrix * position_matrix
+}
+
+create_ubo :: proc(state: ^AppState) -> UBO {
+    x, y: i32;
+    ok := sdl.GetWindowSize(state.window, &x, &y)
+    aspect := f32(x) / f32(y)
+    projection_matrix := linalg.matrix4_perspective_f32(linalg.to_radians(f32(50)), aspect, 0.0001, 1000)
+    model_matrix := linalg.matrix4_translate_f32(state.object_props.position) * linalg.matrix4_rotate_f32(state.object_props.rotation, {0,1,0})
+    view := create_view_matrix(&state.camera)
+    return UBO {
+        view = view,
+        proj = projection_matrix,
+        model = model_matrix,
+    }
 }
 
 create_buffer_with_data :: proc(
@@ -306,49 +373,15 @@ create_buffer_with_data :: proc(
     return buffer
 }
 
-vec3 :: [3]f32
-Vertex :: struct {
-    position: vec3,
-    normal: vec3
-}
-ObjectData :: struct {
-    vertices: []Vertex,
-    indices: []u32
-}
-
-ObjectProps :: struct {
-    position: [3]f32,
-    rotation: f32,
-}
-
-UBO :: struct {
-    view: matrix[4,4]f32,
-    proj: matrix[4,4]f32,
-    model: matrix[4,4]f32
-}
-
-Camera :: struct {
-    position: vec3,
-    yaw: f32,
-    pitch: f32
-}
-
-create_view_matrix :: proc(camera: ^Camera) -> linalg.Matrix4f32 {
-    yaw_matrix := linalg.matrix4_rotate_f32(math.to_radians(camera.yaw), {0, 1, 0})
-    pitch_matrix := linalg.matrix4_rotate_f32(math.to_radians(camera.pitch), {1, 0, 0})
-    return pitch_matrix * yaw_matrix
-}
-
-create_ubo :: proc(state: ^AppState) -> UBO {
-    x, y: i32;
-    ok := sdl.GetWindowSize(state.window, &x, &y)
-    aspect := f32(x) / f32(y)
-    projection_matrix := linalg.matrix4_perspective_f32(linalg.to_radians(f32(70)), aspect, 0.0001, 1000)
-    model_matrix := linalg.matrix4_translate_f32(state.object_props.position) * linalg.matrix4_rotate_f32(state.object_props.rotation, {0,1,0})
-    view := create_view_matrix(&state.camera)
-    return UBO {
-        view = view,
-        proj = projection_matrix,
-        model = model_matrix,
-    }
+load_shader :: proc(device: ^sdl.GPUDevice, code: []u8,
+    stage: sdl.GPUShaderStage, num_uniform_buffers: u32
+) -> ^sdl.GPUShader {
+    return sdl.CreateGPUShader(device, {
+        code_size = len(code),
+        code = raw_data(code),
+        entrypoint = "main",
+        format = {.SPIRV},
+        stage = stage,
+        num_uniform_buffers = num_uniform_buffers,
+    })
 }
