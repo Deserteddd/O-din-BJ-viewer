@@ -18,6 +18,7 @@ load_obj :: proc(path: string) -> (ObjectData, bool) {
 
     positions: [dynamic]vec3; defer delete(positions)
     normals: [dynamic]vec3; defer delete(normals)
+    tex_coords: [dynamic]vec2; defer delete(tex_coords)
     face_data: [dynamic][9]u32; defer delete(face_data)
 
 
@@ -32,22 +33,27 @@ load_obj :: proc(path: string) -> (ObjectData, bool) {
                 append(&face_data, data)
             case "vn":
                 append(&normals, parse_vec3(line, 3))
+            case "vt":
+                append(&tex_coords, parse_vec2(line))
         }
     }
-    vertices := make([]Vertex, len(positions));
+    vertices := make([]Vertex, len(face_data) * 3);
     indices := make([]u32, len(face_data) * 3);
 
     for face, i in face_data {
         i := i*3
         vertices[face[0]].position = positions[face[0]]
+        vertices[face[0]].uv = tex_coords[face[1]]
         vertices[face[0]].normal = normals[face[2]]
         indices[i] = face[0]
 
         vertices[face[3]].position = positions[face[3]]
+        vertices[face[3]].uv = tex_coords[face[4]]
         vertices[face[3]].normal = normals[face[5]]
         indices[i+1] = face[3]
 
         vertices[face[6]].position = positions[face[6]]
+        vertices[face[6]].uv = tex_coords[face[7]]
         vertices[face[6]].normal = normals[face[8]]
         indices[i+2] = face[6]
     }
@@ -55,6 +61,19 @@ load_obj :: proc(path: string) -> (ObjectData, bool) {
         vertices = vertices,
         indices = indices,
     }), true
+}
+
+parse_vec2 :: proc(line: string) -> vec2 {
+    data: vec2
+    start: int
+    for i in 3..<len(line) {
+        if line[i] == 32 {
+            data[0] = strconv.parse_f32(line[3:i]) or_else panic("parse_vec2 error")
+            start = i+1
+        }
+    }
+    data[1] = strconv.parse_f32(line[start:]) or_else panic("parse_vec2 error")
+    return data
 }
 
 parse_vec3 :: proc(line: string, start: int) -> vec3 {
