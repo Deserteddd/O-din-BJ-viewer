@@ -21,7 +21,6 @@ load_obj :: proc(path: string) -> (ObjectData, bool) {
     tex_coords: [dynamic]vec2; defer delete(tex_coords)
     face_data: [dynamic][9]u32; defer delete(face_data)
 
-
     for line in strings.split_lines_iterator(&data) {
         if len(line) < 2 do continue
         switch line[0:2] {
@@ -37,7 +36,7 @@ load_obj :: proc(path: string) -> (ObjectData, bool) {
                 append(&tex_coords, parse_vec2(line))
         }
     }
-    vertices := make([]Vertex, len(face_data) * 3);
+    vertices := make([]Vertex, len(positions));
     indices := make([]u32, len(face_data) * 3);
 
     for face, i in face_data {

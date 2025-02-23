@@ -294,7 +294,8 @@ build_pipeline :: proc(state: ^AppState) {
     state.pipeline = pipeline
 }
 
-load_next_obj :: proc(state: ^AppState, recursion: uint = 0) {
+load_next_obj :: proc(state: ^AppState) {
+    sdl.ReleaseGPUSampler(state.gpu, state.tex_sampler)
     assets_handle := os.open("assets") or_else panic("Assets folder not found")
     assets_dir := os.read_dir(assets_handle, 0) or_else panic("Failed to read asset directory"); defer delete(assets_dir)
     next := strings.concatenate({"assets/", assets_dir[state.active].name}); defer delete(next)
@@ -305,6 +306,8 @@ load_next_obj :: proc(state: ^AppState, recursion: uint = 0) {
     for !ok {
         state.active = (state.active + 1) % len(assets_dir)
         next = strings.concatenate({"assets/", assets_dir[state.active].name})
+        delete(object_data.indices)
+        delete(object_data.vertices)
         object_data, ok = load_obj(next)
     }
     state.active = (state.active + 1) % len(assets_dir)
@@ -313,7 +316,8 @@ load_next_obj :: proc(state: ^AppState, recursion: uint = 0) {
 
     // Texture
     img_size: [2]i32
-    pixels := stbi.load("castle_brick.jpg", &img_size.x, &img_size.y, nil, 4); assert(pixels != nil)
+    pixels := stbi.load("castle_brick.jpg", &img_size.x, &img_size.y, nil, 4); assert(pixels != nil); defer stbi.image_free(pixels)
+    sdl.ReleaseGPUTexture(state.gpu, state.texture)
     pixels_byte_size := img_size.x * img_size.y * 4
     texture := sdl.CreateGPUTexture(state.gpu, {
         type = .D2,
