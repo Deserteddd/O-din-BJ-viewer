@@ -84,12 +84,11 @@ init :: proc(fullscreen: bool) -> AppState {
     ok := sdl.Init({.VIDEO}); assert(ok)
     win_flags: sdl.WindowFlags
     if fullscreen {win_flags = {.MOUSE_GRABBED, .FULLSCREEN}} else do win_flags = {.MOUSE_GRABBED}
-    window := sdl.CreateWindow("Hello Odin", 1280, 720, win_flags); assert(window != nil)
+    window := sdl.CreateWindow("Hello Odin", 1920, 1080, win_flags); assert(window != nil)
     ok = sdl.HideCursor(); assert(ok)
     ok = sdl.SetWindowRelativeMouseMode(window, true); assert(ok)
     width, height: i32
     sdl.GetWindowSize(window, &width, &height)
-
     gpu := sdl.CreateGPUDevice({.SPIRV}, false, nil); assert(gpu != nil)
     ok = sdl.ClaimWindowForGPUDevice(gpu, window); assert(ok)
 
@@ -147,8 +146,8 @@ run :: proc(state: ^AppState) {
 }
 
 update :: proc(state: ^AppState, dt: f32) {
-    process_mouse(&state.camera, dt)
     process_keyboard(&state.camera, dt)
+    process_mouse(&state.camera, dt)
 }
 
 
@@ -157,15 +156,22 @@ process_keyboard :: proc(camera: ^Camera, dt: f32) {
     speed: f32 = 3
     key_state := sdl.GetKeyboardState(nil)
     f, b, l, r, u, d: f32
-    if key_state[W] {f = 1}
-    if key_state[S] {b = 1}
-    if key_state[A] {l = 1}
-    if key_state[D] {r = 1}
-    if key_state[LSHIFT] {u = 1}
+    pitch_u, pitch_d, yaw_r, yaw_l: f32
+    if key_state[W]     {f = 1}
+    if key_state[S]     {b = 1}
+    if key_state[A]     {l = 1}
+    if key_state[D]     {r = 1}
+    if key_state[LSHIFT]{u = 1}
     if key_state[SPACE] {d = 1}
+    if key_state[RIGHT] {yaw_r = 1}
+    if key_state[LEFT]  {yaw_l = 1}
+    if key_state[UP]    {pitch_u = 1}
+    if key_state[DOWN]  {pitch_d = 1}
     fb := f-b
     lr := l-r
     ud := u-d
+    yaw := yaw_r - yaw_l
+    pitch := pitch_d - pitch_u
     yaw_cos := math.cos(math.to_radians(camera.yaw))
     yaw_sin := math.sin(math.to_radians(camera.yaw))
     camera.position +=  {
@@ -173,6 +179,8 @@ process_keyboard :: proc(camera: ^Camera, dt: f32) {
         ud * dt * speed,
         ((fb*yaw_cos) + (lr * yaw_sin)) * dt * speed
     }
+    camera.pitch += pitch * dt * 100
+    camera.yaw += yaw * dt * 100
 }
 
 process_mouse :: proc(camera: ^Camera, dt: f32) {
@@ -371,8 +379,6 @@ load_next_obj :: proc(state: ^AppState) {
     state.ibo = ibo
     state.tex_sampler = sampler
     state.texture = texture
-    fmt.println(state.camera)
-    fmt.println(state.object_props)
 }
 
 create_view_matrix :: proc(camera: ^Camera) -> linalg.Matrix4f32 {
@@ -386,7 +392,7 @@ create_ubo :: proc(state: ^AppState) -> UBO {
     x, y: i32;
     ok := sdl.GetWindowSize(state.window, &x, &y)
     aspect := f32(x) / f32(y)
-    projection_matrix := linalg.matrix4_perspective_f32(linalg.to_radians(f32(50)), aspect, 0.0001, 1000)
+    projection_matrix := linalg.matrix4_perspective_f32(linalg.to_radians(f32(50)), aspect, 0.0001, 10)
     model_matrix := linalg.matrix4_translate_f32(state.object_props.position) * linalg.matrix4_rotate_f32(state.object_props.rotation, {0,1,0})
     view := create_view_matrix(&state.camera)
     return UBO {
