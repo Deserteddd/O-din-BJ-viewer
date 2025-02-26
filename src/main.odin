@@ -19,19 +19,13 @@ frag_shader_code := #load("../shaders/spv/triangle.frag.spv")
 main :: proc() {
     state := init(true) // param: Fullscreen
     run(&state)
-    sdl.ReleaseGPUBuffer(state.gpu, state.vbo)
-    sdl.ReleaseGPUBuffer(state.gpu, state.ibo)
 }
 
 AppState :: struct {
     gpu: ^sdl.GPUDevice,
     window: ^sdl.Window,
     pipeline: ^sdl.GPUGraphicsPipeline,
-    vbo: ^sdl.GPUBuffer,
-    ibo: ^sdl.GPUBuffer,
-    num_indices: u32,
-    object_props: ObjectProps,
-    active: uint,
+    model: Model,
     depth_texture: ^sdl.GPUTexture,
     wireframe: bool,
     camera: Camera,
@@ -45,28 +39,33 @@ vec3 :: [3]f32
 Vertex :: struct {
     position: vec3,
     normal: vec3,
-    uv: vec2
-}
-ObjectData :: struct {
-    vertices: []Vertex,
-    indices: []u32
+    uv: vec2,
 }
 
-ObjectProps :: struct {
-    position: [3]f32,
-    rotation: f32,
+Mesh :: struct {
+    vertices: []Vertex,
+    vbo: ^sdl.GPUBuffer,
 }
 
 UBO :: struct {
     view: matrix[4,4]f32,
     proj: matrix[4,4]f32,
-    model: matrix[4,4]f32
+    model: matrix[4,4]f32,
+    cubie_pos: vec3
 }
 
 Camera :: struct {
     position: vec3,
     yaw: f32,
     pitch: f32
+}
+
+Model :: struct {
+    rotation: f32,
+    mesh: Mesh,
+    indices: []u32,
+    ibo: ^sdl.GPUBuffer,
+    mesh_instances: [27]vec3,
 }
 
 init :: proc(fullscreen: bool) -> AppState {
@@ -81,6 +80,7 @@ init :: proc(fullscreen: bool) -> AppState {
         }, nil
     )
 
+
     ok := sdl.Init({.VIDEO}); assert(ok)
     win_flags: sdl.WindowFlags
     if fullscreen {win_flags = {.MOUSE_GRABBED, .FULLSCREEN}} else do win_flags = {.MOUSE_GRABBED}
@@ -90,14 +90,14 @@ init :: proc(fullscreen: bool) -> AppState {
     width, height: i32
     sdl.GetWindowSize(window, &width, &height)
 
-    gpu := sdl.CreateGPUDevice({.SPIRV}, false, nil); assert(gpu != nil)
+    gpu := sdl.CreateGPUDevice({.SPIRV}, true, nil); assert(gpu != nil)
     ok = sdl.ClaimWindowForGPUDevice(gpu, window); assert(ok)
 
     state.window = window
     state.gpu = gpu
 
-    load_next_obj(&state)
-    
+    load_rubiks_cube(&state)
+
     depth_texture := sdl.CreateGPUTexture(gpu, {
         type = .D2,
         width = u32(width),
@@ -111,7 +111,15 @@ init :: proc(fullscreen: bool) -> AppState {
 
     build_pipeline(&state)
 
-    state.object_props.position = {0, 0, -3}
+    i := 0
+    for x in -1..<2 {
+        for y in -1..<2 {
+            for z in -1..<2 {
+                state.model.mesh_instances[i] = vec3{f32(x)*2.1, f32(y)*2.1, f32(z)*2.1}
+                i += 1
+            }
+        }
+    }
 
     state.camera = Camera {
         position = {0, 0, 0},
@@ -119,6 +127,65 @@ init :: proc(fullscreen: bool) -> AppState {
         yaw = 0
     }
     return state
+}
+
+load_rubiks_cube :: proc(state: ^AppState) {
+    img_size: [2]i32
+    pixels := stbi.load("assets/castle_brick.jpg", &img_size.x, &img_size.y, nil, 4); assert(pixels != nil); defer stbi.image_free(pixels)
+    pixels_byte_size := img_size.x * img_size.y * 4
+    texture := sdl.CreateGPUTexture(state.gpu, {
+        type = .D2,
+        format = .R8G8B8A8_UNORM,
+        usage = {.SAMPLER},
+        width = u32(img_size.x),
+        height = u32(img_size.y),
+        layer_count_or_depth = 1,
+        num_levels = 1
+    })
+
+    tex_transfer_buffer := sdl.CreateGPUTransferBuffer(state.gpu, {
+        usage = sdl.GPUTransferBufferUsage.UPLOAD,
+        size = u32(pixels_byte_size),
+    }); assert(tex_transfer_buffer != nil)
+    tex_transfer_mem := sdl.MapGPUTransferBuffer(state.gpu, tex_transfer_buffer, false)
+    mem.copy(tex_transfer_mem, pixels, int(pixels_byte_size))
+    sdl.UnmapGPUTransferBuffer(state.gpu, tex_transfer_buffer)
+
+    cube: Model
+    load_cube(&cube)
+
+    // Acquire copy_commands and transferbuffer
+    len_bytes := max(
+        len(cube.indices) * size_of(u32),
+        len(cube.mesh.vertices) * size_of(Vertex),
+    )
+    transfer_buffer := sdl.CreateGPUTransferBuffer(state.gpu, {
+        usage = sdl.GPUTransferBufferUsage.UPLOAD,
+        size = u32(len_bytes),
+    }); assert(transfer_buffer != nil)
+
+    copy_commands := sdl.AcquireGPUCommandBuffer(state.gpu); assert(copy_commands != nil)
+    copy_pass := sdl.BeginGPUCopyPass(copy_commands); assert(copy_pass != nil)
+    cube.mesh.vbo = create_buffer_with_data(state.gpu, transfer_buffer, copy_pass, {.VERTEX}, cube.mesh.vertices[:])
+    cube.ibo = create_buffer_with_data(state.gpu, transfer_buffer, copy_pass, {.INDEX}, cube.indices[:])
+    sdl.UploadToGPUTexture(copy_pass, 
+        {transfer_buffer = tex_transfer_buffer},
+        {texture = texture, w = u32(img_size.x), h = u32(img_size.y), d = 1},
+        false
+    )
+
+    // End copy pass
+    sdl.ReleaseGPUTransferBuffer(state.gpu, transfer_buffer)
+    sdl.ReleaseGPUTransferBuffer(state.gpu, tex_transfer_buffer)
+    sdl.EndGPUCopyPass(copy_pass)
+
+    // Create texture sampler
+    sampler := sdl.CreateGPUSampler(state.gpu, {}); assert(sampler != nil)
+
+    ok := sdl.SubmitGPUCommandBuffer(copy_commands); assert(ok)
+    state.tex_sampler = sampler
+    state.texture = texture
+    state.model = cube
 }
 
 run :: proc(state: ^AppState) {
@@ -131,7 +198,6 @@ run :: proc(state: ^AppState) {
                     break main_loop
                 case .KEY_DOWN: #partial switch ev.key.scancode {
                     case .ESCAPE: break main_loop
-                    case .E: load_next_obj(state)
                     case .Q: 
                         state.wireframe = !state.wireframe
                         build_pipeline(state)
@@ -154,7 +220,7 @@ update :: proc(state: ^AppState, dt: f32) {
 
 process_keyboard :: proc(camera: ^Camera, dt: f32) {
     using sdl.Scancode
-    speed: f32 = 3
+    speed: f32 = 6
     key_state := sdl.GetKeyboardState(nil)
     f, b, l, r, u, d: f32
     if key_state[W] {f = 1}
@@ -166,6 +232,7 @@ process_keyboard :: proc(camera: ^Camera, dt: f32) {
     fb := f-b
     lr := l-r
     ud := u-d
+
     yaw_cos := math.cos(math.to_radians(camera.yaw))
     yaw_sin := math.sin(math.to_radians(camera.yaw))
     camera.position +=  {
@@ -196,8 +263,7 @@ render :: proc(state: ^AppState) {
         store_op = .STORE,
         clear_color = {0.1, 0.1, 0.1, 1},
     }
-
-    ubo := create_ubo(state)
+    
     depth_target_info := sdl.GPUDepthStencilTargetInfo {
         texture = state.depth_texture,
         clear_depth = 1,
@@ -211,15 +277,21 @@ render :: proc(state: ^AppState) {
     render_pass := sdl.BeginGPURenderPass(cmd_buff, &color_target, 1, &depth_target_info); assert(render_pass != nil)
     sdl.BindGPUGraphicsPipeline(render_pass, state.pipeline)
 
-    bindings: []sdl.GPUBufferBinding = {
-        sdl.GPUBufferBinding { buffer = state.vbo },
-    } 
+    bindings: [1]sdl.GPUBufferBinding
+    bindings[0] = sdl.GPUBufferBinding { buffer = state.model.mesh.vbo }
 
-    sdl.BindGPUVertexBuffers(render_pass, 0, &bindings[0], 1)
-    sdl.BindGPUIndexBuffer(render_pass, { buffer = state.ibo }, ._32BIT)
-    sdl.PushGPUVertexUniformData(cmd_buff, 0, &ubo, size_of(UBO))
     sdl.BindGPUFragmentSamplers(render_pass, 0, &(sdl.GPUTextureSamplerBinding{texture = state.texture, sampler = state.tex_sampler}), 1)
-    sdl.DrawGPUIndexedPrimitives(render_pass, state.num_indices, 1, 0, 0, 0)
+    sdl.BindGPUIndexBuffer(render_pass, { buffer = state.model.ibo }, ._32BIT)
+    sdl.BindGPUVertexBuffers(render_pass, 0, &bindings[0], 1)
+    distances := sort_vbos(state)
+    fmt.println(distances)
+    #reverse for i in distances {
+        ubo := create_ubo(state.window, state.model.mesh_instances[i], state.model.rotation, &state.camera)
+        sdl.PushGPUVertexUniformData(cmd_buff, 0, &ubo, size_of(UBO))
+        sdl.DrawGPUIndexedPrimitives(render_pass, u32(len(state.model.indices)), 1, 0, 0, 0)
+    }
+
+
     sdl.EndGPURenderPass(render_pass)
 
     ok = sdl.SubmitGPUCommandBuffer(cmd_buff); assert(ok)
@@ -230,14 +302,13 @@ build_pipeline :: proc(state: ^AppState) {
     vert_shader := load_shader(state.gpu, vert_shader_code, .VERTEX, 1, 0); defer sdl.ReleaseGPUShader(state.gpu, vert_shader)
     frag_shader := load_shader(state.gpu, frag_shader_code, .FRAGMENT, 0, 1); defer sdl.ReleaseGPUShader(state.gpu, frag_shader)
 
-    vb_descriptions: []sdl.GPUVertexBufferDescription = {
-        sdl.GPUVertexBufferDescription {
-            slot = 0,
-            pitch = size_of(Vertex),
-            input_rate = .VERTEX,
-            instance_step_rate = 0
-        },
-    };
+    vb_descriptions: [1]sdl.GPUVertexBufferDescription
+    vb_descriptions[0] = sdl.GPUVertexBufferDescription {
+        slot = u32(0),
+        pitch = size_of(Vertex),
+        input_rate = .VERTEX,
+        instance_step_rate = 0
+    }     
 
     vb_attributes: []sdl.GPUVertexAttribute = {
         sdl.GPUVertexAttribute {
@@ -257,6 +328,12 @@ build_pipeline :: proc(state: ^AppState) {
             buffer_slot = 0,
             format = .FLOAT2,
             offset = size_of(vec3) * 2
+        },
+        sdl.GPUVertexAttribute {
+            location = 3,
+            buffer_slot = 0,
+            format = .FLOAT3,
+            offset = size_of(vec3) * 2 + size_of(vec2)
         },
     }
 
@@ -279,11 +356,11 @@ build_pipeline :: proc(state: ^AppState) {
             vertex_buffer_descriptions = &vb_descriptions[0],
             num_vertex_buffers = 1,
             vertex_attributes = &vb_attributes[0],
-            num_vertex_attributes = 3
+            num_vertex_attributes = 4
         },
         rasterizer_state = {
             fill_mode = fill_mode,
-            cull_mode = cull_mode
+            cull_mode = cull_mode,
         },
         depth_stencil_state = {
             enable_depth_test = true,
@@ -294,85 +371,28 @@ build_pipeline :: proc(state: ^AppState) {
     state.pipeline = pipeline
 }
 
-load_next_obj :: proc(state: ^AppState) {
-    sdl.ReleaseGPUSampler(state.gpu, state.tex_sampler)
-    assets_handle := os.open("assets") or_else panic("Assets folder not found")
-    assets_dir := os.read_dir(assets_handle, 0) or_else panic("Failed to read asset directory"); defer delete(assets_dir)
-    next := strings.concatenate({"assets/", assets_dir[state.active].name}); defer delete(next)
-    object_data, ok := load_obj(next); defer {
-        delete(object_data.indices)
-        delete(object_data.vertices)
+sort_vbos :: proc(state: ^AppState) -> [27]u32 {
+    Dist :: struct{d: f32, n: int}
+    distances: [27]Dist
+    output: [27]u32
+    for cubie, i in state.model.mesh_instances {
+        distance: f32 = linalg.distance(cubie, state.camera.position)
+        distances[i] = {distance, i}
     }
-    for !ok {
-        state.active = (state.active + 1) % len(assets_dir)
-        next = strings.concatenate({"assets/", assets_dir[state.active].name})
-        delete(object_data.indices)
-        delete(object_data.vertices)
-        object_data, ok = load_obj(next)
+    for i in 0..<27{
+        for j in 0..<(27 - i - 1){
+            if distances[j].d > distances[j + 1].d {
+                temp := distances[j]
+                distances[j] = distances[j + 1]
+                distances[j + 1] = temp
+            }
+        }
     }
-    state.active = (state.active + 1) % len(assets_dir)
-    sdl.ReleaseGPUBuffer(state.gpu, state.vbo)
-    sdl.ReleaseGPUBuffer(state.gpu, state.ibo)
 
-    // Texture
-    img_size: [2]i32
-    pixels := stbi.load("castle_brick.jpg", &img_size.x, &img_size.y, nil, 4); assert(pixels != nil); defer stbi.image_free(pixels)
-    sdl.ReleaseGPUTexture(state.gpu, state.texture)
-    pixels_byte_size := img_size.x * img_size.y * 4
-    texture := sdl.CreateGPUTexture(state.gpu, {
-        type = .D2,
-        format = .R8G8B8A8_UNORM,
-        usage = {.SAMPLER},
-        width = u32(img_size.x),
-        height = u32(img_size.y),
-        layer_count_or_depth = 1,
-        num_levels = 1
-    })
-
-    tex_transfer_buffer := sdl.CreateGPUTransferBuffer(state.gpu, {
-        usage = sdl.GPUTransferBufferUsage.UPLOAD,
-        size = u32(pixels_byte_size),
-    }); assert(tex_transfer_buffer != nil)
-    tex_transfer_mem := sdl.MapGPUTransferBuffer(state.gpu, tex_transfer_buffer, false)
-    mem.copy(tex_transfer_mem, pixels, int(pixels_byte_size))
-    sdl.UnmapGPUTransferBuffer(state.gpu, tex_transfer_buffer)
-
-    // Acquire copy_commands and transferbuffer
-    len_bytes := max(
-        len(object_data.indices) * size_of(u32),
-        len(object_data.vertices) * size_of(Vertex),
-    )
-    transfer_buffer := sdl.CreateGPUTransferBuffer(state.gpu, {
-        usage = sdl.GPUTransferBufferUsage.UPLOAD,
-        size = u32(len_bytes),
-    }); assert(transfer_buffer != nil)
-
-    copy_commands := sdl.AcquireGPUCommandBuffer(state.gpu); assert(copy_commands != nil)
-    copy_pass := sdl.BeginGPUCopyPass(copy_commands); assert(copy_pass != nil)
-    vbo :=  create_buffer_with_data(state.gpu, transfer_buffer, copy_pass, {.VERTEX}, object_data.vertices[:])
-    ibo := create_buffer_with_data(state.gpu, transfer_buffer, copy_pass, {.INDEX}, object_data.indices[:])
-    sdl.UploadToGPUTexture(copy_pass, 
-        {transfer_buffer = tex_transfer_buffer},
-        {texture = texture, w = u32(img_size.x), h = u32(img_size.y), d = 1},
-        false
-    )
-
-    // End copy pass
-    sdl.ReleaseGPUTransferBuffer(state.gpu, transfer_buffer)
-    sdl.ReleaseGPUTransferBuffer(state.gpu, tex_transfer_buffer)
-
-    // Create texture sampler
-    sampler := sdl.CreateGPUSampler(state.gpu, {}); assert(sampler != nil)
-
-    sdl.EndGPUCopyPass(copy_pass)
-    ok = sdl.SubmitGPUCommandBuffer(copy_commands); assert(ok)
-    state.num_indices = u32(len(object_data.indices))
-    state.vbo = vbo
-    state.ibo = ibo
-    state.tex_sampler = sampler
-    state.texture = texture
-    fmt.println(state.camera)
-    fmt.println(state.object_props)
+    for i in 0..<27 {
+        output[i] = u32(distances[i].n)
+    }
+    return output
 }
 
 create_view_matrix :: proc(camera: ^Camera) -> linalg.Matrix4f32 {
@@ -382,17 +402,18 @@ create_view_matrix :: proc(camera: ^Camera) -> linalg.Matrix4f32 {
     return pitch_matrix * yaw_matrix * position_matrix
 }
 
-create_ubo :: proc(state: ^AppState) -> UBO {
+create_ubo :: proc(window: ^sdl.Window, instance_position: vec3, instance_rotation: f32, camera: ^Camera) -> UBO {
     x, y: i32;
-    ok := sdl.GetWindowSize(state.window, &x, &y)
+    ok := sdl.GetWindowSize(window, &x, &y)
     aspect := f32(x) / f32(y)
-    projection_matrix := linalg.matrix4_perspective_f32(linalg.to_radians(f32(50)), aspect, 0.0001, 1000)
-    model_matrix := linalg.matrix4_translate_f32(state.object_props.position) * linalg.matrix4_rotate_f32(state.object_props.rotation, {0,1,0})
-    view := create_view_matrix(&state.camera)
+    projection_matrix := linalg.matrix4_perspective_f32(linalg.to_radians(f32(70)), aspect, 0.0001, 1000)
+    model_matrix := linalg.matrix4_translate_f32(instance_position) //* linalg.matrix4_rotate_f32(instance_rotation, {0, 1, 0})
+    view := create_view_matrix(camera)
     return UBO {
         view = view,
         proj = projection_matrix,
         model = model_matrix,
+        cubie_pos = instance_position
     }
 }
 
