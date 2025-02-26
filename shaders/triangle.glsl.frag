@@ -11,7 +11,7 @@ layout(set=2, binding=0) uniform sampler2D tex_sampler;
 
 const vec3 specular_color = vec3(1.0, 1.0, 1.0);
 const vec3 diffuse_color = vec3(0.8, 0.8, 0.8);
-const vec3 u_light = vec3(-1, 0, 0);
+const vec3 u_light = vec3(-5, 0, 0);
 void main() {
     float diffuse = max(dot(normalize(v_normal), normalize(u_light)), 0.0);
 
@@ -20,7 +20,7 @@ void main() {
     float specular = pow(max(dot(half_direction, normalize(v_normal)), 0.0), 16.0);
 
     vec4 color = vec4((normalize(v_cubie_pos) + 0.5) / 2 + diffuse * diffuse_color + specular * specular_color, 1.0);
-    // vec4 color = vec4(normalize(v_cubie_pos)/2 + 0.5, 1.0);
     frag_color = texture(tex_sampler, v_uv) * color;
+    // frag_color = color;
 }
 

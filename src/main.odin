@@ -104,7 +104,7 @@ init :: proc(fullscreen: bool) -> AppState {
         height = u32(height),
         layer_count_or_depth = 1,
         num_levels = 1,
-        format = .D16_UNORM,
+        format = .D32_FLOAT,
         usage = {.SAMPLER, .DEPTH_STENCIL_TARGET}
     })
     state.depth_texture = depth_texture
@@ -283,9 +283,8 @@ render :: proc(state: ^AppState) {
     sdl.BindGPUFragmentSamplers(render_pass, 0, &(sdl.GPUTextureSamplerBinding{texture = state.texture, sampler = state.tex_sampler}), 1)
     sdl.BindGPUIndexBuffer(render_pass, { buffer = state.model.ibo }, ._32BIT)
     sdl.BindGPUVertexBuffers(render_pass, 0, &bindings[0], 1)
-    distances := sort_vbos(state)
-    fmt.println(distances)
-    #reverse for i in distances {
+
+    for i in 0..<len(state.model.mesh_instances) {
         ubo := create_ubo(state.window, state.model.mesh_instances[i], state.model.rotation, &state.camera)
         sdl.PushGPUVertexUniformData(cmd_buff, 0, &ubo, size_of(UBO))
         sdl.DrawGPUIndexedPrimitives(render_pass, u32(len(state.model.indices)), 1, 0, 0, 0)
@@ -350,7 +349,7 @@ build_pipeline :: proc(state: ^AppState) {
                 format = sdl.GetGPUSwapchainTextureFormat(state.gpu, state.window)
             }),
             has_depth_stencil_target = true,
-            depth_stencil_format = .D16_UNORM
+            depth_stencil_format = .D32_FLOAT
         },
         vertex_input_state = {
             vertex_buffer_descriptions = &vb_descriptions[0],
@@ -365,34 +364,10 @@ build_pipeline :: proc(state: ^AppState) {
         depth_stencil_state = {
             enable_depth_test = true,
             enable_depth_write = true,
-            compare_op = .LESS
+            compare_op = .LESS,
         }
     })
     state.pipeline = pipeline
-}
-
-sort_vbos :: proc(state: ^AppState) -> [27]u32 {
-    Dist :: struct{d: f32, n: int}
-    distances: [27]Dist
-    output: [27]u32
-    for cubie, i in state.model.mesh_instances {
-        distance: f32 = linalg.distance(cubie, state.camera.position)
-        distances[i] = {distance, i}
-    }
-    for i in 0..<27{
-        for j in 0..<(27 - i - 1){
-            if distances[j].d > distances[j + 1].d {
-                temp := distances[j]
-                distances[j] = distances[j + 1]
-                distances[j + 1] = temp
-            }
-        }
-    }
-
-    for i in 0..<27 {
-        output[i] = u32(distances[i].n)
-    }
-    return output
 }
 
 create_view_matrix :: proc(camera: ^Camera) -> linalg.Matrix4f32 {
@@ -407,7 +382,7 @@ create_ubo :: proc(window: ^sdl.Window, instance_position: vec3, instance_rotati
     ok := sdl.GetWindowSize(window, &x, &y)
     aspect := f32(x) / f32(y)
     projection_matrix := linalg.matrix4_perspective_f32(linalg.to_radians(f32(70)), aspect, 0.0001, 1000)
-    model_matrix := linalg.matrix4_translate_f32(instance_position) //* linalg.matrix4_rotate_f32(instance_rotation, {0, 1, 0})
+    model_matrix := linalg.matrix4_translate_f32(instance_position) * linalg.matrix4_rotate_f32(instance_rotation, {0, 1, 0})
     view := create_view_matrix(camera)
     return UBO {
         view = view,
