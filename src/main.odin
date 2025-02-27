@@ -38,6 +38,7 @@ init :: proc(state: ^AppState, fullscreen: bool){
         }, nil
     )
     ok := sdl.Init({.VIDEO}); assert(ok)
+
     renderer: Renderer
     create_renderer(&renderer)
     cube: Cube
@@ -117,7 +118,8 @@ process_keyboard :: proc(camera: ^Camera, dt: f32) {
     fb := f-b
     lr := l-r
     ud := u-d
-
+    yaw := yaw_r - yaw_l
+    pitch := pitch_d - pitch_u
     yaw_cos := math.cos(math.to_radians(camera.yaw))
     yaw_sin := math.sin(math.to_radians(camera.yaw))
     camera.position +=  {
@@ -127,6 +129,7 @@ process_keyboard :: proc(camera: ^Camera, dt: f32) {
     }
     camera.pitch += (pitch_d-pitch_u) * dt * 100
     camera.yaw += (yaw_r-yaw_l) * dt * 100
+
 }
 
 process_mouse :: proc(camera: ^Camera) {
