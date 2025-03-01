@@ -7,13 +7,11 @@ layout (location = 2) in vec2 uv;
 layout (location = 0) out vec3 v_position;
 layout (location = 1) out vec3 v_normal;
 layout (location = 2) out vec2 v_uv;
-layout (location = 3) out flat float v_cubie;
 
 layout(set=1, binding=0) uniform UBO {
     mat4 view_matrix;
     mat4 projection_matrix;
     mat4 model_matrix;
-    uint cubie;
 };
 
 void main() {
@@ -22,6 +20,5 @@ void main() {
     v_position = gl_Position.xyz;
     v_normal = normal;
     v_uv = uv;
-    v_cubie = cubie;
 }
 

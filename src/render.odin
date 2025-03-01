@@ -21,6 +21,7 @@ Renderer :: struct {
 
 vec2 :: [2]f32
 vec3 :: [3]f32
+vec4 :: [4]f32
 
 Vertex :: struct {
     position: vec3,
@@ -37,7 +38,6 @@ UBO :: struct {
     view: matrix[4,4]f32,
     proj: matrix[4,4]f32,
     model: matrix[4,4]f32,
-    instance: u32
 }
 
 Camera :: struct {
@@ -47,9 +47,9 @@ Camera :: struct {
 }
 
 Model :: struct {
-    rotation: f32,
     mesh: Mesh,
-    mesh_instances: [27]vec3,
+    instance_locations: [27]vec3,
+    instance_rotations: [27]f32,
     indices: []u32,
     ibo: ^sdl.GPUBuffer,
 }
@@ -88,8 +88,7 @@ create_renderer :: proc(renderer: ^Renderer) {
     for x in 0..<3 {
         for y in 0..<3 {
             for z in 0..<3 {
-                renderer.model.mesh_instances[i] = vec3{f32(x), f32(y), f32(z)}
-
+                renderer.model.instance_locations[i] = vec3{f32(x), f32(y), f32(z)}
                 i += 1
             }
         }
@@ -161,10 +160,7 @@ load_rubiks_cube :: proc(renderer: ^Renderer) {
     renderer.model = cube
 }
 
-render :: proc(renderer: ^Renderer, cube: ^Cube) {
-    for i in renderer.model.mesh_instances {
-        fmt.println(cube[u32(i.x)][u32(i.y)][u32(i.z)])
-    }
+render :: proc(renderer: ^Renderer) {
     cmd_buff := sdl.AcquireGPUCommandBuffer(renderer.gpu); assert(cmd_buff != nil)
     swapchain_texture: ^sdl.GPUTexture
     ok := sdl.WaitAndAcquireGPUSwapchainTexture(cmd_buff, renderer.window, &swapchain_texture, nil, nil); assert(ok)
@@ -198,11 +194,11 @@ render :: proc(renderer: ^Renderer, cube: ^Cube) {
     sdl.BindGPUIndexBuffer(render_pass, { buffer = renderer.model.ibo }, ._32BIT)
     sdl.BindGPUVertexBuffers(render_pass, 0, &bindings[0], 1)
 
-    for i in 0..<len(renderer.model.mesh_instances) {
+    for i in 0..<len(renderer.model.instance_locations) {
         ubo := create_ubo(
             renderer.window,
-            &renderer.model,
-            u32(i), 
+            renderer.model.instance_locations[i],
+            renderer.model.instance_rotations[i], 
             &renderer.camera)
         sdl.PushGPUVertexUniformData(cmd_buff, 0, &ubo, size_of(UBO))
         sdl.DrawGPUIndexedPrimitives(render_pass, u32(len(renderer.model.indices)), 1, 0, 0, 0)
@@ -246,12 +242,6 @@ build_pipeline :: proc(renderer: ^Renderer, wireframe: bool) {
             format = .FLOAT2,
             offset = size_of(vec3) * 2
         },
-        sdl.GPUVertexAttribute {
-            location = 3,
-            buffer_slot = 0,
-            format = .UINT,
-            offset = size_of(vec3) * 2 + size_of(vec2)
-        },
     }
 
     fill_mode: sdl.GPUFillMode;
@@ -273,7 +263,7 @@ build_pipeline :: proc(renderer: ^Renderer, wireframe: bool) {
             vertex_buffer_descriptions = &vb_descriptions[0],
             num_vertex_buffers = 1,
             vertex_attributes = &vb_attributes[0],
-            num_vertex_attributes = 4
+            num_vertex_attributes = 3
         },
         rasterizer_state = {
             fill_mode = fill_mode,
@@ -288,24 +278,29 @@ build_pipeline :: proc(renderer: ^Renderer, wireframe: bool) {
 }
 
 create_view_matrix :: proc(camera: ^Camera) -> linalg.Matrix4f32 {
-    yaw_matrix := linalg.matrix4_rotate_f32(math.to_radians(camera.yaw), {0, 1, 0})
-    pitch_matrix := linalg.matrix4_rotate_f32(math.to_radians(camera.pitch), {1, 0, 0})
-    position_matrix := linalg.matrix4_translate_f32(camera.position)
+    using linalg
+    yaw_matrix := matrix4_rotate_f32(math.to_radians(camera.yaw), {0, 1, 0})
+    pitch_matrix := matrix4_rotate_f32(math.to_radians(camera.pitch), {1, 0, 0})
+    position_matrix := matrix4_translate_f32(camera.position)
     return pitch_matrix * yaw_matrix * position_matrix
 }
 
-create_ubo :: proc(window: ^sdl.Window, model: ^Model, instance: u32, camera: ^Camera) -> UBO {
+create_ubo :: proc(window: ^sdl.Window, position: vec3, rotation: f32, camera: ^Camera) -> UBO {
+    using linalg
     x, y: i32;
     ok := sdl.GetWindowSize(window, &x, &y)
     aspect := f32(x) / f32(y)
-    projection_matrix := linalg.matrix4_perspective_f32(linalg.to_radians(f32(70)), aspect, 0.0001, 1000)
-    model_matrix := linalg.matrix4_translate_f32(model.mesh_instances[instance] * 2.1)
+    projection_matrix := matrix4_perspective_f32(linalg.to_radians(f32(70)), aspect, 0.0001, 1000)
+    model_matrix: Matrix4x4f32
+    // if position.y == 2 {
+        model_matrix = matrix4_translate_f32(position * 2.1) * matrix4_rotate_f32(rotation, {0, 1, 0})
+    // }
+    
     view := create_view_matrix(camera)
     return UBO {
         view = view,
         proj = projection_matrix,
         model = model_matrix,
-        instance = instance
     }
 }
 

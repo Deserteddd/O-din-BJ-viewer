@@ -7,6 +7,7 @@ import "core:fmt"
 import "core:mem"
 import "core:os"
 import "core:strings"
+import "core:math/linalg"
 import sdl "vendor:sdl3"
 
 default_context: runtime.Context
@@ -22,12 +23,10 @@ main :: proc() {
 
 AppState :: struct {
     renderer: Renderer,
-    cube: Cube
 }
 
 
 init :: proc(state: ^AppState, fullscreen: bool){
-
     context.logger = log.create_console_logger()
     default_context = context
     sdl.SetLogPriorities(.VERBOSE)
@@ -41,10 +40,7 @@ init :: proc(state: ^AppState, fullscreen: bool){
 
     renderer: Renderer
     create_renderer(&renderer)
-    cube: Cube
-    create_cube(&cube)
     state.renderer = renderer
-    state.cube = cube
 }
 
 Cube :: [3][3][3]int
@@ -68,6 +64,9 @@ run :: proc(state: ^AppState) {
     wireframe := false
     main_loop: for {
         defer frames += 1
+        new_ticks := sdl.GetTicks();
+        delta_time := f32(new_ticks - last_ticks) / 1000
+        second += delta_time
         ev: sdl.Event
         for sdl.PollEvent(&ev) {
             #partial switch ev.type {
@@ -75,22 +74,54 @@ run :: proc(state: ^AppState) {
                     break main_loop
                 case .KEY_DOWN: #partial switch ev.key.scancode {
                     case .ESCAPE: break main_loop
-                    case .Q: 
+                    case .F: 
                         wireframe = !wireframe
                         build_pipeline(&state.renderer, wireframe)
+                    case .E:
+                        for _ in 0..<45 {
+                            rotate_horizontal(&state.renderer.model, 2, .RIGHT)
+                            render(&state.renderer)
+                        }
+                    case .Q:
+                        for _ in 0..<45 {
+                            rotate_horizontal(&state.renderer.model, -2, .LEFT)
+                            render(&state.renderer)
+                        }
                 }
             }
         }
-        new_ticks := sdl.GetTicks();
-        delta_time := f32(new_ticks - last_ticks) / 1000
-        second += delta_time
+
+
         if second >= 0.5 {
             fmt.println("fps:", frames * 2)
             second, frames = 0, 0
         }
+
         last_ticks = new_ticks
         update(state, delta_time)
-        render(&state.renderer, &state.cube)
+        render(&state.renderer)
+    }
+}
+
+Dir :: enum {
+    RIGHT,
+    LEFT
+}
+
+rotate_horizontal :: proc(model: ^Model, row: i32, dir: Dir) {
+    using linalg
+    rotating: bool
+    direction: i32
+    if dir == .LEFT do direction = -2; else do direction = 2
+    for i in 0..<27 {
+        location := model.instance_locations[i]
+        if location.y == f32(abs(row)) {
+            c := vec3{1, location.y, 1}
+            r := matrix3_rotate_f32(to_radians(f32(direction)), vec3{0, 1, 0})
+            p_prime := c + r*(location-c)
+            model.instance_rotations[i] += to_radians(f32(direction))
+            model.instance_locations[i] = p_prime
+        }
     }
 }
 
