@@ -23,6 +23,7 @@ main :: proc() {
 
 AppState :: struct {
     renderer: Renderer,
+    rotation: Rotation
 }
 
 
@@ -56,6 +57,19 @@ create_cube :: proc(cube: ^Cube) {
     }
 }
 
+Dir :: enum {
+    NONE,
+    LEFT,
+    RIGHT,
+    UP,
+    DOWN,
+}
+
+Rotation :: struct {
+    amount: f32,
+    dir: Dir,
+    row: u8
+}
 
 run :: proc(state: ^AppState) {
     last_ticks := sdl.GetTicks();
@@ -78,15 +92,15 @@ run :: proc(state: ^AppState) {
                         wireframe = !wireframe
                         build_pipeline(&state.renderer, wireframe)
                     case .E:
-                        for _ in 0..<45 {
-                            rotate_horizontal(&state.renderer.model, 2, .RIGHT)
-                            render(&state.renderer)
-                        }
+                        if state.rotation.dir == .NONE do state.rotation.dir = .RIGHT
                     case .Q:
-                        for _ in 0..<45 {
-                            rotate_horizontal(&state.renderer.model, -2, .LEFT)
-                            render(&state.renderer)
-                        }
+                        if state.rotation.dir == .NONE do state.rotation.dir = .LEFT
+                    case ._1:
+                        if state.rotation.dir == .NONE do state.rotation.row = 0
+                    case ._2:
+                        if state.rotation.dir == .NONE do state.rotation.row = 1
+                    case ._3:
+                        if state.rotation.dir == .NONE do state.rotation.row = 2
                 }
             }
         }
@@ -103,29 +117,49 @@ run :: proc(state: ^AppState) {
     }
 }
 
-Dir :: enum {
-    RIGHT,
-    LEFT
-}
-
-rotate_horizontal :: proc(model: ^Model, row: i32, dir: Dir) {
+rotate_horizontal :: proc(model: ^Model, rotation: ^Rotation, dt: f32) {
     using linalg
-    rotating: bool
-    direction: i32
-    if dir == .LEFT do direction = -2; else do direction = 2
+    rotate_by: f32 = dt * 300
+    #partial switch rotation.dir {
+        case .RIGHT:
+            if rotation.amount + rotate_by > 90 {
+                rotate_by = 90 - rotation.amount
+            }
+        case .LEFT:
+            rotate_by *= -1
+            if rotation.amount + rotate_by < -90 {
+                rotate_by = -90 - rotation.amount
+            }
+    }
     for i in 0..<27 {
         location := model.instance_locations[i]
-        if location.y == f32(abs(row)) {
+        if location.y == f32(rotation.row) {
             c := vec3{1, location.y, 1}
-            r := matrix3_rotate_f32(to_radians(f32(direction)), vec3{0, 1, 0})
+            r := matrix3_rotate_f32(to_radians(rotate_by), vec3{0, 1, 0})
             p_prime := c + r*(location-c)
-            model.instance_rotations[i] += to_radians(f32(direction))
+            model.instance_rotations[i] += to_radians(rotate_by)
             model.instance_locations[i] = p_prime
         }
     }
+    rotation.amount += rotate_by
 }
 
+
 update :: proc(state: ^AppState, dt: f32) {
+    #partial switch state.rotation.dir {
+        case .RIGHT:
+            if state.rotation.amount < 90 do rotate_horizontal(&state.renderer.model, &state.rotation, dt)
+            else {
+                state.rotation.dir = .NONE
+                state.rotation.amount = 0
+            }
+        case .LEFT:
+            if state.rotation.amount > -90 do rotate_horizontal(&state.renderer.model, &state.rotation, dt)
+            else {
+                state.rotation.dir = .NONE
+                state.rotation.amount = 0
+            }
+    }
     process_mouse(&state.renderer.camera)
     process_keyboard(&state.renderer.camera, dt)
 }
