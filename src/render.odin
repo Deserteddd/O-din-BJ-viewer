@@ -38,6 +38,7 @@ UBO :: struct {
     view: matrix[4,4]f32,
     proj: matrix[4,4]f32,
     model: matrix[4,4]f32,
+    uv_offset: vec2
 }
 
 Camera :: struct {
@@ -48,8 +49,9 @@ Camera :: struct {
 
 Model :: struct {
     mesh: Mesh,
-    instance_locations: [27]vec3,
-    instance_rotations: [27]f32,
+    instance_positions: [27]vec3,
+    instance_rotations: [27]vec2,
+    instance_uv_offsets: [27]vec2,
     indices: []u32,
     ibo: ^sdl.GPUBuffer,
 }
@@ -57,7 +59,7 @@ Model :: struct {
 create_renderer :: proc(renderer: ^Renderer) {
     win_flags: sdl.WindowFlags
     if renderer.fullscreen {win_flags = {.MOUSE_GRABBED, .FULLSCREEN}} else do win_flags = {.MOUSE_GRABBED}
-    window := sdl.CreateWindow("Hello Odin", 1280, 720, win_flags); assert(window != nil)
+    window := sdl.CreateWindow("Hello Odin", 800, 800, win_flags); assert(window != nil)
     ok := sdl.HideCursor(); assert(ok)
     ok = sdl.SetWindowRelativeMouseMode(window, true); assert(ok)
     width, height: i32
@@ -88,16 +90,16 @@ create_renderer :: proc(renderer: ^Renderer) {
     for x in 0..<3 {
         for y in 0..<3 {
             for z in 0..<3 {
-                renderer.model.instance_locations[i] = vec3{f32(x), f32(y), f32(z)}
+                renderer.model.instance_positions[i] = vec3{f32(x), f32(y), f32(z)}
                 i += 1
             }
         }
     }
 
     renderer.camera = Camera {
-        position = {0, 0, -5},
-        pitch = 0,
-        yaw = 0
+        position = {3.68, -7.21, -11},
+        pitch = 27,
+        yaw = 35.4
     }
 }
 
@@ -194,12 +196,13 @@ render :: proc(renderer: ^Renderer) {
     sdl.BindGPUIndexBuffer(render_pass, { buffer = renderer.model.ibo }, ._32BIT)
     sdl.BindGPUVertexBuffers(render_pass, 0, &bindings[0], 1)
 
-    for i in 0..<len(renderer.model.instance_locations) {
+    for i in 0..<len(renderer.model.instance_positions) {
         ubo := create_ubo(
             renderer.window,
-            renderer.model.instance_locations[i],
-            renderer.model.instance_rotations[i], 
-            &renderer.camera)
+            &renderer.model,
+            i,
+            &renderer.camera
+        )
         sdl.PushGPUVertexUniformData(cmd_buff, 0, &ubo, size_of(UBO))
         sdl.DrawGPUIndexedPrimitives(render_pass, u32(len(renderer.model.indices)), 1, 0, 0, 0)
     }
@@ -285,22 +288,24 @@ create_view_matrix :: proc(camera: ^Camera) -> linalg.Matrix4f32 {
     return pitch_matrix * yaw_matrix * position_matrix
 }
 
-create_ubo :: proc(window: ^sdl.Window, position: vec3, rotation: f32, camera: ^Camera) -> UBO {
+create_ubo :: proc(window: ^sdl.Window, model: ^Model, instance: int, camera: ^Camera) -> UBO {
     using linalg
     x, y: i32;
     ok := sdl.GetWindowSize(window, &x, &y)
+    position := model.instance_positions[instance]
+    rotation := model.instance_rotations[instance]
+    uv_offset := model.instance_uv_offsets[instance]
     aspect := f32(x) / f32(y)
     projection_matrix := matrix4_perspective_f32(linalg.to_radians(f32(70)), aspect, 0.0001, 1000)
-    model_matrix: Matrix4x4f32
-    // if position.y == 2 {
-        model_matrix = matrix4_translate_f32(position * 2.1) * matrix4_rotate_f32(rotation, {0, 1, 0})
-    // }
-    
+    model_pitch := matrix4_rotate_f32(linalg.to_radians(rotation.y), {0, 1, 0})
+    model_yaw := matrix4_rotate_f32(linalg.to_radians(rotation.x), {1, 0, 0})
+    model_matrix :=  matrix4_translate_f32(position * 2.1) * model_pitch * model_yaw
     view := create_view_matrix(camera)
     return UBO {
         view = view,
         proj = projection_matrix,
         model = model_matrix,
+        uv_offset = uv_offset
     }
 }
 

@@ -12,6 +12,7 @@ layout(set=1, binding=0) uniform UBO {
     mat4 view_matrix;
     mat4 projection_matrix;
     mat4 model_matrix;
+    vec2 uv_offset;
 };
 
 void main() {

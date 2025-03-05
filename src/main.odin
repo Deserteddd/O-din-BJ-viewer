@@ -44,19 +44,6 @@ init :: proc(state: ^AppState, fullscreen: bool){
     state.renderer = renderer
 }
 
-Cube :: [3][3][3]int
-create_cube :: proc(cube: ^Cube) {
-    value := 0
-    for i in 0..<3 {
-        for j in 0..<3 {
-            for k in 0..<3 {
-                cube[i][j][k] = value
-                value += 1
-            }
-        }
-    }
-}
-
 Dir :: enum {
     NONE,
     LEFT,
@@ -68,7 +55,7 @@ Dir :: enum {
 Rotation :: struct {
     amount: f32,
     dir: Dir,
-    row: u8
+    row: f32
 }
 
 run :: proc(state: ^AppState) {
@@ -93,14 +80,34 @@ run :: proc(state: ^AppState) {
                         build_pipeline(&state.renderer, wireframe)
                     case .E:
                         if state.rotation.dir == .NONE do state.rotation.dir = .RIGHT
+                        if state.rotation.dir == .LEFT {
+                            state.rotation.dir = .RIGHT
+                            state.rotation.amount += 90
+                        }
                     case .Q:
                         if state.rotation.dir == .NONE do state.rotation.dir = .LEFT
+                        if state.rotation.dir == .RIGHT {
+                            state.rotation.dir = .LEFT
+                            state.rotation.amount -= 90
+                        }
+                    case .W:
+                        if state.rotation.dir == .NONE do state.rotation.dir = .UP
+                        if state.rotation.dir == .DOWN {
+                            state.rotation.dir = .UP
+                            state.rotation.amount += 90
+                        }
+                    case .S:
+                        if state.rotation.dir == .NONE do state.rotation.dir = .DOWN
+                        if state.rotation.dir == .UP {
+                            state.rotation.dir = .DOWN
+                            state.rotation.amount -= 90
+                        }
                     case ._1:
-                        if state.rotation.dir == .NONE do state.rotation.row = 0
+                        state.rotation.row = 0
                     case ._2:
-                        if state.rotation.dir == .NONE do state.rotation.row = 1
+                        state.rotation.row = 1
                     case ._3:
-                        if state.rotation.dir == .NONE do state.rotation.row = 2
+                        state.rotation.row = 2
                 }
             }
         }
@@ -109,6 +116,7 @@ run :: proc(state: ^AppState) {
         if second >= 0.5 {
             fmt.println("fps:", frames * 2)
             second, frames = 0, 0
+            // for i in 0..<len(state.renderer.model.instance_positions)
         }
 
         last_ticks = new_ticks
@@ -117,48 +125,68 @@ run :: proc(state: ^AppState) {
     }
 }
 
-rotate_horizontal :: proc(model: ^Model, rotation: ^Rotation, dt: f32) {
+rotate :: proc(model: ^Model, rotation: ^Rotation, dt: f32) {
     using linalg
-    rotate_by: f32 = dt * 300
-    #partial switch rotation.dir {
+    rotate_by: f32 = dt * 200
+    c: vec3
+    axis: vec3
+    switch rotation.dir {
         case .RIGHT:
+            c = vec3{1, rotation.row, 1}
+            axis = vec3{0, 1, 0}
             if rotation.amount + rotate_by > 90 {
                 rotate_by = 90 - rotation.amount
             }
         case .LEFT:
+            c = vec3{1, rotation.row, 1}
+            axis = vec3{0, 1, 0}
             rotate_by *= -1
             if rotation.amount + rotate_by < -90 {
                 rotate_by = -90 - rotation.amount
             }
+        case .UP:
+            c = vec3{rotation.row, 1, 1}
+            axis = vec3{1, 0, 0}
+            if rotation.amount + rotate_by > 90 {
+                rotate_by = 90 - rotation.amount
+            }
+        case .DOWN:
+            c = vec3{rotation.row, 1, 1}
+            axis = vec3{1, 0, 0}
+            rotate_by *= -1
+            if rotation.amount + rotate_by < -90 {
+                rotate_by = -90 - rotation.amount
+            }
+        case .NONE: panic("Rotate called with rotation.NONE")
     }
     for i in 0..<27 {
-        location := model.instance_locations[i]
-        if location.y == f32(rotation.row) {
-            c := vec3{1, location.y, 1}
-            r := matrix3_rotate_f32(to_radians(rotate_by), vec3{0, 1, 0})
-            p_prime := c + r*(location-c)
-            model.instance_rotations[i] += to_radians(rotate_by)
-            model.instance_locations[i] = p_prime
+        location := &model.instance_positions[i]
+        if location[int(axis[1])] == rotation.row {
+            r := matrix3_rotate_f32(to_radians(rotate_by), axis)
+            p_prime := c + r*(location^-c)
+            model.instance_rotations[i][int(axis[0])] += rotate_by
+            location^ = p_prime
         }
     }
     rotation.amount += rotate_by
 }
 
-
 update :: proc(state: ^AppState, dt: f32) {
-    #partial switch state.rotation.dir {
-        case .RIGHT:
-            if state.rotation.amount < 90 do rotate_horizontal(&state.renderer.model, &state.rotation, dt)
-            else {
-                state.rotation.dir = .NONE
-                state.rotation.amount = 0
-            }
-        case .LEFT:
-            if state.rotation.amount > -90 do rotate_horizontal(&state.renderer.model, &state.rotation, dt)
-            else {
-                state.rotation.dir = .NONE
-                state.rotation.amount = 0
-            }
+    rotation_done := false
+    if state.rotation.dir != .NONE {
+        if abs(state.rotation.amount) < 90 do rotate(&state.renderer.model, &state.rotation, dt)
+        else {
+            state.rotation.dir = .NONE
+            state.rotation.amount = 0
+            rotation_done = true
+        }
+    }
+    if rotation_done {
+        for &pos, i in state.renderer.model.instance_positions {
+            pos.x = abs(math.round_f32(pos.x))
+            pos.y = abs(math.round_f32(pos.y))
+            pos.z = abs(math.round_f32(pos.z))
+        }
     }
     process_mouse(&state.renderer.camera)
     process_keyboard(&state.renderer.camera, dt)
