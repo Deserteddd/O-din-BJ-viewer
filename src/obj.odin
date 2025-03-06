@@ -6,7 +6,7 @@ import "core:strings"
 import "core:strconv"
 
 load_cube :: proc(model: ^Model) {
-    file, err := os.read_entire_file_or_err("assets/cube.obj"); assert(err == nil); defer delete(file)
+    file, err := os.read_entire_file_or_err("assets/monke.obj"); assert(err == nil); defer delete(file)
     vertices, indices := load_cubie(file)
     model.mesh.vertices = vertices[:]
     model.indices = indices[:]
@@ -36,17 +36,20 @@ load_cubie :: proc(file: []u8) -> ([]Vertex, []u32) {
     for face, i in face_data {
         i := i*3
         vertices[face[0]].position = positions[face[0]]
-        vertices[face[0]].uv = uvs[face[1]]
+        vertices[face[0]].uv.x = uvs[face[1]].x
+        vertices[face[0]].uv.y = 1-uvs[face[1]].y
         vertices[face[0]].normal = normals[face[2]]
         indices[i] = face[0]
 
         vertices[face[3]].position = positions[face[3]]
-        vertices[face[3]].uv = uvs[face[4]]
+        vertices[face[3]].uv.x = uvs[face[4]].x
+        vertices[face[3]].uv.y = 1-uvs[face[4]].y
         vertices[face[3]].normal = normals[face[5]]
         indices[i+1] = face[3]
 
         vertices[face[6]].position = positions[face[6]]
-        vertices[face[6]].uv = uvs[face[7]]
+        vertices[face[6]].uv.x = uvs[face[7]].x
+        vertices[face[6]].uv.y = 1-uvs[face[7]].y
         vertices[face[6]].normal = normals[face[8]]
         indices[i+2] = face[6]
     }

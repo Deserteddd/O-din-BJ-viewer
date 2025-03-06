@@ -105,7 +105,7 @@ create_renderer :: proc(renderer: ^Renderer) {
 
 load_rubiks_cube :: proc(renderer: ^Renderer) {
     img_size: [2]i32
-    pixels := stbi.load("assets/castle_brick.jpg", &img_size.x, &img_size.y, nil, 4); assert(pixels != nil); defer stbi.image_free(pixels)
+    pixels := stbi.load("assets/monke.png", &img_size.x, &img_size.y, nil, 4); assert(pixels != nil); defer stbi.image_free(pixels)
     pixels_byte_size := img_size.x * img_size.y * 4
     texture := sdl.CreateGPUTexture(renderer.gpu, {
         type = .D2,
