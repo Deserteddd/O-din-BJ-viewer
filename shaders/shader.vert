@@ -4,31 +4,30 @@ layout (location = 0) in vec3 position;
 layout (location = 1) in vec3 normal;
 layout (location = 2) in vec2 uv;
 
-layout (location = 0) out vec3 v_position;
-layout (location = 1) out vec3 v_normal;
-layout (location = 2) out vec2 v_uv;
+layout (location = 0) flat out vec3 v_color;
+layout (location = 1) out vec2 v_uv;
 
-layout(set=1, binding=0) uniform UBO {
-    mat4 view_matrix;
-    mat4 projection_matrix;
-    mat4 model_matrix;
+layout(set=0, binding=0) readonly buffer MaterialIndices {
+    uint indices[];
 };
 
-layout(set=1, binding=1) uniform MTL {
-    vec3 Ka;
-    vec3 Kd;
-    vec3 Ks;
-    vec3 Ke;
-    float Ns;
-    float Ni;
-    float d;
-    uint illum;
+layout(set=1, binding=0) uniform UBO {
+    mat4 modelview;
+    mat4 projection_matrix;
+    mat4 mtl;
 };
 
 void main() {
-    mat4 modelview = view_matrix*model_matrix;
     gl_Position = projection_matrix * modelview * vec4(position, 1.0);
-    v_position = gl_Position.xyz;
-    v_normal = normal;
+    // gl_Position = vec4(normalize(position), 1);
+    // v_color = vec3(ks.x, 0, 0);
+    // v_color = vec3(1);
+    // v_color = mtl[1].xyz;
+    uint id = indices[gl_VertexIndex];
+    if (id == 0) {
+        v_color = vec3(1, 0, 0);
+    } else {
+        v_color = vec3(0, 0, 0);
+    }
     v_uv = uv;
 }

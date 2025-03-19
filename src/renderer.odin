@@ -5,6 +5,7 @@ import stbi "vendor:stb/image"
 import "core:mem"
 import "core:math/linalg"
 import "core:strings"
+import "core:fmt"
 vert_shader_code := #load("../shaders/spv/shader.vert.spv")
 frag_shader_code := #load("../shaders/spv/shader.frag.spv")
 vert_code_2D := #load("../shaders/spv/shader2D.vert.spv")
@@ -45,10 +46,12 @@ Quad :: struct {
 }
 
 UBO3 :: struct {
-    view: matrix[4,4]f32,
+    modelview: matrix[4,4]f32,
     proj: matrix[4,4]f32,
-    model: matrix[4,4]f32,
-    uv_offset: vec2
+    mat_matrix: matrix[4,4]f32,
+    // Ka, Kd, Ks, Ke: vec3
+    // model: matrix[4,4]f32,
+    // uv_offset: vec2
 }
 
 Camera :: struct {
@@ -62,9 +65,10 @@ Object :: struct {
     position: vec3,
     rotation: vec3,
     texture: ^sdl.GPUTexture,
-    material: Material,
+    materials: []Material,
     vbo: ^sdl.GPUBuffer,
     ibo: ^sdl.GPUBuffer,
+    face_data: ^sdl.GPUBuffer,
     num_indices: u32,
 }
 
@@ -162,25 +166,32 @@ RND_DrawObjects :: proc(renderer: ^Renderer, objects: []Object) {
 
     for &object in objects {
         sdl.BindGPUIndexBuffer(render_pass, { buffer = object.ibo }, ._32BIT)
-        bindings: [1]sdl.GPUBufferBinding = sdl.GPUBufferBinding { buffer = object.vbo } // TODO 
+        bindings: [1]sdl.GPUBufferBinding = {
+            sdl.GPUBufferBinding { buffer = object.vbo },
+        } 
         sdl.BindGPUVertexBuffers(render_pass, 0, &bindings[0], 1)
+        sdl.BindGPUVertexStorageBuffers(render_pass, 0, &object.face_data, 1)
         sdl.BindGPUFragmentSamplers(render_pass, 0, 
             &(sdl.GPUTextureSamplerBinding{texture = object.texture, sampler = renderer.tex_sampler}), 1
         )
+        i: u32 = 0
         ubo := create_ubo3(
             renderer.window,
             &object,
-            &renderer.camera
+            &renderer.camera,
+            i
         )
         sdl.PushGPUVertexUniformData(renderer.cmd_buff, 0, &ubo, size_of(UBO3))
-        sdl.PushGPUVertexUniformData(renderer.cmd_buff, 1, &object.material, size_of(Material))
+        // fmt.println(object.materials[i])
+        // sdl.PushGPUVertexUniformData(renderer.cmd_buff, 1, &object.materials[i], size_of(Material))
         sdl.DrawGPUIndexedPrimitives(render_pass, object.num_indices, 1, 0, 0, 0)
+        // sdl.DrawGPUPrimitives(render_pass, 2000, 1, 0, 0)
     }
 
     sdl.EndGPURenderPass(render_pass)
 }
 
-RND_CreateObject :: proc(data: ObjectData, gpu: ^sdl.GPUDevice) -> Object {
+RND_CreateObject :: proc(data: OBJFile, gpu: ^sdl.GPUDevice) -> Object {
     object: Object
     // Create and upload texture
     img_size: [2]i32
@@ -207,6 +218,7 @@ RND_CreateObject :: proc(data: ObjectData, gpu: ^sdl.GPUDevice) -> Object {
     len_bytes := max(
         len(data.indices) * size_of(u32),
         len(data.vertices) * size_of(Vertex3),
+        len(data.face_data) * size_of(u32)
     )
     transfer_buffer := sdl.CreateGPUTransferBuffer(gpu, {
         usage = sdl.GPUTransferBufferUsage.UPLOAD,
@@ -217,6 +229,7 @@ RND_CreateObject :: proc(data: ObjectData, gpu: ^sdl.GPUDevice) -> Object {
 
     vbo := create_buffer_with_data(gpu, transfer_buffer, copy_pass, {.VERTEX}, data.vertices)
     ibo := create_buffer_with_data(gpu, transfer_buffer, copy_pass, {.INDEX}, data.indices)
+    face_data := create_buffer_with_data(gpu, transfer_buffer, copy_pass, {.GRAPHICS_STORAGE_READ}, data.face_data)
 
     sdl.UploadToGPUTexture(copy_pass, 
         {transfer_buffer = tex_transfer_buffer},
@@ -234,26 +247,34 @@ RND_CreateObject :: proc(data: ObjectData, gpu: ^sdl.GPUDevice) -> Object {
     object.texture = texture
     object.vbo = vbo
     object.ibo = ibo
+    object.face_data = face_data
     object.name = strings.clone(data.name)
     object.num_indices = u32(len(data.indices))
-    object.material = data.material
-
+    object.materials = data.materials
     return object
 }
 
 @(private="file")
 build_3D_pipeline :: proc(renderer: ^Renderer, wireframe: bool) {
     sdl.ReleaseGPUGraphicsPipeline(renderer.gpu, renderer.pipeline3D)
-    vert_shader := load_shader(renderer.gpu, vert_shader_code, .VERTEX, 2, 0); defer sdl.ReleaseGPUShader(renderer.gpu, vert_shader)
-    frag_shader := load_shader(renderer.gpu, frag_shader_code, .FRAGMENT, 0, 1); defer sdl.ReleaseGPUShader(renderer.gpu, frag_shader)
+    vert_shader := load_shader(renderer.gpu, vert_shader_code, .VERTEX, 1, 0, 1); defer sdl.ReleaseGPUShader(renderer.gpu, vert_shader)
+    frag_shader := load_shader(renderer.gpu, frag_shader_code, .FRAGMENT, 0, 1, 0); defer sdl.ReleaseGPUShader(renderer.gpu, frag_shader)
 
     vb_descriptions: [1]sdl.GPUVertexBufferDescription
-    vb_descriptions[0] = sdl.GPUVertexBufferDescription {
-        slot = u32(0),
-        pitch = size_of(Vertex3),
-        input_rate = .VERTEX,
-        instance_step_rate = 0
-    }     
+    vb_descriptions = {
+        sdl.GPUVertexBufferDescription {
+            slot = u32(0),
+            pitch = size_of(Vertex3),
+            input_rate = .VERTEX,
+            instance_step_rate = 0
+        },
+        // sdl.GPUVertexBufferDescription {
+        //     slot = u32(1),
+        //     pitch = size_of(Vertex3),
+        //     input_rate = .VERTEX,
+        //     instance_step_rate = 0
+        // },
+    }  
 
     vb_attributes: []sdl.GPUVertexAttribute = {
         sdl.GPUVertexAttribute {
@@ -275,7 +296,6 @@ build_3D_pipeline :: proc(renderer: ^Renderer, wireframe: bool) {
             offset = size_of(vec3) * 2
         },
     }
-
     fill_mode: sdl.GPUFillMode;
     cull_mode: sdl.GPUCullMode; 
     if wireframe {fill_mode = .LINE; cull_mode = .NONE} else {fill_mode = .FILL; cull_mode = .BACK}
@@ -317,18 +337,17 @@ create_view_matrix :: proc(camera: ^Camera) -> linalg.Matrix4f32 {
     return pitch_matrix * yaw_matrix * position_matrix
 }
 
-create_ubo3 :: proc(window: ^sdl.Window, object: ^Object, camera: ^Camera) -> UBO3 {
+create_ubo3 :: proc(window: ^sdl.Window, object: ^Object, camera: ^Camera, mat: u32) -> UBO3 {
     using linalg
     x, y: i32;
     ok := sdl.GetWindowSize(window, &x, &y)
     aspect := f32(x) / f32(y)
     projection_matrix := matrix4_perspective_f32(linalg.to_radians(f32(70)), aspect, 0.0001, 1000)
-    model_matrix :=  matrix4_translate_f32(object.position) * matrix4_rotate_f32(object.rotation.y, {0, 1, 0})
-    view := create_view_matrix(camera)
+    model_matrix := create_view_matrix(camera) * matrix4_translate_f32(object.position) * matrix4_rotate_f32(object.rotation.y, {0, 1, 0})
     return UBO3 {
-        view = view,
+        modelview = model_matrix,
         proj = projection_matrix,
-        model = model_matrix,
+        mat_matrix = mat_matrix(object.materials[mat])
     }
 }
 
@@ -386,8 +405,8 @@ draw_ui :: proc(renderer: ^Renderer, ui_elements: []Quad) {
 
 quad_pipeline :: proc(renderer: ^Renderer) {
     sdl.ReleaseGPUGraphicsPipeline(renderer.gpu, renderer.pipeline2D)
-    vert_shader := load_shader(renderer.gpu, vert_code_2D, .VERTEX, 0, 0); defer sdl.ReleaseGPUShader(renderer.gpu, vert_shader)
-    frag_shader := load_shader(renderer.gpu, frag_code_2D, .FRAGMENT, 0, 0); defer sdl.ReleaseGPUShader(renderer.gpu, frag_shader)
+    vert_shader := load_shader(renderer.gpu, vert_code_2D, .VERTEX, 0, 0, 0); defer sdl.ReleaseGPUShader(renderer.gpu, vert_shader)
+    frag_shader := load_shader(renderer.gpu, frag_code_2D, .FRAGMENT, 0, 0, 0); defer sdl.ReleaseGPUShader(renderer.gpu, frag_shader)
 
     vb_descriptions: [1]sdl.GPUVertexBufferDescription
     vb_descriptions[0] = sdl.GPUVertexBufferDescription {
@@ -468,7 +487,8 @@ create_buffer_with_data :: proc(
 }
 
 load_shader :: proc(device: ^sdl.GPUDevice, code: []u8,
-    stage: sdl.GPUShaderStage, num_uniform_buffers: u32, num_samplers: u32
+    stage: sdl.GPUShaderStage, num_uniform_buffers: u32, num_samplers: u32,
+    num_storage_buffers: u32
 ) -> ^sdl.GPUShader {
     return sdl.CreateGPUShader(device, {
         code_size = len(code),
@@ -477,6 +497,7 @@ load_shader :: proc(device: ^sdl.GPUDevice, code: []u8,
         format = {.SPIRV},
         stage = stage,
         num_uniform_buffers = num_uniform_buffers,
-        num_samplers = num_samplers
+        num_samplers = num_samplers,
+        num_storage_buffers = num_storage_buffers
     })
 }
