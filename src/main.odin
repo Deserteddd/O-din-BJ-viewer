@@ -40,26 +40,12 @@ init :: proc(state: ^AppState) {
         }, nil
     )
 
-    renderer := RND_Init({})
+    renderer := RND_Init({.FULLSCREEN})
     state.renderer = renderer
 
-    asset_handle, err := os.open("assets/ref_cube", 0, 0); assert(err == nil)
-    asset_dir: []os.File_Info
-    asset_dir, err = os.read_dir(asset_handle, 0); assert(err == nil)
-    fmt.println("File count: {}", len(asset_dir))
-    for i in asset_dir do fmt.println(i.name)
-    objects: [dynamic]Object
-    for file in asset_dir {
-        split: []string; defer delete(split)
-        split, err = strings.split(file.name, "."); assert(err == nil)
-        if split[len(split)-1] == "obj" {
-            obj_path := strings.concatenate({"assets/ref_cube/", file.name}); defer delete(obj_path)
-            obj_data := load_obj(obj_path); defer destroy_obj(obj_data)
-            append(&objects, RND_CreateObject(obj_data, renderer.gpu))
-        }
-    }
-    state.objects = objects
-}
+    data := load_object("assets/ref_cube"); defer delete_obj(data)
+    append(&state.objects, RND_CreateObject(data, state.renderer.gpu))
+}   
 
 run :: proc(state: ^AppState) {
     main_loop: for {

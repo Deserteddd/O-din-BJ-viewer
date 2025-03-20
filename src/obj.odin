@@ -5,77 +5,96 @@ import "core:os"
 import "core:strings"
 import "core:strconv"
 import "core:log"
+import "core:math/linalg"
 import stbi "vendor:stb/image"
 
-OBJFile :: struct {
-    name: string,
-    vertices: []Vertex3,
-    indices: []u32,
-    face_data: []u32,
-    materials: []Material,
-}
+vec2 :: [2]f32
+vec3 :: [3]f32
+vec4 :: [4]f32
 
-Material :: struct  {
+ObjectData :: struct {
+    vertex_groups: [dynamic][]Vertex,
+    materials: [][4]vec4,
+}
+Material :: struct {
     Ka, Kd, Ks, Ke: vec3,
     Ns, Ni, d: f32,
     illum: uint
 }
 
-mat_matrix :: proc(mat: Material) -> matrix[4,4]f32 {
-    m: matrix[4,4]f32
-    m[0] = {mat.Ka.x, mat.Ka.y, mat.Ka.z, 0}
-    m[1] = {mat.Kd.x, mat.Kd.y, mat.Kd.z, 0}
-    m[2] = {mat.Ks.x, mat.Ks.y, mat.Ks.z, 0}
-    m[3] = {mat.Ke.x, mat.Ke.y, mat.Ke.z, 1}
-    return m
-}
-// Material :: struct{
-//     Ka: vec3,  pad1: f32,
-//     Kd: vec3,  pad2: f32,
-//     Ks: vec3,  pad3: f32,
-//     Ke: vec3,  pad4: f32,
-//     Ns, Ni, d: f32,
-//     illum: uint,
-// }
-
-destroy_obj :: proc(data: OBJFile) {
-    delete(data.name)
-    delete(data.vertices)
-    delete(data.indices)
-    // delete(data.materials)
+Vertex :: struct {
+    position: vec3,
+    normal: vec3,
+    uv: vec2,
+    material: u32 // Index: 0 ..< number of materials , in order they appear in .mtl file
 }
 
-// print_obj :: proc(data: OBJFile) {
-//     fmt.println("Object:", data.name)
-//     fmt.println("Vertex count:", len(data.vertices))
-//     fmt.println("Index count:", len(data.indices))
-//     for _, data in data.materials {
-//         if data != {} {
-//             fmt.println("Ns:", data.Ns)
-//             fmt.println("Ka:", data.Ka)
-//             fmt.println("Kd:", data.Kd)
-//             fmt.println("Ks:", data.Ks)
-//             fmt.println("Ke:", data.Ke)
-//             fmt.println("Ni:", data.Ni)
-//             fmt.println("d:", data.d)
-//             fmt.println("illum:", data.illum)
-//         }
-//         fmt.println()
-//     }
-// }
+to_vec4 :: #force_inline proc(v: vec3, f: f32) -> vec4 {return vec4{v.x, v.y, v.z, f}}
+
+material_matrix :: #force_inline proc(m: Material) -> [4]vec4 {
+    mat: [4]vec4 = {
+        to_vec4(m.Ka, m.Ns),
+        to_vec4(m.Kd, m.Ni),
+        to_vec4(m.Ks, m.d),
+        to_vec4(m.Ke, f32(m.illum))
+    }
+    
+    return mat
+}
+
+load_object :: proc(dir_path: string) -> ObjectData {
+    defer free_all(context.temp_allocator)
+    fmt.println("Loading:", dir_path)
+    obj: ObjectData
+    asset_handle, err := os.open(dir_path, 0, 0); assert(err == nil)
+    asset_dir: []os.File_Info
+    asset_dir, err = os.read_dir(asset_handle, 0, context.temp_allocator); assert(err == nil)
+    vertex_groups: [dynamic]Vertex
+    for file in asset_dir {
+        if len := len(file.name); len > 3 && file.name[len-3:] == "obj"{
+            positions: [dynamic]vec3;    defer delete(positions)
+            uvs: [dynamic]vec2;          defer delete(uvs)
+            normals: [dynamic]vec3;      defer delete(normals)
+            path := strings.concatenate({dir_path, "/", file.name[:len-4]}, context.temp_allocator)
+            materials, material_names := load_mtl( strings.concatenate({path, ".mtl"}, context.temp_allocator) )
+            defer delete(material_names)
+            obj.materials = materials
+            obj_path := strings.concatenate({path, ".obj"}, context.temp_allocator)
+            file, err := os.read_entire_file_or_err(obj_path); assert(err == nil); defer delete(file)
+            src := string(file)
+            line_arr: [dynamic]string
+            for line in strings.split_lines_iterator(&src) do append(&line_arr, line)
+            start, i: int
+            for line in line_arr {
+                defer i += 1
+                if line[0] == 'o' {
+                    if start != 0 {
+                        append(&obj.vertex_groups, 
+                            load_obj(line_arr[start:i], material_names, &positions, &uvs, &normals)
+                        )
+                    }
+                    start = i
+                }
+            }
+            append(&obj.vertex_groups, 
+                load_obj(line_arr[start:i], material_names, &positions, &uvs, &normals)
+            )
+        }
+    }
+    return obj
+}
 
 @(private = "file")
-load_mtl :: proc(mtl_path: string) -> ([]Material, []string) {
-    materials: [dynamic]Material
+load_mtl :: proc(mtl_path: string) -> ([][4]vec4, []string) {
+    materials: [dynamic][4]vec4
     material_names: [dynamic]string
     assert(materials == nil)
-    file, err := os.read_entire_file_or_err(mtl_path); //defer delete(file)
+    file, err := os.read_entire_file_or_err(mtl_path, context.temp_allocator)
     if err != nil {
         log.warnf("COULDN'T FIND MTL FILE {}", mtl_path)
         return nil, nil
     }
     file_data := string(file)
-
     mat: Material
     mat_name: string
     for line in strings.split_lines_iterator(&file_data) {
@@ -83,7 +102,8 @@ load_mtl :: proc(mtl_path: string) -> ([]Material, []string) {
         if len(line) > 7  && line[:6] == "newmtl"{
             new_name := strings.clone(line[7:])
             if mat_name != "" {
-                append(&materials, mat)
+                fmt.printfln("Append '{}': {}", mat_name, material_matrix(mat))
+                append(&materials, material_matrix(mat))
                 name := strings.clone(mat_name)
                 append(&material_names, name)
             }
@@ -113,84 +133,64 @@ load_mtl :: proc(mtl_path: string) -> ([]Material, []string) {
                 mat.illum = illum
         }
     }
-    append(&materials, mat)
+    append(&materials, material_matrix(mat))
     append(&material_names, mat_name)
     return materials[:], material_names[:]
 }
 
-ObjLoader :: struct {
-    o: string,
-    g: string
-}
+load_obj :: proc(obj_data: []string, mat_names: []string, 
+    positions: ^[dynamic]vec3, uvs: ^[dynamic]vec2, normals: ^[dynamic]vec3,
+) -> []Vertex {
+    data: ObjectData
 
-load_obj :: proc(obj_path: string) -> OBJFile {
-    fmt.println("Loading:", obj_path)
-    file, err := os.read_entire_file_or_err(obj_path); assert(err == nil); defer delete(file)
-    mtl_path := strings.concatenate({obj_path[:len(obj_path)-3], "mtl"});  defer delete(mtl_path)
-    materials, material_names := load_mtl(mtl_path); defer delete(material_names)
-    file_data := string(file)
-    positions: [dynamic]vec3;    defer delete(positions)
-    uvs: [dynamic]vec2;          defer delete(uvs)
-    normals: [dynamic]vec3;      defer delete(normals)
-    raw_face_data: [dynamic][10]u32;  defer delete(raw_face_data)
-    name: string
-    i, n := 0, 0
+    vertices: [dynamic]Vertex;
     current_material: u32 = 0
-    for line in strings.split_lines_iterator(&file_data) {
+    for line in obj_data {
+        if len(line)<2 do panic("short line")
         switch line[0:2] {
-            case "o ":
-                name = strings.clone(line[2:])
             case "v ":
-                append(&positions, parse_vec3(line, 2))
+                append(positions, parse_vec3(line, 2))
             case "vt":
-                append(&uvs, parse_vec2(line))
+                append(uvs, parse_vec2(line))
             case "vn":
-                append(&normals, parse_vec3(line, 3))
+                append(normals, parse_vec3(line, 3))
             case "f ":
-                r := parse_face_data(line)
-                augmented := [10]u32 {r[0], r[1], r[2], r[3], r[4], r[5], r[6], r[7], r[8], current_material}
-                append(&raw_face_data, augmented)
-            case "us":
-                for name, i in material_names {
+                face := parse_face_data(line)
+                    append(&vertices, Vertex {
+                        position = positions[face[0]],
+                        uv       = {uvs[face[1]].x, 1-uvs[face[1]].y},
+                        normal   = normals[face[2]],
+                        material = current_material
+                    })
+                    append(&vertices, Vertex {
+                        position = positions[face[3]],
+                        uv       = {uvs[face[4]].x, 1-uvs[face[4]].y},
+                        normal   = normals[face[5]],
+                        material = current_material
+                    })
+                    append(&vertices, Vertex {
+                        position = positions[face[6]],
+                        uv       = {uvs[face[7]].x, 1-uvs[face[7]].y},
+                        normal   = normals[face[8]],
+                        material = current_material
+                    })
+            case "us": // Switch material
+                for name, i in mat_names {
                     if name == line[7:] {
                         current_material = u32(i)
                     }
                 }
         }
     }
-    vertices := make([]Vertex3, len(positions));
-    indices := make([]u32, len(raw_face_data) * 3);
-    face_data := make([]u32, len(raw_face_data));
-    for face, i in raw_face_data {
-        i := i*3
-        vertices[face[0]].position = positions[face[0]]
-        vertices[face[0]].uv.x = uvs[face[1]].x
-        vertices[face[0]].uv.y = 1-uvs[face[1]].y
-        vertices[face[0]].normal = normals[face[2]]
-        indices[i] = face[0]
+    return vertices[:]
+}
 
-        vertices[face[3]].position = positions[face[3]]
-        vertices[face[3]].uv.x = uvs[face[4]].x
-        vertices[face[3]].uv.y = 1-uvs[face[4]].y
-        vertices[face[3]].normal = normals[face[5]]
-        indices[i+1] = face[3]
-
-        vertices[face[6]].position = positions[face[6]]
-        vertices[face[6]].uv.x = uvs[face[7]].x
-        vertices[face[6]].uv.y = 1-uvs[face[7]].y
-        vertices[face[6]].normal = normals[face[8]]
-        indices[i+2] = face[6]
-        
-        face_data[i/3] = face[9]
+delete_obj :: proc(data: ObjectData) {
+    for mesh in data.vertex_groups {
+        delete(mesh)
     }
-
-    data := OBJFile { 
-        vertices = vertices[:], 
-        indices = indices[:],
-        face_data = face_data[:],
-        materials = materials[:],
-    }
-    return data
+    delete(data.vertex_groups)
+    delete(data.materials)
 }
 
 @(private = "file")
