@@ -5,12 +5,7 @@ import "core:os"
 import "core:strings"
 import "core:strconv"
 import "core:log"
-import "core:math/linalg"
 import stbi "vendor:stb/image"
-
-vec2 :: [2]f32
-vec3 :: [3]f32
-vec4 :: [4]f32
 
 ObjectData :: struct {
     vertex_groups: [dynamic][]Vertex,
@@ -29,17 +24,21 @@ Vertex :: struct {
     material: u32 // Index: 0 ..< number of materials , in order they appear in .mtl file
 }
 
-to_vec4 :: #force_inline proc(v: vec3, f: f32) -> vec4 {return vec4{v.x, v.y, v.z, f}}
-
 material_matrix :: #force_inline proc(m: Material) -> [4]vec4 {
-    mat: [4]vec4 = {
+    return {
         to_vec4(m.Ka, m.Ns),
         to_vec4(m.Kd, m.Ni),
         to_vec4(m.Ks, m.d),
         to_vec4(m.Ke, f32(m.illum))
     }
-    
-    return mat
+}
+
+delete_obj :: proc(data: ObjectData) {
+    for mesh in data.vertex_groups {
+        delete(mesh)
+    }
+    delete(data.vertex_groups)
+    delete(data.materials)
 }
 
 load_object :: proc(dir_path: string) -> ObjectData {
@@ -102,7 +101,6 @@ load_mtl :: proc(mtl_path: string) -> ([][4]vec4, []string) {
         if len(line) > 7  && line[:6] == "newmtl"{
             new_name := strings.clone(line[7:])
             if mat_name != "" {
-                fmt.printfln("Append '{}': {}", mat_name, material_matrix(mat))
                 append(&materials, material_matrix(mat))
                 name := strings.clone(mat_name)
                 append(&material_names, name)
@@ -138,6 +136,7 @@ load_mtl :: proc(mtl_path: string) -> ([][4]vec4, []string) {
     return materials[:], material_names[:]
 }
 
+@(private = "file")
 load_obj :: proc(obj_data: []string, mat_names: []string, 
     positions: ^[dynamic]vec3, uvs: ^[dynamic]vec2, normals: ^[dynamic]vec3,
 ) -> []Vertex {
@@ -183,14 +182,6 @@ load_obj :: proc(obj_data: []string, mat_names: []string,
         }
     }
     return vertices[:]
-}
-
-delete_obj :: proc(data: ObjectData) {
-    for mesh in data.vertex_groups {
-        delete(mesh)
-    }
-    delete(data.vertex_groups)
-    delete(data.materials)
 }
 
 @(private = "file")

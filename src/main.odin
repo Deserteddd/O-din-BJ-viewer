@@ -1,4 +1,3 @@
-#+feature dynamic-literals
 package obj_viewer
 
 import "base:runtime"
@@ -25,9 +24,7 @@ main :: proc() {
 AppState :: struct {
     renderer: Renderer,
     objects: [dynamic]Object,
-    wireframe: bool
 }
-
 
 init :: proc(state: ^AppState) {
     context.logger = log.create_console_logger()
@@ -40,10 +37,10 @@ init :: proc(state: ^AppState) {
         }, nil
     )
 
-    renderer := RND_Init({.FULLSCREEN})
+    renderer := RND_Init({})
     state.renderer = renderer
 
-    data := load_object("assets/ref_cube"); defer delete_obj(data)
+    data := load_object("assets/scene"); defer delete_obj(data)
     append(&state.objects, RND_CreateObject(data, state.renderer.gpu))
 }   
 
@@ -57,8 +54,7 @@ run :: proc(state: ^AppState) {
                 case .KEY_DOWN: #partial switch ev.key.scancode {
                     case .ESCAPE: break main_loop
                     case .F: 
-                        state.wireframe = !state.wireframe
-                        RND_SetWireframe(&state.renderer, state.wireframe)
+                        RND_ToggleWireframe(&state.renderer)
                 }
             }
         }
@@ -104,8 +100,8 @@ process_keyboard :: proc(camera: ^Camera, dt: f32) {
         ((lr * yaw_cos) + (-fb * yaw_sin)) * dt * speed, ud * dt * speed,
         ((fb * yaw_cos) + ( lr * yaw_sin)) * dt * speed
     }
-    camera.pitch += (pitch_d-pitch_u) * dt * speed
-    camera.yaw   += (yaw_r-yaw_l) * dt * speed
+    camera.pitch += (pitch_d-pitch_u) * dt * speed * 30
+    camera.yaw   += (yaw_r-yaw_l) * dt * speed * 30
 }
 
 process_mouse :: proc(camera: ^Camera) {

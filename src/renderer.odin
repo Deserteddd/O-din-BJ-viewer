@@ -4,12 +4,12 @@ import sdl "vendor:sdl3"
 import stbi "vendor:stb/image"
 import "core:mem"
 import "core:math/linalg"
-import "core:strings"
-import "core:fmt"
+
 vert_shader_code := #load("../shaders/spv/shader.vert.spv")
 frag_shader_code := #load("../shaders/spv/shader.frag.spv")
 vert_code_2D := #load("../shaders/spv/shader2D.vert.spv")
 frag_code_2D := #load("../shaders/spv/shader2D.frag.spv")
+
 Renderer :: struct {
     window: ^sdl.Window,
     gpu: ^sdl.GPUDevice,
@@ -19,7 +19,8 @@ Renderer :: struct {
     camera: Camera,
     tex_sampler: ^sdl.GPUSampler,
     cmd_buff: ^sdl.GPUCommandBuffer,
-    swapchain_texture: ^sdl.GPUTexture
+    swapchain_texture: ^sdl.GPUTexture,
+    wireframe: bool
 }
 
 Vertex2 :: struct {
@@ -87,11 +88,13 @@ RND_Init :: proc(flags: RND_InitFlags) -> Renderer {
         usage = {.SAMPLER, .DEPTH_STENCIL_TARGET}
     })
     renderer.depth_texture = depth_texture
-
-    build_3D_pipeline(&renderer, .WIREFRAME in flags)
+    if .WIREFRAME in flags do renderer.wireframe = true
+    build_3D_pipeline(&renderer)
 
     renderer.camera = Camera {
-        position = {0, 0, -5},
+        position = {5, -3, -6},
+        yaw = 45,
+        pitch = 25
 
     }
     sampler := sdl.CreateGPUSampler(gpu, {}); assert(sampler != nil)
@@ -99,8 +102,9 @@ RND_Init :: proc(flags: RND_InitFlags) -> Renderer {
     return renderer
 }
 
-RND_SetWireframe :: proc(renderer: ^Renderer, b: bool) {
-    build_3D_pipeline(renderer, b)
+RND_ToggleWireframe :: proc(renderer: ^Renderer) {
+    renderer.wireframe = !renderer.wireframe
+    build_3D_pipeline(renderer)
 }
 
 RND_FrameBegin :: proc(renderer: ^Renderer) {
@@ -205,7 +209,6 @@ RND_CreateObject :: proc(data: ObjectData, gpu: ^sdl.GPUDevice) -> Object {
     copy_commands := sdl.AcquireGPUCommandBuffer(gpu); assert(copy_commands != nil)
     copy_pass := sdl.BeginGPUCopyPass(copy_commands); assert(copy_pass != nil)
     vbo := create_buffer_with_data(gpu, transfer_buffer, copy_pass, {.VERTEX}, vertices[:])
-    fmt.println("data materials:", data.materials)
     material_buffer := create_buffer_with_data(gpu, transfer_buffer, copy_pass, {.GRAPHICS_STORAGE_READ}, data.materials[:])
     sdl.UploadToGPUTexture(copy_pass, 
         {transfer_buffer = tex_transfer_buffer},
@@ -228,7 +231,7 @@ RND_CreateObject :: proc(data: ObjectData, gpu: ^sdl.GPUDevice) -> Object {
 }
 
 @(private="file")
-build_3D_pipeline :: proc(renderer: ^Renderer, wireframe: bool) {
+build_3D_pipeline :: proc(renderer: ^Renderer) {
     sdl.ReleaseGPUGraphicsPipeline(renderer.gpu, renderer.pipeline3D)
     vert_shader := load_shader(renderer.gpu, vert_shader_code, .VERTEX, 1, 0, 1); defer sdl.ReleaseGPUShader(renderer.gpu, vert_shader)
     frag_shader := load_shader(renderer.gpu, frag_shader_code, .FRAGMENT, 0, 1, 0); defer sdl.ReleaseGPUShader(renderer.gpu, frag_shader)
@@ -271,7 +274,7 @@ build_3D_pipeline :: proc(renderer: ^Renderer, wireframe: bool) {
     }
     fill_mode: sdl.GPUFillMode;
     cull_mode: sdl.GPUCullMode; 
-    if wireframe {fill_mode = .LINE; cull_mode = .NONE} else {fill_mode = .FILL; cull_mode = .BACK}
+    if renderer.wireframe {fill_mode = .LINE; cull_mode = .NONE} else {fill_mode = .FILL; cull_mode = .BACK}
     renderer.pipeline3D = sdl.CreateGPUGraphicsPipeline(renderer.gpu, {
         vertex_shader = vert_shader,
         fragment_shader = frag_shader,
