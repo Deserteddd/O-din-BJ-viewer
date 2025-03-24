@@ -5,16 +5,22 @@ import "core:os"
 import "core:strings"
 import "core:strconv"
 import "core:log"
+import "core:time"
+import "core:thread"
+import "core:sync"
+
 import stbi "vendor:stb/image"
 
 ObjectData :: struct {
     vertex_groups: [dynamic][]Vertex,
-    materials: [][4]vec4,
+    materials: []Material,
+    texture_data: TextureData
 }
+
 Material :: struct {
     Ka, Kd, Ks, Ke: vec3,
     Ns, Ni, d: f32,
-    illum: uint
+    illum: uint,
 }
 
 Vertex :: struct {
@@ -24,7 +30,35 @@ Vertex :: struct {
     material: u32 // Index: 0 ..< number of materials , in order they appear in .mtl file
 }
 
-material_matrix :: #force_inline proc(m: Material) -> [4]vec4 {
+TextureData :: struct {
+    names:     [dynamic]string,
+    textures:  [dynamic][^]u8,
+    sizes:     [dynamic][2]i32
+}
+
+print_obj :: proc(data: ObjectData) {
+          fmt.println("-------------------- ObjectData --------------------")
+    defer fmt.println("----------------------------------------------------")
+
+    fmt.printfln("Vertex groups: {}\n", len(data.vertex_groups))
+    fmt.printfln("Materials:")
+    for mat, i in data.materials {
+        fmt.printfln("\tMaterial {}", i)
+        M := material_matrix(mat)
+        for i in 0..<4 do fmt.printfln("\t\t{}", M[i])
+    }
+    fmt.println("Texture data:")
+    tex := data.texture_data
+    for i in 0..<len(tex.sizes) {
+        fmt.printfln("\tTexture: {}", tex.names[i])
+        fmt.printfln("\tPointer: {}", tex.textures[i])
+        fmt.printfln("\tSize:    {} x {}", tex.sizes[i].x, tex.sizes[i].y)
+        if i != 2 do fmt.println()
+    }
+
+}
+
+material_matrix :: proc(m: Material) -> [4]vec4 {
     return {
         to_vec4(m.Ka, m.Ns),
         to_vec4(m.Kd, m.Ni),
@@ -34,43 +68,61 @@ material_matrix :: #force_inline proc(m: Material) -> [4]vec4 {
 }
 
 delete_obj :: proc(data: ObjectData) {
-    for mesh in data.vertex_groups {
+    using data
+    for mesh in vertex_groups {
         delete(mesh)
     }
-    delete(data.vertex_groups)
-    delete(data.materials)
+    using texture_data
+    for i in 0..<len(names) {
+        delete(names[i])
+    }
+    delete(names)
+    delete(textures)
+    delete(sizes)
+    delete(vertex_groups)
+    delete(materials)
 }
 
 load_object :: proc(dir_path: string) -> ObjectData {
-    defer free_all(context.temp_allocator)
+    now := time.now()
+    // defer free_all(context.temp_allocator)
     fmt.println("Loading:", dir_path)
     obj: ObjectData
     asset_handle, err := os.open(dir_path, 0, 0); assert(err == nil)
     asset_dir: []os.File_Info
-    asset_dir, err = os.read_dir(asset_handle, 0, context.temp_allocator); assert(err == nil)
+    asset_dir, err = os.read_dir(asset_handle, 0); assert(err == nil)
     vertex_groups: [dynamic]Vertex
+    materials: []Material
+    material_names: []string
+    texture_data: TextureData
+    for file in asset_dir {
+        if file.name[len(file.name)-3:] == "mtl" { // If this crashes, add a check for name length
+            materials, material_names, texture_data = load_mtl(file.fullpath)
+        }
+    }
+    obj.materials = materials
+    obj.texture_data = texture_data
+
     for file in asset_dir {
         if len := len(file.name); len > 3 && file.name[len-3:] == "obj"{
             positions: [dynamic]vec3;    defer delete(positions)
             uvs: [dynamic]vec2;          defer delete(uvs)
             normals: [dynamic]vec3;      defer delete(normals)
             path := strings.concatenate({dir_path, "/", file.name[:len-4]}, context.temp_allocator)
-            materials, material_names := load_mtl( strings.concatenate({path, ".mtl"}, context.temp_allocator) )
-            defer delete(material_names)
-            obj.materials = materials
+
+            // Load materials
             obj_path := strings.concatenate({path, ".obj"}, context.temp_allocator)
             file, err := os.read_entire_file_or_err(obj_path); assert(err == nil); defer delete(file)
             src := string(file)
-            line_arr: [dynamic]string
+            line_arr: [dynamic]string; defer delete(line_arr)
             for line in strings.split_lines_iterator(&src) do append(&line_arr, line)
             start, i: int
             for line in line_arr {
                 defer i += 1
                 if line[0] == 'o' {
                     if start != 0 {
-                        append(&obj.vertex_groups, 
-                            load_obj(line_arr[start:i], material_names, &positions, &uvs, &normals)
-                        )
+                        new_obj := load_obj(line_arr[start:i], material_names, &positions, &uvs, &normals)
+                        append(&obj.vertex_groups, new_obj)
                     }
                     start = i
                 }
@@ -80,30 +132,44 @@ load_object :: proc(dir_path: string) -> ObjectData {
             )
         }
     }
+
+    load_time := time.since(now)
+    fmt.printfln("Object loading took: {}", load_time)
     return obj
 }
 
+
+/* Loads materials from specified path along with their names.
+    returns: 
+        1. List of materials in the order they appear in file
+        2. List of material names as they appear in the file
+*/
 @(private = "file")
-load_mtl :: proc(mtl_path: string) -> ([][4]vec4, []string) {
-    materials: [dynamic][4]vec4
-    material_names: [dynamic]string
-    assert(materials == nil)
-    file, err := os.read_entire_file_or_err(mtl_path, context.temp_allocator)
-    if err != nil {
-        log.warnf("COULDN'T FIND MTL FILE {}", mtl_path)
-        return nil, nil
-    }
+load_mtl :: proc(mtl_path: string) -> ([]Material, []string, TextureData) {
+    materials:      [dynamic]Material
+    material_names: [dynamic]string;  defer assert(len(materials) == len(material_names))
+    tex_data: TextureData
+
+    defer { for s, i in tex_data.names {
+        if s != ""  do assert(tex_data.textures[i] != nil)
+        else        do assert(tex_data.textures[i] == nil)
+    }}
+
+    file, err := os.read_entire_file_or_err(mtl_path)
+    if err != nil { log.warnf("COULDN'T FIND MTL FILE {}", mtl_path); return nil, nil, {} }
     file_data := string(file)
     mat: Material
     mat_name: string
     for line in strings.split_lines_iterator(&file_data) {
+        // fmt.println(line)
         if len(line) == 0 do continue
         if len(line) > 7  && line[:6] == "newmtl"{
             new_name := strings.clone(line[7:])
             if mat_name != "" {
-                append(&materials, material_matrix(mat))
+                append(&materials, mat)
                 name := strings.clone(mat_name)
                 append(&material_names, name)
+
             }
             mat_name = new_name
             mat = {}
@@ -129,19 +195,76 @@ load_mtl :: proc(mtl_path: string) -> ([][4]vec4, []string) {
             case "il":
                 illum, ok := strconv.parse_uint(line[6:]); assert(ok)
                 mat.illum = illum
+            case "ma":
+                path_split := strings.split_after(mtl_path, "\\")
+                extension_split := strings.split(line[7:], "\\")
+                tex_path_base := strings.concatenate(path_split[:len(path_split)-1])
+                tex_path_extension: string
+                for s in extension_split {
+                    if s != "" do tex_path_extension = strings.concatenate({tex_path_extension, "\\", s})
+                }
+                tex_path := strings.concatenate({tex_path_base, tex_path_extension[1:]})
+                tex_index := new_texture(tex_path, &tex_data)
+                switch line[4:6] {
+                    case "Ka":
+                        if tex_index >= 0 do mat.Ka.xy = {-1, tex_index}
+                    case "Kd":
+                        if tex_index >= 0 do mat.Kd.xy = {-1, tex_index}
+                    case "Ks":
+                        if tex_index >= 0 do mat.Ks.xy = {-1, tex_index}
+                    case "Ke":
+                        if tex_index >= 0 do mat.Ke.xy = {-1, tex_index}
+                }
         }
     }
-    append(&materials, material_matrix(mat))
+    append(&materials, mat)
     append(&material_names, mat_name)
-    return materials[:], material_names[:]
+    return materials[:], material_names[:], tex_data
 }
+
+// returns: index to texture/sampler that should be bound to the material field. -1 if the there is no space for a new textures
+new_texture :: proc(tex_path: string, data: ^TextureData) -> f32 {
+    tex_path_cstring := strings.clone_to_cstring(tex_path); 
+    path_split       := strings.split(tex_path, "/");
+    tex_name         := strings.clone(path_split[len(path_split)-1])
+    fmt.println("TEXTURE PATH:", tex_path)
+
+    i: int
+    for i = 0; i<len(data.textures); i += 1 {
+        if data.textures[i] == nil do break
+        assert(data.sizes[i] != {}); assert(data.names[i] != "")
+    }
+
+    // If texture is loaded, we return the index of it
+    for name, j in data.names {
+        if name == tex_name {
+            fmt.printfln("Texture {} already in loader", tex_name)
+            delete(tex_name)
+            return f32(j)
+        }
+    }
+
+    // At this point we know there is no space for new textures, and it doesn't exist in our texture collection
+    // if i == 4 do return -1
+    
+    img_size: [2]i32
+    pixels := stbi.load(
+        tex_path_cstring,
+        &img_size.x, &img_size.y, nil, 4
+    ); assert(pixels != nil)
+    // fmt.println("Loaded ok")
+    append(&data.textures, pixels)
+    append(&data.names   , tex_name)
+    append(&data.sizes   , img_size)
+    return f32(i)
+}
+
 
 @(private = "file")
 load_obj :: proc(obj_data: []string, mat_names: []string, 
     positions: ^[dynamic]vec3, uvs: ^[dynamic]vec2, normals: ^[dynamic]vec3,
 ) -> []Vertex {
     data: ObjectData
-
     vertices: [dynamic]Vertex;
     current_material: u32 = 0
     for line in obj_data {
@@ -155,24 +278,24 @@ load_obj :: proc(obj_data: []string, mat_names: []string,
                 append(normals, parse_vec3(line, 3))
             case "f ":
                 face := parse_face_data(line)
-                    append(&vertices, Vertex {
-                        position = positions[face[0]],
-                        uv       = {uvs[face[1]].x, 1-uvs[face[1]].y},
-                        normal   = normals[face[2]],
-                        material = current_material
-                    })
-                    append(&vertices, Vertex {
-                        position = positions[face[3]],
-                        uv       = {uvs[face[4]].x, 1-uvs[face[4]].y},
-                        normal   = normals[face[5]],
-                        material = current_material
-                    })
-                    append(&vertices, Vertex {
-                        position = positions[face[6]],
-                        uv       = {uvs[face[7]].x, 1-uvs[face[7]].y},
-                        normal   = normals[face[8]],
-                        material = current_material
-                    })
+                append(&vertices, Vertex {
+                    position = positions[face[0]],
+                    uv       = {uvs[face[1]].x, 1-uvs[face[1]].y},
+                    normal   = normals[face[2]],
+                    material = current_material
+                })
+                append(&vertices, Vertex {
+                    position = positions[face[3]],
+                    uv       = {uvs[face[4]].x, 1-uvs[face[4]].y},
+                    normal   = normals[face[5]],
+                    material = current_material
+                })
+                append(&vertices, Vertex {
+                    position = positions[face[6]],
+                    uv       = {uvs[face[7]].x, 1-uvs[face[7]].y},
+                    normal   = normals[face[8]],
+                    material = current_material
+                })
             case "us": // Switch material
                 for name, i in mat_names {
                     if name == line[7:] {
@@ -183,6 +306,7 @@ load_obj :: proc(obj_data: []string, mat_names: []string,
     }
     return vertices[:]
 }
+
 
 @(private = "file")
 parse_vec2 :: proc(line: string) -> vec2 {
@@ -222,14 +346,16 @@ parse_face_data :: proc(line: string) -> [9]u32 {
     data: [9]u32;
     start := 2
     n := 0
+    errors: bool
     for i in 2..<len(line) {
         if !(rune(line[i]) >= '0' && rune(line[i]) <= '9')  {
             num, ok := strconv.parse_int(line[start:i])
             if !ok {
-                fmt.println("Failed to parse:", line)
-                panic("")
+                errors = true
+                data[n] = 0
+            } else {
+                data[n] = u32(num)-1
             }
-            data[n] = u32(num)-1
             n += 1
             start = i+1
         }

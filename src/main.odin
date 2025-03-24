@@ -18,7 +18,9 @@ last_ticks := sdl.GetTicks();
 main :: proc() {
     state: AppState
     init(&state)
+    fmt.println("MAIN: init done")
     run(&state)
+    fmt.println("MAIN: Exiting")
 }
 
 AppState :: struct {
@@ -40,7 +42,8 @@ init :: proc(state: ^AppState) {
     renderer := RND_Init({})
     state.renderer = renderer
 
-    data := load_object("assets/scene"); defer delete_obj(data)
+    data := load_object("assets/ref_tris"); defer delete_obj(data)
+    print_obj(data)
     append(&state.objects, RND_CreateObject(data, state.renderer.gpu))
 }   
 

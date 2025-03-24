@@ -2,6 +2,18 @@ package obj_viewer
 
 import sdl "vendor:sdl3"
 
+Vertex2 :: struct {
+    position: vec2,
+    uv: vec2
+}
+
+Quad :: struct {
+    position: vec2,
+    vbo: ^sdl.GPUBuffer,
+    ibo: ^sdl.GPUBuffer,
+    num_indices: u32
+}
+
 create_quad :: proc(gpu: ^sdl.GPUDevice) -> Quad {
     vertices: [4]Vertex2 = {
         Vertex2{position = vec2{-1,  1}, uv = vec2{0, 1}},
