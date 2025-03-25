@@ -9,18 +9,38 @@ import "core:os"
 import "core:strings"
 import "core:math/linalg"
 import "core:path/filepath"
+import "core:time"
 import sdl "vendor:sdl3"
 
 default_context: runtime.Context
-
+TEST := false
 last_ticks := sdl.GetTicks();
 
 main :: proc() {
-    state: AppState
-    init(&state)
-    fmt.println("MAIN: init done")
-    run(&state)
-    fmt.println("MAIN: Exiting")
+    if !TEST {
+        state: AppState
+        init(&state)
+        fmt.println("MAIN: init done")
+        run(&state)
+        fmt.println("MAIN: Exiting")
+        return
+    } else {
+        asset_handle := os.open("assets", 0, 0) or_else panic("os error opening asset dir")
+        asset_dir := os.read_dir(asset_handle, 0) or_else panic("couln't read asset dir")
+        objects := make([]ObjectData, len(asset_dir))
+        for file, i in asset_dir {
+            if file.is_dir {
+                fmt.printfln("\n[ {} ]", i+1)
+                start := time.now()
+                objects[i] = load_object(file.fullpath)
+                duration := time.since(start)
+                fmt.printfln("Load time from main: {}", duration)
+            }
+        }
+        // for object, i in objects {
+        //     print_obj(object)
+        // }
+    }
 }
 
 AppState :: struct {
@@ -43,7 +63,6 @@ init :: proc(state: ^AppState) {
     state.renderer = renderer
 
     data := load_object("assets/ref_tris"); defer delete_obj(data)
-    print_obj(data)
     append(&state.objects, RND_CreateObject(data, state.renderer.gpu))
 }   
 

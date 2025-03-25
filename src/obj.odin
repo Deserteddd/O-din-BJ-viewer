@@ -36,19 +36,22 @@ TextureData :: struct {
     sizes:     [dynamic][2]i32
 }
 
-print_obj :: proc(data: ObjectData) {
+print_obj :: proc(data: ObjectData, verbose := false) {
           fmt.println("-------------------- ObjectData --------------------")
     defer fmt.println("----------------------------------------------------")
 
-    fmt.printfln("Vertex groups: {}\n", len(data.vertex_groups))
-    fmt.printfln("Materials:")
-    for mat, i in data.materials {
-        fmt.printfln("\tMaterial {}", i)
-        M := material_matrix(mat)
-        for i in 0..<4 do fmt.printfln("\t\t{}", M[i])
-    }
-    fmt.println("Texture data:")
+    fmt.printfln("Vertex groups: {}", len(data.vertex_groups))
+    if verbose {
+        fmt.printfln("Materials:")
+        for mat, i in data.materials {
+            fmt.printfln("\tMaterial {}", i)
+            M := material_matrix(mat)
+            for i in 0..<4 do fmt.printfln("\t\t{}", M[i])
+        }
+    } else do fmt.println("Material count:", len(data.materials))
     tex := data.texture_data
+    if len(tex.sizes) == 0 do return
+    fmt.println("Texture data:")
     for i in 0..<len(tex.sizes) {
         fmt.printfln("\tTexture: {}", tex.names[i])
         fmt.printfln("\tPointer: {}", tex.textures[i])
@@ -84,8 +87,8 @@ delete_obj :: proc(data: ObjectData) {
 }
 
 load_object :: proc(dir_path: string) -> ObjectData {
-    now := time.now()
-    // defer free_all(context.temp_allocator)
+    load_time: f64
+    defer free_all(context.temp_allocator)
     fmt.println("Loading:", dir_path)
     obj: ObjectData
     asset_handle, err := os.open(dir_path, 0, 0); assert(err == nil)
@@ -104,36 +107,44 @@ load_object :: proc(dir_path: string) -> ObjectData {
     obj.texture_data = texture_data
 
     for file in asset_dir {
-        if len := len(file.name); len > 3 && file.name[len-3:] == "obj"{
+        if line_len := len(file.name); line_len > 3 && file.name[line_len-3:] == "obj"{
             positions: [dynamic]vec3;    defer delete(positions)
             uvs: [dynamic]vec2;          defer delete(uvs)
             normals: [dynamic]vec3;      defer delete(normals)
-            path := strings.concatenate({dir_path, "/", file.name[:len-4]}, context.temp_allocator)
+            path := strings.concatenate({dir_path, "/", file.name[:line_len-4]}, context.temp_allocator)
 
             // Load materials
             obj_path := strings.concatenate({path, ".obj"}, context.temp_allocator)
+            test_time := time.now()
             file, err := os.read_entire_file_or_err(obj_path); assert(err == nil); defer delete(file)
+            fmt.println("measured time:", time.since(test_time))
             src := string(file)
-            line_arr: [dynamic]string; defer delete(line_arr)
-            for line in strings.split_lines_iterator(&src) do append(&line_arr, line)
+            line_arr := strings.split_lines(src); defer delete(line_arr)
             start, i: int
             for line in line_arr {
+                if len(line) < 2 do continue
                 defer i += 1
                 if line[0] == 'o' {
                     if start != 0 {
+                        now := time.now()
                         new_obj := load_obj(line_arr[start:i], material_names, &positions, &uvs, &normals)
+                        elapsed := time.since(now)
+                        load_time += time.duration_milliseconds(elapsed)
                         append(&obj.vertex_groups, new_obj)
+
                     }
                     start = i
                 }
             }
-            append(&obj.vertex_groups, 
-                load_obj(line_arr[start:i], material_names, &positions, &uvs, &normals)
-            )
+            now := time.now()
+            new_obj := load_obj(line_arr[start:i], material_names, &positions, &uvs, &normals)
+            elapsed := time.since(now)
+            load_time += time.duration_milliseconds(elapsed)
+            append(&obj.vertex_groups, new_obj)
+
         }
     }
 
-    load_time := time.since(now)
     fmt.printfln("Object loading took: {}", load_time)
     return obj
 }
@@ -265,10 +276,15 @@ load_obj :: proc(obj_data: []string, mat_names: []string,
     positions: ^[dynamic]vec3, uvs: ^[dynamic]vec2, normals: ^[dynamic]vec3,
 ) -> []Vertex {
     data: ObjectData
-    vertices: [dynamic]Vertex;
-    current_material: u32 = 0
+    vertex_count: u32
     for line in obj_data {
         if len(line)<2 do panic("short line")
+        if line[0] == 'f' do vertex_count += 3
+    }
+    vertices := make([]Vertex, vertex_count);
+    current_material: u32 = 0
+    vertex_index: uint
+    for line in obj_data {
         switch line[0:2] {
             case "v ":
                 append(positions, parse_vec3(line, 2))
@@ -277,34 +293,36 @@ load_obj :: proc(obj_data: []string, mat_names: []string,
             case "vn":
                 append(normals, parse_vec3(line, 3))
             case "f ":
+                defer vertex_index += 3
                 face := parse_face_data(line)
-                append(&vertices, Vertex {
+                vertices[vertex_index] = Vertex {
                     position = positions[face[0]],
                     uv       = {uvs[face[1]].x, 1-uvs[face[1]].y},
                     normal   = normals[face[2]],
                     material = current_material
-                })
-                append(&vertices, Vertex {
+                }
+                vertices[vertex_index+1] = Vertex {
                     position = positions[face[3]],
                     uv       = {uvs[face[4]].x, 1-uvs[face[4]].y},
                     normal   = normals[face[5]],
                     material = current_material
-                })
-                append(&vertices, Vertex {
+                }
+                vertices[vertex_index+2] = Vertex {
                     position = positions[face[6]],
                     uv       = {uvs[face[7]].x, 1-uvs[face[7]].y},
                     normal   = normals[face[8]],
                     material = current_material
-                })
+                }
             case "us": // Switch material
                 for name, i in mat_names {
                     if name == line[7:] {
                         current_material = u32(i)
+                        break
                     }
                 }
         }
     }
-    return vertices[:]
+    return vertices
 }
 
 
