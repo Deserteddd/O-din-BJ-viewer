@@ -8,7 +8,7 @@ import "core:log"
 import "core:time"
 import "core:thread"
 import "core:sync"
-
+import "core:mem"
 import stbi "vendor:stb/image"
 
 ObjectData :: struct {
@@ -207,7 +207,7 @@ load_mtl :: proc(mtl_path: string) -> ([]Material, []string, TextureData) {
                 illum, ok := strconv.parse_uint(line[6:]); assert(ok)
                 mat.illum = illum
             case "ma":
-                path_split := strings.split_after(mtl_path, "\\")
+                path_split := strings.split_after(mtl_path, "\\");
                 extension_split := strings.split(line[7:], "\\")
                 tex_path_base := strings.concatenate(path_split[:len(path_split)-1])
                 tex_path_extension: string
@@ -259,10 +259,9 @@ new_texture :: proc(tex_path: string, data: ^TextureData) -> f32 {
     // if i == 4 do return -1
     
     img_size: [2]i32
-    pixels := stbi.load(
-        tex_path_cstring,
-        &img_size.x, &img_size.y, nil, 4
-    ); assert(pixels != nil)
+    pixels := stbi.load(tex_path_cstring, &img_size.x, &img_size.y, nil, 4)
+    if pixels == nil do pixels = stbi.load("assets/err_tex.jpg", &img_size.x, &img_size.y, nil, 4)
+    assert(pixels != nil) 
     // fmt.println("Loaded ok")
     append(&data.textures, pixels)
     append(&data.names   , tex_name)

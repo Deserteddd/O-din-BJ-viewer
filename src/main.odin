@@ -16,6 +16,8 @@ default_context: runtime.Context
 TEST := false
 last_ticks := sdl.GetTicks();
 
+
+
 main :: proc() {
     if !TEST {
         state: AppState
@@ -37,15 +39,13 @@ main :: proc() {
                 fmt.printfln("Load time from main: {}", duration)
             }
         }
-        // for object, i in objects {
-        //     print_obj(object)
-        // }
     }
 }
 
 AppState :: struct {
     renderer: Renderer,
-    objects: [dynamic]Object,
+    entities: [dynamic]Entity,
+    point_light: vec4 // Pos.xyz, intensity 0..1
 }
 
 init :: proc(state: ^AppState) {
@@ -58,12 +58,22 @@ init :: proc(state: ^AppState) {
             log.debugf("SDL {} [{}]", category, priority, message)
         }, nil
     )
-
-    renderer := RND_Init({})
+    
+    // state.point_light = {14, 2, 10}
+    renderer := RND_Init({.FULLSCREEN, .DRAW_UI})
     state.renderer = renderer
 
     data := load_object("assets/ref_tris"); defer delete_obj(data)
-    append(&state.objects, RND_CreateObject(data, state.renderer.gpu))
+    append(&state.entities, CreateObject(data, state.renderer.gpu)); delete_obj(data)
+    state.entities[0].position = {1.5, 12, -20}
+    state.entities[0].rotation.y = 180
+
+    data = load_object("assets/22-moto_simple");
+    append(&state.entities, CreateObject(data, state.renderer.gpu)); delete_obj(data)
+    state.entities[1].position = {0, 7, -20}
+
+    data = load_object("assets/box_world"); 
+    append(&state.entities, CreateObject(data, state.renderer.gpu))
 }   
 
 run :: proc(state: ^AppState) {
@@ -84,7 +94,8 @@ run :: proc(state: ^AppState) {
         update(state)
 
         RND_FrameBegin(&state.renderer)
-        RND_DrawObjects(&state.renderer, state.objects[:])
+        RND_DrawEntities(&state.renderer, state.entities[:], state.point_light)
+        draw_ui(&state.renderer)
 
         ok := RND_FrameSubmit(&state.renderer); assert(ok)
     }
@@ -96,26 +107,28 @@ update :: proc(state: ^AppState) {
     dt := f32(new_ticks - last_ticks) / 1000
     last_ticks = new_ticks
     process_mouse(&state.renderer.camera)
-    process_keyboard(&state.renderer.camera, dt)
+    process_keyboard(state, dt)
 }
 
-process_keyboard :: proc(camera: ^Camera, dt: f32) {
+process_keyboard :: proc(state: ^AppState, dt: f32) {
     using sdl.Scancode
-    speed: f32 = 6
     key_state := sdl.GetKeyboardState(nil)
+    speed: f32 = 2
+    if key_state[LSHIFT] do speed = 6
     f, b, l, r, u, d: f32
     yaw_r, yaw_l, pitch_u, pitch_d : f32
     if key_state[W] do f = 1
     if key_state[S] do b = 1
     if key_state[A] do l = 1
     if key_state[D] do r = 1
-    if key_state[LSHIFT] do u = 1
-    if key_state[SPACE] do d = 1
+    if key_state[SPACE] do u = 1
+    if key_state[LCTRL] do d = 1
     if key_state[RIGHT] do yaw_r = 1
     if key_state[LEFT] do yaw_l = 1
     if key_state[UP] do pitch_u = 1
     if key_state[DOWN] do pitch_d = 1
     fb := f-b; lr := l-r; ud := d-u
+    using state.renderer
     yaw_cos := math.cos(math.to_radians(camera.yaw))
     yaw_sin := math.sin(math.to_radians(camera.yaw))
     camera.position +=  {
@@ -124,6 +137,9 @@ process_keyboard :: proc(camera: ^Camera, dt: f32) {
     }
     camera.pitch += (pitch_d-pitch_u) * dt * speed * 30
     camera.yaw   += (yaw_r-yaw_l) * dt * speed * 30
+    
+    if key_state[E] do state.point_light.w += 0.005
+    if key_state[Q] && state.point_light.w >= 0 do state.point_light.w -= 0.005 
 }
 
 process_mouse :: proc(camera: ^Camera) {

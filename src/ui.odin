@@ -1,6 +1,13 @@
 package obj_viewer
 
 import sdl "vendor:sdl3"
+import "core:fmt"
+
+GUI :: struct {
+    pipeline: ^sdl.GPUGraphicsPipeline,
+    quad: Quad,
+    sampler: ^sdl.GPUSampler
+}
 
 Vertex2 :: struct {
     position: vec2,
@@ -12,6 +19,17 @@ Quad :: struct {
     vbo: ^sdl.GPUBuffer,
     ibo: ^sdl.GPUBuffer,
     num_indices: u32
+}
+
+GUI_Init :: proc(gpu: ^sdl.GPUDevice, window: ^sdl.Window) -> GUI {
+    pipeline := build_2D_pipeline(gpu, window)
+    quad     := create_quad(gpu)
+    sampler  := sdl.CreateGPUSampler(gpu, {}); assert(sampler != nil)
+    return GUI {
+        pipeline,
+        quad,
+        sampler
+    }
 }
 
 create_quad :: proc(gpu: ^sdl.GPUDevice) -> Quad {
@@ -46,7 +64,8 @@ create_quad :: proc(gpu: ^sdl.GPUDevice) -> Quad {
     }
 }
 
-draw_ui :: proc(renderer: ^Renderer, ui_elements: []Quad) {
+draw_ui :: proc(renderer: ^Renderer) {
+    assert(renderer.depth_texture != nil)
     color_target := sdl.GPUColorTargetInfo {
         texture = renderer.swapchain_texture,
         load_op = .LOAD,
@@ -54,22 +73,25 @@ draw_ui :: proc(renderer: ^Renderer, ui_elements: []Quad) {
         clear_color = {0, 0, 0, 1},
     }
     render_pass := sdl.BeginGPURenderPass(renderer.cmd_buff, &color_target, 1, nil); assert(render_pass != nil)
-    sdl.BindGPUGraphicsPipeline(render_pass, renderer.pipeline2D)
-    for &element in ui_elements {
-        sdl.BindGPUIndexBuffer(render_pass, { buffer = element.ibo }, ._32BIT)
-        bindings: [1]sdl.GPUBufferBinding = sdl.GPUBufferBinding { buffer = element.vbo }
-        sdl.BindGPUVertexBuffers(render_pass, 0, &bindings[0], 1)
 
-        sdl.DrawGPUIndexedPrimitives(render_pass, element.num_indices, 1, 0, 0, 0)
-    }
-
+    using renderer.gui
+    sdl.BindGPUGraphicsPipeline(render_pass, pipeline)
+    sdl.BindGPUFragmentSamplers(render_pass, 0, 
+        &(sdl.GPUTextureSamplerBinding{texture = renderer.depth_texture, sampler = sampler}), 1
+    )
+    sdl.BindGPUIndexBuffer(render_pass, { buffer = quad.ibo }, ._32BIT)
+    bindings: [1]sdl.GPUBufferBinding = sdl.GPUBufferBinding { buffer = quad.vbo }
+    sdl.BindGPUVertexBuffers(render_pass, 0, &bindings[0], 1)
+    sdl.DrawGPUIndexedPrimitives(render_pass, quad.num_indices, 1, 0, 0, 0)
     sdl.EndGPURenderPass(render_pass)
 }
 
-quad_pipeline :: proc(renderer: ^Renderer) {
-    sdl.ReleaseGPUGraphicsPipeline(renderer.gpu, renderer.pipeline2D)
-    vert_shader := load_shader(renderer.gpu, vert_code_2D, .VERTEX, 0, 0, 0); defer sdl.ReleaseGPUShader(renderer.gpu, vert_shader)
-    frag_shader := load_shader(renderer.gpu, frag_code_2D, .FRAGMENT, 0, 0, 0); defer sdl.ReleaseGPUShader(renderer.gpu, frag_shader)
+@(private = "file")
+build_2D_pipeline :: proc(gpu: ^sdl.GPUDevice, window: ^sdl.Window) -> ^sdl.GPUGraphicsPipeline {
+    pipeline: ^sdl.GPUGraphicsPipeline
+    sdl.ReleaseGPUGraphicsPipeline(gpu, pipeline)
+    vert_shader := load_shader(gpu, vert_code_2D, .VERTEX, 0, 0, 0); defer sdl.ReleaseGPUShader(gpu, vert_shader)
+    frag_shader := load_shader(gpu, frag_code_2D, .FRAGMENT, 0, 1, 0); defer sdl.ReleaseGPUShader(gpu, frag_shader)
 
     vb_descriptions: [1]sdl.GPUVertexBufferDescription
     vb_descriptions[0] = sdl.GPUVertexBufferDescription {
@@ -94,14 +116,14 @@ quad_pipeline :: proc(renderer: ^Renderer) {
         },
     }
 
-    renderer.pipeline2D = sdl.CreateGPUGraphicsPipeline(renderer.gpu, {
+    pipeline = sdl.CreateGPUGraphicsPipeline(gpu, {
         vertex_shader = vert_shader,
         fragment_shader = frag_shader,
         primitive_type = .TRIANGLELIST,
         target_info = {
             num_color_targets = 1,
             color_target_descriptions = &(sdl.GPUColorTargetDescription {
-                format = sdl.GetGPUSwapchainTextureFormat(renderer.gpu, renderer.window)
+                format = sdl.GetGPUSwapchainTextureFormat(gpu, window)
             }),
         },
         vertex_input_state = {
@@ -112,7 +134,8 @@ quad_pipeline :: proc(renderer: ^Renderer) {
         },
         rasterizer_state = {
             fill_mode = .FILL,
-            cull_mode = .BACK
+            cull_mode = .NONE
         },
     })
+    return pipeline
 }

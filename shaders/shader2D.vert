@@ -5,7 +5,6 @@ layout (location = 1) in vec2 uv;
 
 layout (location = 0) out vec2 v_position;
 layout (location = 1) out vec2 v_uv;
-// layout (location = 2) out vec2 v_uv;
 
 // layout(set=1, binding=0) uniform UBO {
 //     mat4 view_matrix;

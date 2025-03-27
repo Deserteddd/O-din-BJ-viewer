@@ -1,18 +1,5 @@
 #version 450
 
-layout(location = 0) in vec2 v_uv;
-layout(location = 1) flat in uint material;
-
-layout(location = 0) out vec4 frag_color;
-
-// layout(set=2, binding=0) uniform sampler2D tex_sampler;
-// layout(set=2, binding=1) uniform sampler2D tex_sampler2;
-
-layout(set=2, binding=0) uniform sampler2D ts1;
-layout(set=2, binding=1) uniform sampler2D ts2;
-layout(set=2, binding=2) uniform sampler2D ts3;
-layout(set=2, binding=3) uniform sampler2D ts4;
-
 struct Material {
     vec4 Ka;
     vec4 Kd;
@@ -20,22 +7,57 @@ struct Material {
     vec4 Ke;
 };
 
+layout(location = 0) in vec3 v_pos;
+layout(location = 1) in vec3 v_normal;
+layout(location = 2) in vec2 v_uv;
+layout(location = 3) flat in uint material;
+
+layout(location = 0) out vec4 frag_color;
+
+layout(set=2, binding=0) uniform sampler2D ts0;
+layout(set=2, binding=1) uniform sampler2D ts1;
+layout(set=2, binding=2) uniform sampler2D ts2;
+layout(set=2, binding=3) uniform sampler2D ts3;
+
 layout(set=2, binding = 4) readonly buffer Materials {
     Material materials[];
 };
 
-void main() {
-    vec4 diffuse;
-    float Kd_texture = materials[material].Kd.x;
-    if (Kd_texture == -1) {
+layout(set=3, binding = 0) uniform UBO {
+    vec4 light_pos;
+    vec4 camera_pos;
+};
+
+vec4 getColor() {
+    float is_texture = materials[material].Kd.x;
+    if (is_texture == -1) {
         float texture_index = materials[material].Kd.y;
-        if (texture_index == 0)
-            diffuse = vec4(texture(ts1, v_uv));
-        else
-            diffuse = vec4(texture(ts2, v_uv));
-    } else {
-        diffuse = vec4(materials[material].Kd.xyz, 1);
+        if (texture_index == 0) {
+            return vec4(texture(ts0, v_uv));
+        } else if (texture_index == 1) {
+            return vec4(texture(ts1, v_uv));
+        } else if (texture_index == 2) {
+            return vec4(texture(ts2, v_uv));
+        } else if (texture_index == 3) {
+            return vec4(texture(ts3, v_uv));
+        }
+    } 
+    else {
+        return vec4(materials[material].Kd.xyz, 1);
     }
-    frag_color = diffuse;
 }
+
+void main() {
+    vec4 color = getColor();
+    vec3 to_light = normalize(light_pos.xyz - v_pos);
+    vec3 normal = normalize(v_normal);
+    float diffuse = max(0.0, dot(v_normal, to_light));
+    float distance = distance(v_pos.xyz, light_pos.xyz);
+    vec3 intensity = max(light_pos.w * color.xyz * diffuse, 0.2) * (1/distance);
+    frag_color = vec4(color.xyz * intensity, 1);
+}
+
+
+
+
 
