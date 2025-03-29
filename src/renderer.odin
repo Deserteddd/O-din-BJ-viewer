@@ -3,6 +3,7 @@ package obj_viewer
 import "core:mem"
 import "core:math/linalg"
 import "core:fmt"
+import "core:c"
 import sdl "vendor:sdl3"
 import stbi "vendor:stb/image"
 
@@ -37,8 +38,7 @@ FragUniforms :: struct {
 
 Camera :: struct {
     position: vec3,
-    yaw: f32,
-    pitch: f32
+    rotation: vec3
 }
 
 RND_InitFlags :: distinct bit_set[RND_InitFlag; uint]
@@ -53,8 +53,13 @@ RND_Init :: proc(flags: RND_InitFlags) -> Renderer {
     renderer: Renderer
     ok := sdl.Init({.VIDEO}); assert(ok)
     window_flags: sdl.WindowFlags
-    if .FULLSCREEN in flags do window_flags += {.FULLSCREEN}
-    window  := sdl.CreateWindow("Hello Odin", 1280, 720, window_flags); assert(ok)
+    w, h: c.int = 1280, 720
+    if .FULLSCREEN in flags {
+        window_flags += {.FULLSCREEN}
+        w = 1920
+        h = 1080
+    } 
+    window  := sdl.CreateWindow("Hello Odin", w, h, window_flags); assert(ok)
     ok = sdl.HideCursor(); assert(ok)
     ok = sdl.SetWindowRelativeMouseMode(window, true); assert(ok)
     width, height: i32
@@ -109,17 +114,11 @@ RND_Init :: proc(flags: RND_InitFlags) -> Renderer {
     renderer.depth_texture = depth_texture
     if .WIREFRAME in flags do renderer.wireframe = true
     build_3D_pipeline(&renderer)
-    gui := GUI_Init(gpu, window)
-    renderer.gui = gui
+    // gui := GUI_Init(gpu, window)
+    // renderer.gui = gui
     for i in 0..<4 {
         sampler := sdl.CreateGPUSampler(gpu, {}); assert(sampler != nil)
         renderer.samplers[i] = sampler
-    }
-
-    renderer.camera = Camera {
-        // position = {5, -3, -6},
-        // yaw = 45,
-        // pitch = 25
     }
     return renderer
 }
@@ -141,7 +140,8 @@ RND_FrameSubmit :: proc(renderer: ^Renderer) -> bool {
     return ok
 }
 
-RND_DrawEntities :: proc(renderer: ^Renderer, entities: []Entity, point_light: vec4) {
+RND_DrawEntities :: proc(state: ^AppState) {
+    using state
     assert(renderer.cmd_buff != nil)
     assert(renderer.swapchain_texture != nil)
     color_target := sdl.GPUColorTargetInfo {
@@ -163,9 +163,11 @@ RND_DrawEntities :: proc(renderer: ^Renderer, entities: []Entity, point_light: v
     render_pass := sdl.BeginGPURenderPass(renderer.cmd_buff, &color_target, 1, &depth_target_info)
     assert(render_pass != nil)
     sdl.BindGPUGraphicsPipeline(render_pass, renderer.pipeline3D)
+    assert(entities[0].model.vbo == nil)
     frag_ubo := create_fragment_UBO(point_light, renderer.camera.position)
     sdl.PushGPUFragmentUniformData(renderer.cmd_buff, 0, &frag_ubo, size_of(FragUniforms))
-    for &entity in entities {
+    for &entity, entity_index in entities {
+        if entity.model.vbo == nil do continue
         using entity
         bindings: [1]sdl.GPUBufferBinding = { sdl.GPUBufferBinding { buffer = model.vbo } } 
         sdl.BindGPUVertexBuffers(render_pass, 0, &bindings[0], 1)
@@ -182,7 +184,10 @@ RND_DrawEntities :: proc(renderer: ^Renderer, entities: []Entity, point_light: v
             )
         }
         sdl.BindGPUFragmentStorageBuffers(render_pass, 0, &model.material_buffer, 1)
-        vert_ubo := create_vertex_UBO(renderer, position, rotation)
+        vert_ubo := create_vertex_UBO(
+            &renderer, 
+            entity_physics[entity_index]
+        )
         sdl.PushGPUVertexUniformData(renderer.cmd_buff, 0, &vert_ubo, size_of(VertUniforms))
         start: u32 = 0
         for end in model.mesh_bounds {
@@ -200,91 +205,6 @@ RND_ToggleWireframe :: proc(renderer: ^Renderer) {
     build_3D_pipeline(renderer)
 }
 
-CreateObject :: proc(data: ObjectData, gpu: ^sdl.GPUDevice) -> Entity {
-    entity: Entity
-    // Create and upload texture
-    // pixels_byte_size_total: u32
-    tex_transfer_buffers: [4]^sdl.GPUTransferBuffer
-    img_sizes: [4][2]i32
-    i: int
-    textures: [dynamic]^sdl.GPUTexture // try deleting
-    for i<len(data.texture_data.textures) {
-        defer i += 1
-        img_sizes[i] = data.texture_data.sizes[i]
-        size := img_sizes[i]
-        assert(size.x >= 1)
-        assert(size.y >= 1)
-        pixels := data.texture_data.textures[i]
-        
-        pixels_byte_size := u32(size.x * size.y * 4)
-        // pixels_byte_size_total += pixels_byte_size
-        texture := sdl.CreateGPUTexture(gpu, {
-            type = .D2,
-            format = .R8G8B8A8_UNORM,
-            usage = {.SAMPLER},
-            width = u32(size.x),
-            height = u32(size.y),
-            layer_count_or_depth = 1,
-            num_levels = 1
-        })
-
-        append(&textures, texture)
-        tex_transfer_buffer := sdl.CreateGPUTransferBuffer(gpu, {
-            usage = sdl.GPUTransferBufferUsage.UPLOAD,
-            size = pixels_byte_size,
-        }); assert(tex_transfer_buffer != nil)
-
-        tex_transfer_mem := sdl.MapGPUTransferBuffer(gpu, tex_transfer_buffer, false); assert(tex_transfer_mem != nil)
-        mem.copy(tex_transfer_mem, pixels, int(pixels_byte_size))
-        sdl.UnmapGPUTransferBuffer(gpu, tex_transfer_buffer)
-        tex_transfer_buffers[i] = tex_transfer_buffer
-    }
-    entity.model.textures = textures[:]
-    fmt.println("Model uses", i, "textures")
-    // Create and upload buffers
-    len_bytes, num_vertices: u32
-    vertices: [dynamic]Vertex; defer delete(vertices)
-    mesh_bounds := make([]u32, len(data.vertex_groups))
-    for group, i in data.vertex_groups {
-        len_bytes += u32(len(group)*size_of(Vertex))
-        for vert in group {
-            num_vertices += 1
-            append(&vertices, vert)
-        }
-        mesh_bounds[i] = num_vertices
-    }
-
-    material_matrices := make([dynamic][4]vec4, 0, len(data.materials)); defer delete(material_matrices)
-    for material in data.materials do append(&material_matrices, material_matrix(material))
-
-    transfer_buffer := sdl.CreateGPUTransferBuffer(gpu, {
-        usage = sdl.GPUTransferBufferUsage.UPLOAD,
-        size = len_bytes,
-    }); assert(transfer_buffer != nil)
-    copy_commands := sdl.AcquireGPUCommandBuffer(gpu); assert(copy_commands != nil)
-    copy_pass := sdl.BeginGPUCopyPass(copy_commands); assert(copy_pass != nil)
-    vbo := create_buffer_with_data(gpu, transfer_buffer, copy_pass, {.VERTEX}, vertices[:])
-    material_buffer := create_buffer_with_data(gpu, transfer_buffer, copy_pass, {.GRAPHICS_STORAGE_READ}, material_matrices[:])
-    for j in 0..<i {
-        sdl.UploadToGPUTexture(copy_pass, 
-            {transfer_buffer = tex_transfer_buffers[j]},
-            {texture = entity.model.textures[j], w = u32(img_sizes[j].x), h = u32(img_sizes[j].y), d = 1},
-            false
-        )
-    }
-
-    // End copy pass
-    sdl.ReleaseGPUTransferBuffer(gpu, transfer_buffer)
-    for j in 0..<i do sdl.ReleaseGPUTransferBuffer(gpu, tex_transfer_buffers[j])
-    sdl.EndGPUCopyPass(copy_pass)
-    ok := sdl.SubmitGPUCommandBuffer(copy_commands); assert(ok)
-
-    // Assignments
-    entity.model.vbo = vbo
-    entity.model.material_buffer = material_buffer
-    entity.model.mesh_bounds = mesh_bounds
-    return entity
-}
 @(private="file")
 build_3D_pipeline :: proc(renderer: ^Renderer) {
     sdl.ReleaseGPUGraphicsPipeline(renderer.gpu, renderer.pipeline3D)
@@ -332,7 +252,7 @@ build_3D_pipeline :: proc(renderer: ^Renderer) {
     if renderer.wireframe {fill_mode = .LINE; cull_mode = .NONE} else {fill_mode = .FILL; cull_mode = .BACK}
 
     format := sdl.GetGPUSwapchainTextureFormat(renderer.gpu, renderer.window)
-    fmt.println(format)
+    // fmt.println(format)
     renderer.pipeline3D = sdl.CreateGPUGraphicsPipeline(renderer.gpu, {
         vertex_shader = vert_shader,
         fragment_shader = frag_shader,
@@ -365,19 +285,20 @@ build_3D_pipeline :: proc(renderer: ^Renderer) {
 
 create_view_matrix :: proc(camera: Camera) -> linalg.Matrix4f32 {
     using linalg
-    yaw_matrix := matrix4_rotate_f32(to_radians(camera.yaw), {0, 1, 0})
-    pitch_matrix := matrix4_rotate_f32(to_radians(camera.pitch), {1, 0, 0})
+    pitch_matrix := matrix4_rotate_f32(to_radians(camera.rotation.x), {1, 0, 0})
+    yaw_matrix := matrix4_rotate_f32(to_radians(camera.rotation.y), {0, 1, 0})
     position_matrix := matrix4_translate_f32(camera.position)
     return pitch_matrix * yaw_matrix * position_matrix
 }
 
-create_vertex_UBO :: proc(renderer: ^Renderer, position: vec3, rotation: vec3) -> VertUniforms {
-    using linalg, renderer
+create_vertex_UBO :: proc(renderer: ^Renderer, entity_physics: Physics) -> VertUniforms {
+    using linalg
     x, y: i32;
-    ok := sdl.GetWindowSize(window, &x, &y)
+    ok := sdl.GetWindowSize(renderer.window, &x, &y)
     aspect := f32(x) / f32(y)
     projection_matrix := matrix4_perspective_f32(linalg.to_radians(f32(70)), aspect, 0.0001, 1000)
-    model_matrix := create_view_matrix(camera) * matrix4_translate_f32(position) * matrix4_rotate_f32(to_radians(rotation.y), {0, 1, 0})
+    view_matrix := create_view_matrix(renderer.camera)
+    model_matrix := view_matrix * matrix4_translate_f32(-entity_physics.position) * matrix4_rotate_f32(to_radians(entity_physics.rotation.y), {0, 1, 0})
     return VertUniforms {
         modelview = model_matrix,
         proj = projection_matrix,

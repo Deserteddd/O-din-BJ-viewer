@@ -117,7 +117,7 @@ load_object :: proc(dir_path: string) -> ObjectData {
             obj_path := strings.concatenate({path, ".obj"}, context.temp_allocator)
             test_time := time.now()
             file, err := os.read_entire_file_or_err(obj_path); assert(err == nil); defer delete(file)
-            fmt.println("measured time:", time.since(test_time))
+            // fmt.println("measured time:", time.since(test_time))
             src := string(file)
             line_arr := strings.split_lines(src); defer delete(line_arr)
             start, i: int
@@ -145,7 +145,7 @@ load_object :: proc(dir_path: string) -> ObjectData {
         }
     }
 
-    fmt.printfln("Object loading took: {}", load_time)
+    // fmt.printfln("Object loading took: {}", load_time)
     return obj
 }
 
@@ -238,7 +238,7 @@ new_texture :: proc(tex_path: string, data: ^TextureData) -> f32 {
     tex_path_cstring := strings.clone_to_cstring(tex_path); 
     path_split       := strings.split(tex_path, "/");
     tex_name         := strings.clone(path_split[len(path_split)-1])
-    fmt.println("TEXTURE PATH:", tex_path)
+    // fmt.println("TEXTURE PATH:", tex_path)
 
     i: int
     for i = 0; i<len(data.textures); i += 1 {
@@ -249,7 +249,7 @@ new_texture :: proc(tex_path: string, data: ^TextureData) -> f32 {
     // If texture is loaded, we return the index of it
     for name, j in data.names {
         if name == tex_name {
-            fmt.printfln("Texture {} already in loader", tex_name)
+            // fmt.printfln("Texture {} already in loader", tex_name)
             delete(tex_name)
             return f32(j)
         }

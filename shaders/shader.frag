@@ -53,7 +53,7 @@ void main() {
     vec3 normal = normalize(v_normal);
     float diffuse = max(0.0, dot(v_normal, to_light));
     float distance = distance(v_pos.xyz, light_pos.xyz);
-    vec3 intensity = max(light_pos.w * color.xyz * diffuse, 0.2) * (1/distance);
+    vec3 intensity = max(light_pos.w * 10 * color.xyz * diffuse, 0.3) * (1/(distance*distance));
     frag_color = vec4(color.xyz * intensity, 1);
 }
 
