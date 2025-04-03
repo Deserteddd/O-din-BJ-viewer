@@ -24,8 +24,7 @@ layout(set=2, binding = 4) readonly buffer Materials {
 };
 
 layout(set=3, binding = 0) uniform UBO {
-    vec4 light_pos;
-    vec4 camera_pos;
+    vec4 player_pos;
 };
 
 vec4 getColor() {
@@ -49,11 +48,11 @@ vec4 getColor() {
 
 void main() {
     vec4 color = getColor();
-    vec3 to_light = normalize(light_pos.xyz - v_pos);
+    vec3 to_light = normalize(player_pos.xyz - v_pos);
     vec3 normal = normalize(v_normal);
     float diffuse = max(0.0, dot(v_normal, to_light));
-    float distance = distance(v_pos.xyz, light_pos.xyz);
-    vec3 intensity = max(light_pos.w * 10 * color.xyz * diffuse, 0.3) * (1/(distance*distance));
+    float distance = distance(v_pos.xyz, player_pos.xyz);
+    vec3 intensity = player_pos.w * color.xyz * diffuse * (1/(distance*distance));
     frag_color = vec4(color.xyz * intensity, 1);
 }
 

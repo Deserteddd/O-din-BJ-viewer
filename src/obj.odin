@@ -277,7 +277,7 @@ load_obj :: proc(obj_data: []string, mat_names: []string,
     data: ObjectData
     vertex_count: u32
     for line in obj_data {
-        if len(line)<2 do panic("short line")
+        assert(len(line)>=2)
         if line[0] == 'f' do vertex_count += 3
     }
     vertices := make([]Vertex, vertex_count);
