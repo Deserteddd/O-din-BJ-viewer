@@ -15,12 +15,13 @@ layout (location = 3) flat out uint v_material;
 layout(set=1, binding=0) uniform UBO {
     mat4 modelview;
     mat4 projection_matrix;
+    vec4 position_offset;
 };
 
 
 void main() {
     gl_Position = projection_matrix * modelview * vec4(position, 1.0);
-    v_position = position;
+    v_position = position+position_offset.xyz;
     v_normal = normal;
     v_uv = uv;
     v_material = material;

@@ -11,7 +11,7 @@ Constant entity id's:
 Entity :: struct {
     id: u32,
     model: Model,
-    bboxes_vbo: ^sdl.GPUBuffer,
+    bbox_vbo: ^sdl.GPUBuffer,
 }
 
 Model :: struct {
@@ -21,26 +21,10 @@ Model :: struct {
     mesh_boundary_indices: []u32,
 }
 
-PhysicsFlag :: enum {
-    STATIC,     // Isn't affected by gravity
-    DYNAMIC,    // Is affected by gravity
-    COLLIDER,   // Duh?
-    AIRBORNE,
-    PLAYER
-}
-
-PhysicsFlags :: distinct bit_set[PhysicsFlag]
-
-Physics :: struct {
-    position: vec3,
-    speed: vec3,
-    rotation: vec3,
-    flags: PhysicsFlags,
-}
-
-AABB :: struct {
-    min: vec3,
-    max: vec3
+move_entity :: proc(physics: ^Physics, bbox: ^AABB, by: vec3) {
+    physics.position += by
+    bbox.min += by
+    bbox.max += by
 }
 
 print_entities :: proc(entities: [dynamic]Entity, physics: [dynamic]Physics) {
@@ -57,7 +41,6 @@ CreateEntity :: proc(data: ObjectData, state: ^AppState, physics_flags: PhysicsF
     entity.id = u32(len(state.entities))
     physics: Physics
     physics.flags = physics_flags
-    append(&state.entity_physics, physics)
     // Create and upload texture
     using state.renderer
     tex_transfer_buffers: [4]^sdl.GPUTransferBuffer
@@ -100,45 +83,41 @@ CreateEntity :: proc(data: ObjectData, state: ^AppState, physics_flags: PhysicsF
     // Create and upload buffers
     len_bytes, num_vertices: u32
     vertices: [dynamic]Vertex; defer delete(vertices)
-    bbox_vertices: [dynamic]vec3; defer delete(bbox_vertices)
+    bbox_vertices: [24]vec3
     mesh_boundary_indices := make([]u32, len(data.vertex_groups))
-    aabbs: []AABB
-    if .COLLIDER in physics_flags {
-        aabbs = make([]AABB, len(data.vertex_groups))
-        defer delete(aabbs)
+    bbox: AABB = {
+        min = max(f32),
+        max = min(f32)
     }
     for group, i in data.vertex_groups {
         len_bytes += u32(len(group)*size_of(Vertex))
         count: f32
-        bbox: AABB
-        min_pos: vec3 = max(f32)
-        max_pos: vec3 = min(f32)
+
         for vert, v in group {
             using vert
             num_vertices += 1
             count += 1
-            if (position.x < min_pos.x) do min_pos.x = position.x;
-            if (position.y < min_pos.y) do min_pos.y = position.y;
-            if (position.z < min_pos.z) do min_pos.z = position.z;
+            if .COLLIDER in physics_flags {
+                if (position.x < bbox.min.x) do bbox.min.x = position.x;
+                if (position.y < bbox.min.y) do bbox.min.y = position.y;
+                if (position.z < bbox.min.z) do bbox.min.z = position.z;
 
-            if (position.x > max_pos.x) do max_pos.x = position.x;
-            if (position.y > max_pos.y) do max_pos.y = position.y;
-            if (position.z > max_pos.z) do max_pos.z = position.z;
+                if (position.x > bbox.max.x) do bbox.max.x = position.x;
+                if (position.y > bbox.max.y) do bbox.max.y = position.y;
+                if (position.z > bbox.max.z) do bbox.max.z = position.z;
+            }
             append(&vertices, vert)
-        }
-        if .COLLIDER in physics_flags {
-            b_box := AABB {min_pos, max_pos}
-            aabbs[i] = b_box
-            append(&bbox_vertices, min_pos)
-            append(&bbox_vertices, max_pos)
         }
         mesh_boundary_indices[i] = num_vertices
     }
 
-    for aabb in aabbs do append(&state.bounds, aabb)
+    if .COLLIDER in physics_flags {
+        bbox_vertices = get_bbox_vertices(bbox)
+    }
+
     material_matrices := make([dynamic][4]vec4, 0, len(data.materials)); defer delete(material_matrices)
     for material in data.materials do append(&material_matrices, material_matrix(material))
-
+    // fmt.println(bbox_vertices)
     transfer_buffer := sdl.CreateGPUTransferBuffer(gpu, {
         usage = sdl.GPUTransferBufferUsage.UPLOAD,
         size = len_bytes,
@@ -163,12 +142,71 @@ CreateEntity :: proc(data: ObjectData, state: ^AppState, physics_flags: PhysicsF
     ok := sdl.SubmitGPUCommandBuffer(copy_commands); assert(ok)
 
     // Assignments
-    entity.bboxes_vbo = bounding_box_vbo
     entity.model.vbo = vbo
+    fmt.println(bbox_vertices)
+    entity.bbox_vbo = bounding_box_vbo
     entity.model.material_buffer = material_buffer
     entity.model.mesh_boundary_indices = mesh_boundary_indices
-
-    // Assertions
-    if .COLLIDER in physics_flags do assert(len(aabbs) == len(data.vertex_groups))
+    append(&state.entity_bounds, bbox)
     append(&state.entities, entity)
+    append(&state.entity_physics, physics)
+}
+
+CreatePlayer :: proc(state: ^AppState) {
+    physics := Physics{
+        flags = {.PLAYER, .COLLIDER, .DYNAMIC},
+        position = {0, 11, 0}
+    }
+    bbox := AABB {
+        min = physics.position + {-0.2, 0, -0.2},
+        max = physics.position + {0.2, 2.1, 0.2}
+    }
+
+    entity := Entity { id = 0 }
+
+    append(&state.entities, entity)
+    append(&state.entity_physics, physics)
+    append(&state.entity_bounds, bbox)
+}
+
+get_bbox_vertices :: proc(bbox: AABB) -> [24]vec3 {
+    using bbox
+    return {
+        vec3{min.x, min.y, min.z},
+        vec3{max.x, min.y, min.z},
+
+        vec3{max.x, max.y, min.z},
+        vec3{min.x, max.y, min.z},
+
+        vec3{min.x, min.y, min.z},
+        vec3{min.x, min.y, max.z},
+
+        vec3{max.x, min.y, max.z},
+        vec3{min.x, min.y, max.z},
+
+        vec3{max.x, max.y, max.z},
+        vec3{min.x, max.y, max.z},
+
+        vec3{max.x, min.y, max.z},
+        vec3{max.x, min.y, min.z},
+
+        vec3{max.x, max.y, min.z},
+        vec3{max.x, max.y, max.z},
+
+        vec3{min.x, max.y, min.z},
+        vec3{min.x, max.y, max.z},
+        
+        // Vertical bars
+        vec3{min.x, min.y, min.z},
+        vec3{min.x, max.y, min.z},
+
+        vec3{max.x, min.y, min.z},
+        vec3{max.x, max.y, min.z},
+
+        vec3{min.x, min.y, max.z},
+        vec3{min.x, max.y, max.z},
+
+        vec3{max.x, min.y, max.z},
+        vec3{max.x, max.y, max.z},
+    }
 }

@@ -29,7 +29,8 @@ AppState :: struct {
     renderer:           Renderer,
     entities:           [dynamic]Entity,
     entity_physics:     [dynamic]Physics,
-    bounds:             [dynamic]AABB,
+    entity_bounds:      [dynamic]AABB,
+    player_collisions:  []bool
 }
 
 init :: proc(state: ^AppState) {
@@ -43,17 +44,22 @@ init :: proc(state: ^AppState) {
         }, nil
     )
     
-    renderer := RND_Init({})
-    state.renderer = renderer
-    player_entity := Entity { id = 0 }
-    player_physics := Physics{
-        flags = {.PLAYER, .COLLIDER, .DYNAMIC},
-        position = {0, 0, 5}
+    state.renderer = RND_Init({.FULLSCREEN})
+    CreatePlayer(state)
+    slab := load_object("assets/ref_cube"); defer delete_obj(slab)
+    for i in 0..<10 {
+        CreateEntity(slab, state, {.COLLIDER, .STATIC})
+        physics := &state.entity_physics[i+1]
+        bbox := &state.entity_bounds[i+1]
+        move_by := vec3{0, f32(i), -f32(i)*2}
+        move_entity(physics, bbox, move_by)
     }
-    append(&state.entities, player_entity)
-    append(&state.entity_physics, player_physics)
-    data := load_object("assets/cube_world"); defer delete_obj(data)
-    CreateEntity(data, state, {.COLLIDER, .STATIC})
+    creeper := load_object("assets/22-moto_simple"); defer delete_obj(creeper)
+    CreateEntity(creeper, state, {.STATIC, .COLLIDER})
+    // state.entity_physics[11].position = {0, 6, -20}
+    move_entity(&state.entity_physics[11], &state.entity_bounds[11], {-2, 4, -20})
+    // state.entity_physics[11].rotation.y = 90
+    state.player_collisions = make([]bool, len(state.entity_physics))
 }   
 
 run :: proc(state: ^AppState) {
@@ -69,70 +75,62 @@ run :: proc(state: ^AppState) {
                     case .F: 
                         RND_ToggleWireframe(&state.renderer)
                     case .Q:
-                        state.entity_physics[0].position = {0, 0, 5}
+                        p := &state.entity_physics[0]
+                        b := &state.entity_bounds[0]
+                        move_entity(p, b, -p.position+{0, 2, 0})
+                        p.speed = 0
                 }
             }
         }
+        // fmt.println(state.player_collisions)
         update(state)
         RND_FrameBegin(&state.renderer)
         RND_DrawEntities(state)
         RND_DrawBounds(state)
         ok := RND_FrameSubmit(&state.renderer); assert(ok)
-        if FRAMES % 30 == 0 {
-            fmt.println("player pos:\t", state.entity_physics[0].position)
-        //     fmt.println("player rot:\t", state.entity_physics[0].rotation)
-        //     fmt.println("First bbox:\t", state.entities[1].bboxes[0])
-        //     fmt.println("Airborne:\t", .AIRBORNE in state.entity_physics[0].flags)
-        //     fmt.println()
+        if FRAMES % 60 == 0 {
+            fmt.println("speed:\t", state.entity_physics[0].speed)
+            fmt.println("Airborne:\t", .AIRBORNE in state.entity_physics[0].flags)
+            fmt.println("bbox_min:\t", state.entity_bounds[0].min)
+            fmt.println("bbox_max:\t", state.entity_bounds[0].max)
+            fmt.println()
         }
     }
 }
 
 update :: proc(state: ^AppState) {
     using state
-    assert(state.entities[0].bboxes_vbo == nil)
     new_ticks := sdl.GetTicks();
     dt := f32(new_ticks - last_ticks) / 1000
     last_ticks = new_ticks
-    update_entity_physics(state, dt)
     process_keyboard(state, dt)
+    update_player(state, dt)
     update_camera(&state.entity_physics[0])
 }
 
-check_player_collision :: proc(p: vec3, aabb: AABB) -> vec3 {
-    clampedX := math.max(aabb.min.x, math.min(p.x, aabb.max.x));
-    clampedY := math.max(aabb.min.y, math.min(p.y, aabb.max.y));
-    clampedZ := math.max(aabb.min.z, math.min(p.z, aabb.max.z));
-    return {clampedX, clampedY, clampedZ};
-}
-
-update_entity_physics :: proc(state: ^AppState, dt: f32) {
-    // assert(len(state.bounding_boxes) == 4)
-    for &physics, i in state.entity_physics {
-        using state, physics
-        nearest_y := 1000
-        if .PLAYER in flags {
-            g: f32 = 18
-            previous := position
-            position += speed * dt
-            speed.y -= g*dt
-            assert(physics.position == state.entity_physics[0].position)
-            for aabb, j in bounds {
-                collision := check_player_collision(physics.position, aabb) 
-                if collision == physics.position {
-                    // speed.y = 0
-                    position = previous
-                }
-            }
-            if position.y <= 0 {
-                speed.y = 0
-                position.y = 0
-                flags -= {.AIRBORNE}
-            } else {
-                flags += {.AIRBORNE}
-            }
+update_player :: proc(state: ^AppState, dt: f32) {
+    g: f32 = 16
+    p := &state.entity_physics[0]
+    p.speed.y -= g*dt*2
+    if p.speed.y < -10 do p.speed.y = -10
+    delta_pos := p.speed * dt
+    move_entity(p, &state.entity_bounds[0], delta_pos)
+    p.flags += {.AIRBORNE}
+    for box, i in state.entity_bounds {
+        if i == 0 do continue
+        if aabbs_collide(state.entity_bounds[0], box) {
+            mtv := resolve_aabb_collision_mtv(state.entity_bounds[0], box)
+            for axis, j in mtv do if axis != 0 {
+                p.speed[j] *= 0.95
+                if j == 1 && axis > 0 { // This means we are standing on a block
+                    p.flags -= {.AIRBORNE}
+                } 
+            } 
+            move_entity(p, &state.entity_bounds[0], mtv)
+            state.player_collisions[i] = true
+        } else {
+            state.player_collisions[i] = false
         }
-
     }
 }
 
@@ -141,7 +139,7 @@ process_keyboard :: proc(state: ^AppState, dt: f32) {
     key_state := sdl.GetKeyboardState(nil)
     f, b, l, r, u, d: f32
     yaw_r, yaw_l, pitch_u, pitch_d : f32
-    move_speed: f32 = 50
+    move_speed: f32 = 75
     if key_state[W] do f = 1
     if key_state[S] do b = 1
     if key_state[A] do l = 1
@@ -152,30 +150,27 @@ process_keyboard :: proc(state: ^AppState, dt: f32) {
     if key_state[LEFT] do yaw_l = 1
     if key_state[UP] do pitch_u = 1
     if key_state[DOWN] do pitch_d = 1
-    if key_state[LSHIFT] do move_speed *= 2
 
     using state
     player:= &entity_physics[0]
     yaw_cos := math.cos(math.to_radians(player.rotation.y))
     yaw_sin := math.sin(math.to_radians(player.rotation.y))
-
     player.rotation.x += (pitch_d-pitch_u) * dt * 100
     player.rotation.y += (yaw_r-yaw_l) * dt * 100
-    if !(.AIRBORNE in entity_physics[0].flags) {
-        assert(player.speed.y == 0)
+    if !(.AIRBORNE in state.entity_physics[0].flags) {
         fb := b-f; lr := r-l
-        friction: f32 = 0.1
+        player.speed.y = (u-d)*move_speed * 0.15
+        if key_state[LSHIFT] do move_speed *= 2
         player.speed.x += (lr * yaw_cos - fb * yaw_sin) * move_speed * dt
         player.speed.z += (lr * yaw_sin + fb * yaw_cos) * move_speed * dt
-        player.speed.y = u*move_speed * 0.11
-        player.speed.xz *= 1-friction
+        player.speed *= 0.9
     }
 }
 
 update_camera :: proc(player_physics: ^Physics) {
     x, y: f32
     using player_physics
-    _flags := sdl.GetRelativeMouseState(&x, &y)
+    _ = sdl.GetRelativeMouseState(&x, &y)
     rotation.y += x * 0.05
     rotation.x += y * 0.05
     if rotation.x >  90 do rotation.x =  90

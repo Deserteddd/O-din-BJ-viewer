@@ -31,6 +31,7 @@ Renderer :: struct {
 VertUniforms :: struct {
     modelview: matrix[4,4]f32,
     proj: matrix[4,4]f32,
+    position_offset: vec4,
 }
 
 FragUniforms :: struct {
@@ -145,20 +146,18 @@ RND_DrawBounds :: proc(state: ^AppState) {
         texture = renderer.swapchain_texture,
         load_op = .LOAD,
         store_op = .STORE,
-        clear_color = {0, 0, 0, 1},
     }
     bbox_pass := sdl.BeginGPURenderPass(renderer.cmd_buff, &bbox_color_target, 1, nil)
     assert(bbox_pass != nil)
     sdl.BindGPUGraphicsPipeline(bbox_pass, renderer.bbox_pipeline)
     for &entity, entity_index in entities {
-        if entity.bboxes_vbo == nil do continue
-        assert(entity_index>0)
+        if entity.bbox_vbo == nil || !state.player_collisions[entity_index] do continue
         using entity
-        bindings: [1]sdl.GPUBufferBinding = { sdl.GPUBufferBinding { buffer = bboxes_vbo } } 
+        bindings: [1]sdl.GPUBufferBinding = { sdl.GPUBufferBinding { buffer = bbox_vbo } } 
         sdl.BindGPUVertexBuffers(bbox_pass, 0, &bindings[0], 1)
         vert_ubo := create_vertex_UBO(renderer, entity_physics[:], entity_index)
         sdl.PushGPUVertexUniformData(renderer.cmd_buff, 0, &vert_ubo, size_of(VertUniforms))
-        sdl.DrawGPUPrimitives(bbox_pass, u32(len(bounds)*4), 1, 0, 0)
+        sdl.DrawGPUPrimitives(bbox_pass, 24, 1, 0, 0)
 
     }
     sdl.EndGPURenderPass(bbox_pass)
@@ -173,7 +172,7 @@ RND_DrawEntities :: proc(state: ^AppState) {
         texture = renderer.swapchain_texture,
         load_op = .CLEAR,
         store_op = .STORE,
-        clear_color = {0.0, 0.0, 0.0, 1},
+        clear_color = {0.2, 0.2, 0.2, 1},
     }
     depth_target_info := sdl.GPUDepthStencilTargetInfo {
         texture = renderer.depth_texture,
@@ -185,11 +184,14 @@ RND_DrawEntities :: proc(state: ^AppState) {
         cycle = true,
         clear_stencil = 0,
     }
-    render_pass := sdl.BeginGPURenderPass(renderer.cmd_buff, &color_target, 1, &depth_target_info)
-    assert(render_pass != nil)
+
+    render_pass := sdl.BeginGPURenderPass(renderer.cmd_buff, &color_target, 1, &depth_target_info); assert(render_pass != nil)
     sdl.BindGPUGraphicsPipeline(render_pass, renderer.pipeline3D)
     assert(entities[0].model.vbo == nil)
-    frag_ubo := FragUniforms {player_pos = to_vec4(player.position, 3)}
+    light_pos := player.position
+    light_pos.y += 2
+    frag_ubo := FragUniforms {player_pos = to_vec4(light_pos, 5)}
+
     sdl.PushGPUFragmentUniformData(renderer.cmd_buff, 0, &frag_ubo, size_of(FragUniforms))
     for &entity, entity_index in entities {
         if entity.model.vbo == nil do continue
@@ -312,7 +314,10 @@ create_view_matrix :: proc(player: Physics) -> linalg.Matrix4f32 {
     using linalg, player
     pitch_matrix := matrix4_rotate_f32(to_radians(rotation.x), {1, 0, 0})
     yaw_matrix := matrix4_rotate_f32(to_radians(rotation.y), {0, 1, 0})
-    position_matrix := matrix4_translate_f32(-position)
+    camera_position := -position
+    camera_position.y -= 2
+    position_matrix := matrix4_translate_f32(camera_position)
+
     return pitch_matrix * yaw_matrix * position_matrix
 }
 
@@ -321,31 +326,36 @@ create_vertex_UBO :: proc(renderer: Renderer, entity_physics: []Physics, index: 
     x, y: i32;
     ok := sdl.GetWindowSize(renderer.window, &x, &y)
     aspect := f32(x) / f32(y)
-    projection_matrix := matrix4_perspective_f32(linalg.to_radians(f32(70)), aspect, 0.0001, 1000)
+    projection_matrix := matrix4_perspective_f32(linalg.to_radians(f32(90)), aspect, 0.00001, 1000)
     view_matrix := create_view_matrix(entity_physics[0])
     model_rotation_matrix := matrix4_rotate_f32(to_radians(entity_physics[index].rotation.y), {0, 1, 0})
     model_translation_matrix := matrix4_translate_f32(entity_physics[index].position)
-    model_matrix := view_matrix  * model_translation_matrix * model_rotation_matrix
+    model_matrix: matrix[4, 4]f32 = view_matrix  * model_translation_matrix
+    if index != 0 do model_matrix *= model_rotation_matrix
     return VertUniforms {
         modelview = model_matrix,
         proj = projection_matrix,
+        position_offset = to_vec4(entity_physics[index].position, 1)
     }
 }
 
-// create_bbox_UBO :: proc(renderer: ^Renderer, box: BBox) -> VertUniforms {
-//     using linalg
-//     x, y: i32;
-//     ok := sdl.GetWindowSize(renderer.window, &x, &y)
-//     aspect := f32(x) / f32(y)
-//     projection_matrix := matrix4_perspective_f32(linalg.to_radians(f32(70)), aspect, 0.0001, 1000)
-//     view_matrix := create_view_matrix(renderer.camera)
-//     box_position := box.max - box.min
-//     model_matrix := view_matrix * matrix4_translate_f32(box_position)
-//     return VertUniforms {
-//         modelview = model_matrix,
-//         proj = projection_matrix,
-//     }
-// }
+create_bbox_UBO :: proc(renderer: Renderer, entity_physics: []Physics, index: int) -> VertUniforms {
+    using linalg
+    x, y: i32;
+    ok := sdl.GetWindowSize(renderer.window, &x, &y)
+    aspect := f32(x) / f32(y)
+    projection_matrix := matrix4_perspective_f32(linalg.to_radians(f32(90)), aspect, 0.00001, 1000)
+    view_matrix := create_view_matrix(entity_physics[0])
+    model_rotation_matrix := matrix4_rotate_f32(to_radians(entity_physics[index].rotation.y), {0, 1, 0})
+    model_translation_matrix := matrix4_translate_f32(entity_physics[index].position)
+    model_matrix: matrix[4, 4]f32 = view_matrix  * model_translation_matrix * model_rotation_matrix
+    if index != 0 do model_matrix *= model_rotation_matrix
+    return VertUniforms {
+        modelview = model_matrix,
+        proj = projection_matrix,
+        position_offset = to_vec4(entity_physics[index].position, 1)
+    }
+}
 
 @(private="file")
 build_bbox_pipeline :: proc(renderer: ^Renderer) {
@@ -376,7 +386,7 @@ build_bbox_pipeline :: proc(renderer: ^Renderer) {
     renderer.bbox_pipeline = sdl.CreateGPUGraphicsPipeline(renderer.gpu, {
         vertex_shader = vert_shader,
         fragment_shader = frag_shader,
-        primitive_type = .POINTLIST,
+        primitive_type = .LINELIST,
         target_info = {
             num_color_targets = 1,
             color_target_descriptions = &(sdl.GPUColorTargetDescription {
