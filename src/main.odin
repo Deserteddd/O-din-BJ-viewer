@@ -8,9 +8,13 @@ import "core:mem"
 import "core:os"
 import "core:strings"
 import "core:math/linalg"
+import "core:math/rand"
 import "core:path/filepath"
 import "core:time"
 import sdl "vendor:sdl3"
+import im "shared:imgui"
+import im_sdl "shared:imgui/imgui_impl_sdl3"
+import im_sdlgpu "shared:imgui/imgui_impl_sdlgpu3"
 
 default_context: runtime.Context
 DEBUG := false
@@ -26,11 +30,17 @@ main :: proc() {
 }
 
 AppState :: struct {
+    mode:               AppMode,
     renderer:           Renderer,
     entities:           [dynamic]Entity,
     entity_physics:     [dynamic]Physics,
     entity_bounds:      [dynamic]AABB,
-    player_collisions:  []bool
+    player_collisions:  []bool,
+}
+
+AppMode :: enum u8 {
+    GAME,
+    MENU
 }
 
 init :: proc(state: ^AppState) {
@@ -44,56 +54,88 @@ init :: proc(state: ^AppState) {
         }, nil
     )
     
-    state.renderer = RND_Init({.FULLSCREEN})
+    state.renderer = RND_Init({})
     CreatePlayer(state)
     slab := load_object("assets/ref_cube"); defer delete_obj(slab)
     for i in 0..<10 {
-        CreateEntity(slab, state, {.COLLIDER, .STATIC})
-        physics := &state.entity_physics[i+1]
-        bbox := &state.entity_bounds[i+1]
-        move_by := vec3{0, f32(i), -f32(i)*2}
-        move_entity(physics, bbox, move_by)
+        for j in 0..<10 {
+            r1 := rand.float32()
+            r2 := rand.float32()
+            CreateEntity(slab, state, {.COLLIDER, .STATIC})
+            physics := &state.entity_physics[i+1]
+            bbox := &state.entity_bounds[i+1]
+            i, j := f32(i), f32(j)
+            move_by := vec3{i, 0, j}
+            move_entity(physics, bbox, move_by)
+        }
     }
-    creeper := load_object("assets/22-moto_simple"); defer delete_obj(creeper)
-    CreateEntity(creeper, state, {.STATIC, .COLLIDER})
-    // state.entity_physics[11].position = {0, 6, -20}
-    move_entity(&state.entity_physics[11], &state.entity_bounds[11], {-2, 4, -20})
-    // state.entity_physics[11].rotation.y = 90
     state.player_collisions = make([]bool, len(state.entity_physics))
+
+    init_imgui(state)
 }   
+
+init_imgui :: proc(state: ^AppState) {
+    assert(state.renderer.window != nil)
+    im.CHECKVERSION()
+    im.CreateContext()
+    using state.renderer
+    im_sdl.InitForSDLGPU(window)
+    im_sdlgpu.Init(&{
+        Device = state.renderer.gpu,
+        ColorTargetFormat = sdl.GetGPUSwapchainTextureFormat(gpu, window)
+    })
+}
 
 run :: proc(state: ^AppState) {
     main_loop: for {
         defer FRAMES += 1
         ev: sdl.Event
         for sdl.PollEvent(&ev) {
+            im_sdl.ProcessEvent(&ev)
             #partial switch ev.type {
                 case .QUIT: 
                     break main_loop
                 case .KEY_DOWN: #partial switch ev.key.scancode {
-                    case .ESCAPE: break main_loop
+                    case .ESCAPE:
+                        switch_mode(state)
                     case .F: 
                         RND_ToggleWireframe(&state.renderer)
                     case .Q:
-                        p := &state.entity_physics[0]
-                        b := &state.entity_bounds[0]
-                        move_entity(p, b, -p.position+{0, 2, 0})
-                        p.speed = 0
+                        if state.mode == .GAME {
+                            p := &state.entity_physics[0]
+                            b := &state.entity_bounds[0]
+                            move_entity(p, b, -p.position+{0, 2, 0})
+                            p.speed = 0
+                        }
                 }
             }
         }
-        // fmt.println(state.player_collisions)
+
         update(state)
+
         RND_FrameBegin(&state.renderer)
         RND_DrawEntities(state)
         RND_DrawBounds(state)
+        if state.mode == .MENU do RND_DrawUI(&state.renderer)
         ok := RND_FrameSubmit(&state.renderer); assert(ok)
         if FRAMES % 60 == 0 {
-            fmt.println("speed:\t", state.entity_physics[0].speed)
-            fmt.println("Airborne:\t", .AIRBORNE in state.entity_physics[0].flags)
-            fmt.println("bbox_min:\t", state.entity_bounds[0].min)
-            fmt.println("bbox_max:\t", state.entity_bounds[0].max)
-            fmt.println()
+
+        }
+    }
+}
+
+switch_mode :: proc(state: ^AppState) {
+    if state.mode == .GAME do state.mode = .MENU
+    else do state.mode = .GAME
+    switch state.mode {
+        case .GAME: {
+            ok := sdl.HideCursor(); assert(ok)
+            ok = sdl.SetWindowRelativeMouseMode(state.renderer.window, true); assert(ok)
+        }
+        case .MENU: {
+            ok := sdl.ShowCursor(); assert(ok)
+            ok = sdl.SetWindowRelativeMouseMode(state.renderer.window, false); assert(ok)
+            sdl.WarpMouseInWindow(state.renderer.window, 700, 90)
         }
     }
 }
@@ -103,8 +145,10 @@ update :: proc(state: ^AppState) {
     new_ticks := sdl.GetTicks();
     dt := f32(new_ticks - last_ticks) / 1000
     last_ticks = new_ticks
-    process_keyboard(state, dt)
-    update_player(state, dt)
+    if state.mode == .GAME {
+        process_keyboard(state, dt)
+        update_player(state, dt)
+    }
     update_camera(&state.entity_physics[0])
 }
 

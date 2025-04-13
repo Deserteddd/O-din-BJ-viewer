@@ -18,7 +18,7 @@ Model :: struct {
     textures: []^sdl.GPUTexture,
     vbo: ^sdl.GPUBuffer,
     material_buffer: ^sdl.GPUBuffer,
-    mesh_boundary_indices: []u32,
+    num_vertices: u32
 }
 
 move_entity :: proc(physics: ^Physics, bbox: ^AABB, by: vec3) {
@@ -81,52 +81,36 @@ CreateEntity :: proc(data: ObjectData, state: ^AppState, physics_flags: PhysicsF
     entity.model.textures = textures[:]
 
     // Create and upload buffers
-    len_bytes, num_vertices: u32
-    vertices: [dynamic]Vertex; defer delete(vertices)
+    len_bytes := u32(len(data.vertices) * size_of(Vertex))
+    num_vertices: u32
     bbox_vertices: [24]vec3
-    mesh_boundary_indices := make([]u32, len(data.vertex_groups))
-    bbox: AABB = {
-        min = max(f32),
-        max = min(f32)
-    }
-    for group, i in data.vertex_groups {
-        len_bytes += u32(len(group)*size_of(Vertex))
-        count: f32
-
-        for vert, v in group {
-            using vert
-            num_vertices += 1
-            count += 1
-            if .COLLIDER in physics_flags {
-                if (position.x < bbox.min.x) do bbox.min.x = position.x;
-                if (position.y < bbox.min.y) do bbox.min.y = position.y;
-                if (position.z < bbox.min.z) do bbox.min.z = position.z;
-
-                if (position.x > bbox.max.x) do bbox.max.x = position.x;
-                if (position.y > bbox.max.y) do bbox.max.y = position.y;
-                if (position.z > bbox.max.z) do bbox.max.z = position.z;
-            }
-            append(&vertices, vert)
-        }
-        mesh_boundary_indices[i] = num_vertices
-    }
-
-    if .COLLIDER in physics_flags {
-        bbox_vertices = get_bbox_vertices(bbox)
-    }
 
     material_matrices := make([dynamic][4]vec4, 0, len(data.materials)); defer delete(material_matrices)
     for material in data.materials do append(&material_matrices, material_matrix(material))
-    // fmt.println(bbox_vertices)
     transfer_buffer := sdl.CreateGPUTransferBuffer(gpu, {
         usage = sdl.GPUTransferBufferUsage.UPLOAD,
         size = len_bytes,
     }); assert(transfer_buffer != nil)
     copy_commands := sdl.AcquireGPUCommandBuffer(gpu); assert(copy_commands != nil)
     copy_pass := sdl.BeginGPUCopyPass(copy_commands); assert(copy_pass != nil)
-    vbo              := create_buffer_with_data(gpu, transfer_buffer, copy_pass, {.VERTEX}, vertices[:])
-    bounding_box_vbo := create_buffer_with_data(gpu, transfer_buffer, copy_pass, {.VERTEX}, bbox_vertices[:])
+    vbo              := create_buffer_with_data(gpu, transfer_buffer, copy_pass, {.VERTEX}, data.vertices[:])
     material_buffer  := create_buffer_with_data(gpu, transfer_buffer, copy_pass, {.GRAPHICS_STORAGE_READ}, material_matrices[:])
+    bbox: AABB = {min = max(f32), max = min(f32)}
+    if .COLLIDER in physics_flags {
+        for vert, v in data.vertices {
+            using vert
+            if (position.x < bbox.min.x) do bbox.min.x = position.x;
+            if (position.y < bbox.min.y) do bbox.min.y = position.y;
+            if (position.z < bbox.min.z) do bbox.min.z = position.z;
+            if (position.x > bbox.max.x) do bbox.max.x = position.x;
+            if (position.y > bbox.max.y) do bbox.max.y = position.y;
+            if (position.z > bbox.max.z) do bbox.max.z = position.z;
+        }
+        bbox_vertices = get_bbox_vertices(bbox)
+        entity.model.num_vertices = u32(len(data.vertices))
+        entity.bbox_vbo = create_buffer_with_data(gpu, transfer_buffer, copy_pass, {.VERTEX}, bbox_vertices[:])
+        assert(entity.bbox_vbo != nil)
+    }
     for j in 0..<i {
         sdl.UploadToGPUTexture(copy_pass, 
             {transfer_buffer = tex_transfer_buffers[j]},
@@ -143,10 +127,7 @@ CreateEntity :: proc(data: ObjectData, state: ^AppState, physics_flags: PhysicsF
 
     // Assignments
     entity.model.vbo = vbo
-    fmt.println(bbox_vertices)
-    entity.bbox_vbo = bounding_box_vbo
     entity.model.material_buffer = material_buffer
-    entity.model.mesh_boundary_indices = mesh_boundary_indices
     append(&state.entity_bounds, bbox)
     append(&state.entities, entity)
     append(&state.entity_physics, physics)

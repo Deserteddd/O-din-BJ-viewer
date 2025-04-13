@@ -12,7 +12,7 @@ import "core:mem"
 import stbi "vendor:stb/image"
 
 ObjectData :: struct {
-    vertex_groups: [dynamic][]Vertex,
+    vertices: [dynamic]Vertex,
     materials: []Material,
     texture_data: TextureData
 }
@@ -40,7 +40,7 @@ print_obj :: proc(data: ObjectData, verbose := false) {
           fmt.println("-------------------- ObjectData --------------------")
     defer fmt.println("----------------------------------------------------")
 
-    fmt.printfln("Vertex groups: {}", len(data.vertex_groups))
+    fmt.printfln("Vertex groups: {}", len(data.vertices))
     if verbose {
         fmt.printfln("Materials:")
         for mat, i in data.materials {
@@ -72,9 +72,6 @@ material_matrix :: proc(m: Material) -> [4]vec4 {
 
 delete_obj :: proc(data: ObjectData) {
     using data
-    for mesh in vertex_groups {
-        delete(mesh)
-    }
     using texture_data
     for i in 0..<len(names) {
         delete(names[i])
@@ -82,7 +79,7 @@ delete_obj :: proc(data: ObjectData) {
     delete(names)
     delete(textures)
     delete(sizes)
-    delete(vertex_groups)
+    delete(vertices)
     delete(materials)
 }
 
@@ -130,7 +127,7 @@ load_object :: proc(dir_path: string) -> ObjectData {
                         new_obj := load_obj(line_arr[start:i], material_names, &positions, &uvs, &normals)
                         elapsed := time.since(now)
                         load_time += time.duration_milliseconds(elapsed)
-                        append(&obj.vertex_groups, new_obj)
+                        for v in new_obj do append(&obj.vertices, v)
 
                     }
                     start = i
@@ -140,7 +137,7 @@ load_object :: proc(dir_path: string) -> ObjectData {
             new_obj := load_obj(line_arr[start:i], material_names, &positions, &uvs, &normals)
             elapsed := time.since(now)
             load_time += time.duration_milliseconds(elapsed)
-            append(&obj.vertex_groups, new_obj)
+            for v in new_obj do append(&obj.vertices, v)
 
         }
     }

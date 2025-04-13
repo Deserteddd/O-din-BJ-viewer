@@ -6,11 +6,12 @@ import "core:fmt"
 import "core:c"
 import sdl "vendor:sdl3"
 import stbi "vendor:stb/image"
+import im "shared:imgui"
+import im_sdl "shared:imgui/imgui_impl_sdl3"
+import im_sdlgpu "shared:imgui/imgui_impl_sdlgpu3"
 
 vert_shader_code := #load("../shaders/spv/shader.vert.spv")
 frag_shader_code := #load("../shaders/spv/shader.frag.spv")
-vert_code_2D := #load("../shaders/spv/shader2D.vert.spv")
-frag_code_2D := #load("../shaders/spv/shader2D.frag.spv")
 bbox_vert_shader := #load("../shaders/spv/bbox.vert.spv")
 bbox_frag_shader := #load("../shaders/spv/bbox.frag.spv")
 
@@ -25,7 +26,7 @@ Renderer :: struct {
     swapchain_texture: ^sdl.GPUTexture,
     wireframe: bool,
     samplers: [4]^sdl.GPUSampler,
-    gui: GUI,
+    light: vec4
 }
 
 VertUniforms :: struct {
@@ -35,7 +36,7 @@ VertUniforms :: struct {
 }
 
 FragUniforms :: struct {
-    player_pos: vec4,
+    light: vec4,
 }
 
 RND_InitFlags :: distinct bit_set[RND_InitFlag; uint]
@@ -117,7 +118,31 @@ RND_Init :: proc(flags: RND_InitFlags) -> Renderer {
         renderer.samplers[i] = sampler
     }
     assert(renderer.bbox_pipeline != nil)
+    renderer.light = {0, 10, 0, 100}
     return renderer
+}
+
+RND_DrawUI :: proc(renderer: ^Renderer) {
+    im_sdlgpu.NewFrame()
+    im_sdl.NewFrame()
+    im.NewFrame()
+    if im.Begin("Light") {
+        im.DragFloat3("position", transmute(^vec3)&renderer.light, 0.1, -20, 20)
+        im.DragFloat("intensity", &renderer.light.w, 0.5, 0, 1000)
+    }
+    im.End()
+    im.Render()
+    im_draw_data := im.GetDrawData()
+    im_sdlgpu.PrepareDrawData(im_draw_data, renderer.cmd_buff)
+    im_color_target := sdl.GPUColorTargetInfo {
+        texture = renderer.swapchain_texture,
+        load_op = .LOAD,
+        store_op = .STORE
+    }
+    im_render_pass := sdl.BeginGPURenderPass(renderer.cmd_buff, &im_color_target, 1, nil)
+    assert(im_render_pass != nil)
+    im_sdlgpu.RenderDrawData(im_draw_data, renderer.cmd_buff, im_render_pass)
+    sdl.EndGPURenderPass(im_render_pass)
 }
 
 RND_FrameBegin :: proc(renderer: ^Renderer) {
@@ -188,9 +213,7 @@ RND_DrawEntities :: proc(state: ^AppState) {
     render_pass := sdl.BeginGPURenderPass(renderer.cmd_buff, &color_target, 1, &depth_target_info); assert(render_pass != nil)
     sdl.BindGPUGraphicsPipeline(render_pass, renderer.pipeline3D)
     assert(entities[0].model.vbo == nil)
-    light_pos := player.position
-    light_pos.y += 2
-    frag_ubo := FragUniforms {player_pos = to_vec4(light_pos, 5)}
+    frag_ubo := FragUniforms {light = renderer.light}
 
     sdl.PushGPUFragmentUniformData(renderer.cmd_buff, 0, &frag_ubo, size_of(FragUniforms))
     for &entity, entity_index in entities {
@@ -218,12 +241,7 @@ RND_DrawEntities :: proc(state: ^AppState) {
             entity_index
         )
         sdl.PushGPUVertexUniformData(renderer.cmd_buff, 0, &vert_ubo, size_of(VertUniforms))
-        start: u32 = 0
-        for end, i in model.mesh_boundary_indices {
-            sdl.DrawGPUPrimitives(render_pass, end-start, 1, start, 0)
-            start = end
-
-        }
+        sdl.DrawGPUPrimitives(render_pass, model.num_vertices, 1, 0, 0)
     }
     sdl.EndGPURenderPass(render_pass)
 }
@@ -405,8 +423,6 @@ build_bbox_pipeline :: proc(renderer: ^Renderer) {
         },
     })
 }
-
-
 
 create_buffer_with_data :: proc(
     gpu: ^sdl.GPUDevice, 
