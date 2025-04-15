@@ -19,6 +19,8 @@ import im_sdlgpu "shared:imgui/imgui_impl_sdlgpu3"
 default_context: runtime.Context
 DEBUG := false
 FRAMES := 0
+RENDERTIME := 0
+PHYSICSTIME := 0
 last_ticks := sdl.GetTicks();
 
 main :: proc() {
@@ -31,11 +33,12 @@ main :: proc() {
 
 AppState :: struct {
     mode:               AppMode,
+    player:             Player,
     renderer:           Renderer,
     entities:           [dynamic]Entity,
-    entity_physics:     [dynamic]Physics,
-    entity_bounds:      [dynamic]AABB,
+    models:             [dynamic]Model,
     player_collisions:  []bool,
+    checkpoint:         [2]vec3, // Position, Rotation
 }
 
 AppMode :: enum u8 {
@@ -55,24 +58,32 @@ init :: proc(state: ^AppState) {
     )
     
     state.renderer = RND_Init({})
-    CreatePlayer(state)
+    state.player = create_player()
     slab := load_object("assets/ref_cube"); defer delete_obj(slab)
-    for i in 0..<10 {
-        for j in 0..<10 {
-            r1 := rand.float32()
-            r2 := rand.float32()
-            CreateEntity(slab, state, {.COLLIDER, .STATIC})
-            physics := &state.entity_physics[i+1]
-            bbox := &state.entity_bounds[i+1]
-            i, j := f32(i), f32(j)
-            move_by := vec3{i, 0, j}
-            move_entity(physics, bbox, move_by)
+    add_model(slab, state)
+
+    for i in 0..<5000 {
+        create_entity(state, {.COLLIDER, .STATIC}, 0)
+    }
+
+    randomize_tile_positions(state)
+
+    state.player_collisions = make([]bool, len(state.entities))
+    init_imgui(state)
+} 
+
+randomize_tile_positions :: proc(state: ^AppState) {
+    resert_player_pos(state, true)
+    state.checkpoint = 0
+    for &entity, i in state.entities {
+        if i == 0 do continue
+        entity.position = {
+            random_range(-50, 50),
+            random_range(0, 40),
+            random_range(-50, 50)
         }
     }
-    state.player_collisions = make([]bool, len(state.entity_physics))
-
-    init_imgui(state)
-}   
+}
 
 init_imgui :: proc(state: ^AppState) {
     assert(state.renderer.window != nil)
@@ -98,29 +109,28 @@ run :: proc(state: ^AppState) {
                 case .KEY_DOWN: #partial switch ev.key.scancode {
                     case .ESCAPE:
                         switch_mode(state)
-                    case .F: 
-                        RND_ToggleWireframe(&state.renderer)
                     case .Q:
-                        if state.mode == .GAME {
-                            p := &state.entity_physics[0]
-                            b := &state.entity_bounds[0]
-                            move_entity(p, b, -p.position+{0, 2, 0})
-                            p.speed = 0
+                        if !state.player.airborne {
+                            state.checkpoint = {state.player.position, state.player.rotation}
                         }
+                    case .E:
+                        resert_player_pos(state)
                 }
             }
         }
-
         update(state)
-
         RND_FrameBegin(&state.renderer)
+        // now := time.now()
         RND_DrawEntities(state)
+        // elapsed := time.since(now)
         RND_DrawBounds(state)
-        if state.mode == .MENU do RND_DrawUI(&state.renderer)
-        ok := RND_FrameSubmit(&state.renderer); assert(ok)
-        if FRAMES % 60 == 0 {
 
-        }
+        wireframe := state.renderer.wireframe 
+        RND_DrawUI(state)
+        if wireframe != state.renderer.wireframe do RND_ToggleWireframe(&state.renderer)
+        ok := RND_FrameSubmit(&state.renderer); assert(ok)
+        // fmt.println(elapsed)
+        if FRAMES % 60 == 0 {}
     }
 }
 
@@ -140,6 +150,22 @@ switch_mode :: proc(state: ^AppState) {
     }
 }
 
+resert_player_pos :: proc(state: ^AppState, at_zero := false) {
+    using state
+    if at_zero do player.position = 0; 
+    else if checkpoint.x == 0 {
+        player.position = checkpoint.x
+    } else {
+        player.position = checkpoint.x
+        player.rotation = checkpoint.y
+    }
+    player.speed = 0
+    player.bbox = AABB {
+        min = player.position + {-0.2, 0, -0.2},
+        max = player.position + {0.2, 2.1, 0.2}
+    }
+}
+
 update :: proc(state: ^AppState) {
     using state
     new_ticks := sdl.GetTicks();
@@ -148,33 +174,44 @@ update :: proc(state: ^AppState) {
     if state.mode == .GAME {
         process_keyboard(state, dt)
         update_player(state, dt)
+        update_camera(&state.player)
     }
-    update_camera(&state.entity_physics[0])
 }
 
 update_player :: proc(state: ^AppState, dt: f32) {
     g: f32 = 16
-    p := &state.entity_physics[0]
-    p.speed.y -= g*dt*2
-    if p.speed.y < -10 do p.speed.y = -10
-    delta_pos := p.speed * dt
-    move_entity(p, &state.entity_bounds[0], delta_pos)
-    p.flags += {.AIRBORNE}
-    for box, i in state.entity_bounds {
-        if i == 0 do continue
-        if aabbs_collide(state.entity_bounds[0], box) {
-            mtv := resolve_aabb_collision_mtv(state.entity_bounds[0], box)
+    using state
+    player.speed.y -= g*dt*2
+    if player.speed.y < -10 do player.speed.y = -10
+    delta_pos := player.speed * dt
+    player.position += delta_pos
+    player.bbox.min += delta_pos
+    player.bbox.max += delta_pos
+
+    player.airborne = true
+    for entity, i in state.entities {
+        entity_bbox := AABB {
+            min = entity.model.bbox.min + entity.position,
+            max = entity.model.bbox.max + entity.position
+        }
+        if aabbs_collide(player.bbox, entity_bbox) {
+            mtv := resolve_aabb_collision_mtv(player.bbox, entity_bbox)
             for axis, j in mtv do if axis != 0 {
-                p.speed[j] *= 0.95
+                player.speed[j] *= 0.95
                 if j == 1 && axis > 0 { // This means we are standing on a block
-                    p.flags -= {.AIRBORNE}
+                    player.airborne = false
                 } 
             } 
-            move_entity(p, &state.entity_bounds[0], mtv)
+            player.position += mtv
+            player.bbox.min += mtv
+            player.bbox.max += mtv
             state.player_collisions[i] = true
         } else {
             state.player_collisions[i] = false
         }
+    }
+    if player.position.y < -2 {
+        resert_player_pos(state)
     }
 }
 
@@ -196,12 +233,11 @@ process_keyboard :: proc(state: ^AppState, dt: f32) {
     if key_state[DOWN] do pitch_d = 1
 
     using state
-    player:= &entity_physics[0]
     yaw_cos := math.cos(math.to_radians(player.rotation.y))
     yaw_sin := math.sin(math.to_radians(player.rotation.y))
     player.rotation.x += (pitch_d-pitch_u) * dt * 100
     player.rotation.y += (yaw_r-yaw_l) * dt * 100
-    if !(.AIRBORNE in state.entity_physics[0].flags) {
+    if !player.airborne {
         fb := b-f; lr := r-l
         player.speed.y = (u-d)*move_speed * 0.15
         if key_state[LSHIFT] do move_speed *= 2
@@ -211,9 +247,9 @@ process_keyboard :: proc(state: ^AppState, dt: f32) {
     }
 }
 
-update_camera :: proc(player_physics: ^Physics) {
+update_camera :: proc(player: ^Player) {
     x, y: f32
-    using player_physics
+    using player
     _ = sdl.GetRelativeMouseState(&x, &y)
     rotation.y += x * 0.05
     rotation.x += y * 0.05

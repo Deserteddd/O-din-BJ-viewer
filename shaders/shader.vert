@@ -11,10 +11,12 @@ layout (location = 2) out vec2 v_uv;
 layout (location = 3) flat out uint v_material;
 
 
-
-layout(set=1, binding=0) uniform UBO {
-    mat4 modelview;
+layout(set=1, binding=0) uniform PROJ {
     mat4 projection_matrix;
+};
+
+layout(set=1, binding=1) uniform UBO {
+    mat4 modelview;
     vec4 position_offset;
 };
 

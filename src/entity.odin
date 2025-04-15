@@ -10,39 +10,42 @@ Constant entity id's:
 */
 Entity :: struct {
     id: u32,
-    model: Model,
-    bbox_vbo: ^sdl.GPUBuffer,
+    model: ^Model,
+    position: vec3,
+    speed: vec3,
+    rotation: vec3,
+    flags: PhysicsFlags,
 }
 
 Model :: struct {
-    textures: []^sdl.GPUTexture,
-    vbo: ^sdl.GPUBuffer,
+    textures:        []^sdl.GPUTexture,
+    vbo:             ^sdl.GPUBuffer,
     material_buffer: ^sdl.GPUBuffer,
-    num_vertices: u32
+    bbox_vbo:        ^sdl.GPUBuffer,
+    num_vertices:    u32,
+    bbox:            AABB
 }
 
-move_entity :: proc(physics: ^Physics, bbox: ^AABB, by: vec3) {
-    physics.position += by
-    bbox.min += by
-    bbox.max += by
+Player :: struct {
+    position: vec3,
+    speed: vec3,
+    rotation: vec3,
+    bbox: AABB,
+    airborne: bool
 }
 
-print_entities :: proc(entities: [dynamic]Entity, physics: [dynamic]Physics) {
-    for e, i in entities {
-        assert(len(entities) == len(physics))
-        fmt.printfln("Entity {} - has_model: {}", e.id, e.model.vbo != nil)
-        fmt.println(physics[i].flags)
-        fmt.println()
-    }
-}
-
-CreateEntity :: proc(data: ObjectData, state: ^AppState, physics_flags: PhysicsFlags) {
+create_entity :: proc(state: ^AppState, physics_flags: PhysicsFlags, model: u32) {
     entity: Entity
     entity.id = u32(len(state.entities))
-    physics: Physics
-    physics.flags = physics_flags
+    entity.flags = physics_flags
+    entity.model = &state.models[model]
+    append(&state.entities, entity)
+}
+
+add_model :: proc(data: ObjectData, state: ^AppState) {
     // Create and upload texture
     using state.renderer
+    model: Model
     tex_transfer_buffers: [4]^sdl.GPUTransferBuffer
     img_sizes: [4][2]i32
     i: int
@@ -78,7 +81,7 @@ CreateEntity :: proc(data: ObjectData, state: ^AppState, physics_flags: PhysicsF
         sdl.UnmapGPUTransferBuffer(gpu, tex_transfer_buffer)
         tex_transfer_buffers[i] = tex_transfer_buffer
     }
-    entity.model.textures = textures[:]
+    model.textures = textures[:]
 
     // Create and upload buffers
     len_bytes := u32(len(data.vertices) * size_of(Vertex))
@@ -96,25 +99,26 @@ CreateEntity :: proc(data: ObjectData, state: ^AppState, physics_flags: PhysicsF
     vbo              := create_buffer_with_data(gpu, transfer_buffer, copy_pass, {.VERTEX}, data.vertices[:])
     material_buffer  := create_buffer_with_data(gpu, transfer_buffer, copy_pass, {.GRAPHICS_STORAGE_READ}, material_matrices[:])
     bbox: AABB = {min = max(f32), max = min(f32)}
-    if .COLLIDER in physics_flags {
-        for vert, v in data.vertices {
-            using vert
-            if (position.x < bbox.min.x) do bbox.min.x = position.x;
-            if (position.y < bbox.min.y) do bbox.min.y = position.y;
-            if (position.z < bbox.min.z) do bbox.min.z = position.z;
-            if (position.x > bbox.max.x) do bbox.max.x = position.x;
-            if (position.y > bbox.max.y) do bbox.max.y = position.y;
-            if (position.z > bbox.max.z) do bbox.max.z = position.z;
-        }
-        bbox_vertices = get_bbox_vertices(bbox)
-        entity.model.num_vertices = u32(len(data.vertices))
-        entity.bbox_vbo = create_buffer_with_data(gpu, transfer_buffer, copy_pass, {.VERTEX}, bbox_vertices[:])
-        assert(entity.bbox_vbo != nil)
+    for vert, v in data.vertices {
+        using vert
+        if (position.x < bbox.min.x) do bbox.min.x = position.x;
+        if (position.y < bbox.min.y) do bbox.min.y = position.y;
+        if (position.z < bbox.min.z) do bbox.min.z = position.z;
+        if (position.x > bbox.max.x) do bbox.max.x = position.x;
+        if (position.y > bbox.max.y) do bbox.max.y = position.y;
+        if (position.z > bbox.max.z) do bbox.max.z = position.z;
     }
+
+    bbox_vertices = get_bbox_vertices(bbox)
+    model.num_vertices = u32(len(data.vertices))
+    model.bbox_vbo = create_buffer_with_data(gpu, transfer_buffer, copy_pass, {.VERTEX}, bbox_vertices[:])
+    model.bbox = bbox
+    assert(model.bbox_vbo != nil)
+
     for j in 0..<i {
         sdl.UploadToGPUTexture(copy_pass, 
             {transfer_buffer = tex_transfer_buffers[j]},
-            {texture = entity.model.textures[j], w = u32(img_sizes[j].x), h = u32(img_sizes[j].y), d = 1},
+            {texture = model.textures[j], w = u32(img_sizes[j].x), h = u32(img_sizes[j].y), d = 1},
             false
         )
     }
@@ -126,28 +130,20 @@ CreateEntity :: proc(data: ObjectData, state: ^AppState, physics_flags: PhysicsF
     ok := sdl.SubmitGPUCommandBuffer(copy_commands); assert(ok)
 
     // Assignments
-    entity.model.vbo = vbo
-    entity.model.material_buffer = material_buffer
-    append(&state.entity_bounds, bbox)
-    append(&state.entities, entity)
-    append(&state.entity_physics, physics)
+    model.vbo = vbo
+    model.material_buffer = material_buffer
+    append(&state.models, model)
 }
 
-CreatePlayer :: proc(state: ^AppState) {
-    physics := Physics{
-        flags = {.PLAYER, .COLLIDER, .DYNAMIC},
-        position = {0, 11, 0}
+create_player :: proc() -> Player {
+    position: vec3 = {0, 0, 0}
+    return Player {
+        position = position,
+        bbox = AABB {
+            min = position + {-0.2, 0, -0.2},
+            max = position + {0.2, 2.1, 0.2}
+        },
     }
-    bbox := AABB {
-        min = physics.position + {-0.2, 0, -0.2},
-        max = physics.position + {0.2, 2.1, 0.2}
-    }
-
-    entity := Entity { id = 0 }
-
-    append(&state.entities, entity)
-    append(&state.entity_physics, physics)
-    append(&state.entity_bounds, bbox)
 }
 
 get_bbox_vertices :: proc(bbox: AABB) -> [24]vec3 {

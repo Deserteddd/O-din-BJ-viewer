@@ -26,17 +26,18 @@ Renderer :: struct {
     swapchain_texture: ^sdl.GPUTexture,
     wireframe: bool,
     samplers: [4]^sdl.GPUSampler,
-    light: vec4
+    light: PointLight
+}
+
+PointLight :: struct #packed {
+    position: vec3,
+    power:    f32,
+    color:    vec4,
 }
 
 VertUniforms :: struct {
     modelview: matrix[4,4]f32,
-    proj: matrix[4,4]f32,
     position_offset: vec4,
-}
-
-FragUniforms :: struct {
-    light: vec4,
 }
 
 RND_InitFlags :: distinct bit_set[RND_InitFlag; uint]
@@ -57,12 +58,12 @@ RND_Init :: proc(flags: RND_InitFlags) -> Renderer {
         w = 1920
         h = 1080
     } 
-    window  := sdl.CreateWindow("Hello Odin", w, h, window_flags); assert(ok)
+    window  := sdl.CreateWindow("Demo window", w, h, window_flags); assert(ok)
     ok = sdl.HideCursor(); assert(ok)
     ok = sdl.SetWindowRelativeMouseMode(window, true); assert(ok)
     width, height: i32
     sdl.GetWindowSize(window, &width, &height)
-    gpu := sdl.CreateGPUDevice({.SPIRV}, true, nil); assert(gpu != nil)
+    gpu := sdl.CreateGPUDevice({.SPIRV}, false, nil); assert(gpu != nil)
     ok = sdl.ClaimWindowForGPUDevice(gpu, window); assert(ok)
 
     renderer.window = window
@@ -118,17 +119,26 @@ RND_Init :: proc(flags: RND_InitFlags) -> Renderer {
         renderer.samplers[i] = sampler
     }
     assert(renderer.bbox_pipeline != nil)
-    renderer.light = {0, 10, 0, 100}
+    renderer.light = PointLight {
+        position = vec3{0, 10, 0},
+        color = 1,
+        power = 100
+    }
     return renderer
 }
 
-RND_DrawUI :: proc(renderer: ^Renderer) {
+RND_DrawUI :: proc(state: ^AppState) {
+    using state
+    if state.mode != .MENU do return
     im_sdlgpu.NewFrame()
     im_sdl.NewFrame()
     im.NewFrame()
-    if im.Begin("Light") {
-        im.DragFloat3("position", transmute(^vec3)&renderer.light, 0.1, -20, 20)
-        im.DragFloat("intensity", &renderer.light.w, 0.5, 0, 1000)
+    if im.Begin("Pointlight") {
+        im.DragFloat3("position", &renderer.light.position, 0.1, -50, 50)
+        im.DragFloat("intensity", &renderer.light.power, 0.5, 0, 1000)
+        im.ColorPicker3("color", transmute(^vec3)&renderer.light.color, {.InputRGB})
+        im.Checkbox("Wireframe", &renderer.wireframe)
+        if im.Button("Random tiles") do randomize_tile_positions(state)
     }
     im.End()
     im.Render()
@@ -176,11 +186,11 @@ RND_DrawBounds :: proc(state: ^AppState) {
     assert(bbox_pass != nil)
     sdl.BindGPUGraphicsPipeline(bbox_pass, renderer.bbox_pipeline)
     for &entity, entity_index in entities {
-        if entity.bbox_vbo == nil || !state.player_collisions[entity_index] do continue
+        if !state.player_collisions[entity_index] do continue
         using entity
-        bindings: [1]sdl.GPUBufferBinding = { sdl.GPUBufferBinding { buffer = bbox_vbo } } 
+        bindings: [1]sdl.GPUBufferBinding = { sdl.GPUBufferBinding { buffer = model.bbox_vbo } } 
         sdl.BindGPUVertexBuffers(bbox_pass, 0, &bindings[0], 1)
-        vert_ubo := create_vertex_UBO(renderer, entity_physics[:], entity_index)
+        vert_ubo := create_vertex_UBO(renderer, entity, player)
         sdl.PushGPUVertexUniformData(renderer.cmd_buff, 0, &vert_ubo, size_of(VertUniforms))
         sdl.DrawGPUPrimitives(bbox_pass, 24, 1, 0, 0)
 
@@ -190,7 +200,6 @@ RND_DrawBounds :: proc(state: ^AppState) {
 
 RND_DrawEntities :: proc(state: ^AppState) {
     using state
-    player := entity_physics[0]
     assert(renderer.cmd_buff != nil)
     assert(renderer.swapchain_texture != nil)
     color_target := sdl.GPUColorTargetInfo {
@@ -212,13 +221,11 @@ RND_DrawEntities :: proc(state: ^AppState) {
 
     render_pass := sdl.BeginGPURenderPass(renderer.cmd_buff, &color_target, 1, &depth_target_info); assert(render_pass != nil)
     sdl.BindGPUGraphicsPipeline(render_pass, renderer.pipeline3D)
-    assert(entities[0].model.vbo == nil)
-    frag_ubo := FragUniforms {light = renderer.light}
-
-    sdl.PushGPUFragmentUniformData(renderer.cmd_buff, 0, &frag_ubo, size_of(FragUniforms))
-    for &entity, entity_index in entities {
+    sdl.PushGPUFragmentUniformData(renderer.cmd_buff, 0, &renderer.light, size_of(PointLight))
+    proj_matrix := create_proj_matrix(renderer)
+    sdl.PushGPUVertexUniformData(renderer.cmd_buff, 0, &proj_matrix, size_of(matrix[4,4]f32))
+    for &entity in entities {
         if entity.model.vbo == nil do continue
-        assert(entity_index>0)
         using entity
         bindings: [1]sdl.GPUBufferBinding = { sdl.GPUBufferBinding { buffer = model.vbo } } 
         sdl.BindGPUVertexBuffers(render_pass, 0, &bindings[0], 1)
@@ -237,24 +244,23 @@ RND_DrawEntities :: proc(state: ^AppState) {
         sdl.BindGPUFragmentStorageBuffers(render_pass, 0, &model.material_buffer, 1)
         vert_ubo := create_vertex_UBO(
             renderer, 
-            entity_physics[:],
-            entity_index
+            entity,
+            player
         )
-        sdl.PushGPUVertexUniformData(renderer.cmd_buff, 0, &vert_ubo, size_of(VertUniforms))
+        sdl.PushGPUVertexUniformData(renderer.cmd_buff, 1, &vert_ubo, size_of(VertUniforms))
         sdl.DrawGPUPrimitives(render_pass, model.num_vertices, 1, 0, 0)
     }
     sdl.EndGPURenderPass(render_pass)
 }
 
 RND_ToggleWireframe :: proc(renderer: ^Renderer) {
-    renderer.wireframe = !renderer.wireframe
     build_3D_pipeline(renderer)
 }
 
 @(private="file")
 build_3D_pipeline :: proc(renderer: ^Renderer) {
     sdl.ReleaseGPUGraphicsPipeline(renderer.gpu, renderer.pipeline3D)
-    vert_shader := load_shader(renderer.gpu, vert_shader_code, .VERTEX, 1, 0, 0); defer sdl.ReleaseGPUShader(renderer.gpu, vert_shader)
+    vert_shader := load_shader(renderer.gpu, vert_shader_code, .VERTEX, 2, 0, 0); defer sdl.ReleaseGPUShader(renderer.gpu, vert_shader)
     frag_shader := load_shader(renderer.gpu, frag_shader_code, .FRAGMENT, 1, 4, 1); defer sdl.ReleaseGPUShader(renderer.gpu, frag_shader)
 
     vb_descriptions: [1]sdl.GPUVertexBufferDescription
@@ -328,7 +334,7 @@ build_3D_pipeline :: proc(renderer: ^Renderer) {
     })
 }
 
-create_view_matrix :: proc(player: Physics) -> linalg.Matrix4f32 {
+create_view_matrix :: proc(player: Player) -> linalg.Matrix4f32 {
     using linalg, player
     pitch_matrix := matrix4_rotate_f32(to_radians(rotation.x), {1, 0, 0})
     yaw_matrix := matrix4_rotate_f32(to_radians(rotation.y), {0, 1, 0})
@@ -339,39 +345,24 @@ create_view_matrix :: proc(player: Physics) -> linalg.Matrix4f32 {
     return pitch_matrix * yaw_matrix * position_matrix
 }
 
-create_vertex_UBO :: proc(renderer: Renderer, entity_physics: []Physics, index: int) -> VertUniforms {
+create_proj_matrix :: proc(renderer: Renderer) -> matrix[4,4]f32 {
     using linalg
     x, y: i32;
     ok := sdl.GetWindowSize(renderer.window, &x, &y)
     aspect := f32(x) / f32(y)
-    projection_matrix := matrix4_perspective_f32(linalg.to_radians(f32(90)), aspect, 0.00001, 1000)
-    view_matrix := create_view_matrix(entity_physics[0])
-    model_rotation_matrix := matrix4_rotate_f32(to_radians(entity_physics[index].rotation.y), {0, 1, 0})
-    model_translation_matrix := matrix4_translate_f32(entity_physics[index].position)
-    model_matrix: matrix[4, 4]f32 = view_matrix  * model_translation_matrix
-    if index != 0 do model_matrix *= model_rotation_matrix
-    return VertUniforms {
-        modelview = model_matrix,
-        proj = projection_matrix,
-        position_offset = to_vec4(entity_physics[index].position, 1)
-    }
+    return matrix4_perspective_f32(linalg.to_radians(f32(90)), aspect, 0.00001, 1000)
 }
 
-create_bbox_UBO :: proc(renderer: Renderer, entity_physics: []Physics, index: int) -> VertUniforms {
+create_vertex_UBO :: proc(renderer: Renderer, entity: Entity, player: Player) -> VertUniforms {
     using linalg
-    x, y: i32;
-    ok := sdl.GetWindowSize(renderer.window, &x, &y)
-    aspect := f32(x) / f32(y)
-    projection_matrix := matrix4_perspective_f32(linalg.to_radians(f32(90)), aspect, 0.00001, 1000)
-    view_matrix := create_view_matrix(entity_physics[0])
-    model_rotation_matrix := matrix4_rotate_f32(to_radians(entity_physics[index].rotation.y), {0, 1, 0})
-    model_translation_matrix := matrix4_translate_f32(entity_physics[index].position)
+    view_matrix := create_view_matrix(player)
+    model_rotation_matrix := matrix4_rotate_f32(to_radians(entity.rotation.y), {0, 1, 0})
+    model_translation_matrix := matrix4_translate_f32(entity.position)
     model_matrix: matrix[4, 4]f32 = view_matrix  * model_translation_matrix * model_rotation_matrix
-    if index != 0 do model_matrix *= model_rotation_matrix
+    // if index != 0 do model_matrix *= model_rotation_matrix
     return VertUniforms {
         modelview = model_matrix,
-        proj = projection_matrix,
-        position_offset = to_vec4(entity_physics[index].position, 1)
+        position_offset = to_vec4(entity.position, 1)
     }
 }
 

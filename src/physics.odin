@@ -13,13 +13,6 @@ PhysicsFlag :: enum {
     PLAYER
 }
 
-Physics :: struct {
-    position: vec3,
-    speed: vec3,
-    rotation: vec3,
-    flags: PhysicsFlags,
-}
-
 // AABB stores 6 values when it only needs to store witdth, height and offset
 AABB :: struct {
     min: vec3,

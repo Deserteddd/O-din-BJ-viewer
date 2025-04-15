@@ -7,6 +7,12 @@ struct Material {
     vec4 Ke;
 };
 
+struct PointLight {
+    vec3 position;
+    float power;
+    vec3 color;
+};
+
 layout(location = 0) in vec3 v_pos;
 layout(location = 1) in vec3 v_normal;
 layout(location = 2) in vec2 v_uv;
@@ -24,7 +30,7 @@ layout(set=2, binding = 4) readonly buffer Materials {
 };
 
 layout(set=3, binding = 0) uniform UBO {
-    vec4 player_pos;
+    PointLight light;
 };
 
 vec4 getColor() {
@@ -48,11 +54,11 @@ vec4 getColor() {
 
 void main() {
     vec4 color = getColor();
-    vec3 to_light = normalize(player_pos.xyz - v_pos);
+    vec3 to_light = normalize(light.position - v_pos);
     vec3 normal = normalize(v_normal);
     float diffuse = max(0.0, dot(v_normal, to_light));
-    float distance = distance(v_pos.xyz, player_pos.xyz);
-    vec3 intensity = player_pos.w * color.xyz * diffuse * (1/(distance*distance));
+    float distance = distance(v_pos.xyz, light.position);
+    vec3 intensity = light.power * light.color * color.xyz * diffuse * (1/(distance*distance));
     frag_color = vec4(color.xyz * intensity, 1);
 }
 
