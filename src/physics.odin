@@ -1,22 +1,56 @@
 package obj_viewer
 
 import "core:math"
+import "core:math/linalg"
 import "core:fmt"
+import "core:simd"
 
 PhysicsFlags :: distinct bit_set[PhysicsFlag]
 
 PhysicsFlag :: enum {
-    STATIC,     // Isn't affected by gravity
-    DYNAMIC,    // Is affected by gravity
-    COLLIDER,   // Duh?
+    STATIC,
+    DYNAMIC,
+    COLLIDER,
     AIRBORNE,
     PLAYER
 }
 
-// AABB stores 6 values when it only needs to store witdth, height and offset
 AABB :: struct {
     min: vec3,
     max: vec3
+}
+
+AABB_soa :: struct {
+    min: #soa[dynamic]vec3,
+    max: #soa[dynamic]vec3
+}
+
+create_furstum_planes :: proc(vp: matrix[4,4]f32) -> [6]vec4 {
+    vp := linalg.transpose(vp)
+    return {
+        vp[3]+vp[0],
+        vp[3]-vp[0],
+        vp[3]+vp[1],
+        vp[3]-vp[1],
+        vp[3]+vp[2],
+        vp[3]-vp[2],
+    }
+}
+
+aabb_intersects_frustum :: proc(frustum_planes: [6]vec4, aabb: AABB) -> bool {
+    using aabb
+    if linalg.length((aabb.min + aabb.max)/2) > 100 do return false
+    for p in frustum_planes {
+        p_vertex: vec3
+        if p.x >= 0 do p_vertex.x = max.x; else do p_vertex.x = min.x
+        if p.y >= 0 do p_vertex.y = max.y; else do p_vertex.y = min.y
+        if p.z >= 0 do p_vertex.z = max.z; else do p_vertex.z = min.z
+
+        if linalg.dot(p.xyz, p_vertex) + p.w < 0 {
+            return false
+        }
+    }
+    return true
 }
 
 aabbs_collide :: proc(a: AABB, b: AABB) -> bool {
@@ -43,10 +77,8 @@ resolve_aabb_collision_mtv :: proc(moving: AABB, solid: AABB) -> vec3 {
 
 	// Resolve along axis of least penetration
 	if x_overlap <= y_overlap && x_overlap <= z_overlap {
-		// mtv.x = if direction.x < 0 then -x_overlap else x_overlap
         if direction.x < 0 do mtv.x = -x_overlap; else do mtv.x = x_overlap
 	} else if y_overlap <= z_overlap {
-		// mtv.y = if direction.y < 0 then -y_overlap else y_overlap
         if direction.y < 0 do mtv.y = -y_overlap; else do mtv.y = y_overlap
 	} else {
         if direction.z < 0 do mtv.z = -z_overlap; else do mtv.z = z_overlap

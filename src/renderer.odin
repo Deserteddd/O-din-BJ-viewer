@@ -4,6 +4,7 @@ import "core:mem"
 import "core:math/linalg"
 import "core:fmt"
 import "core:c"
+import "core:time"
 import sdl "vendor:sdl3"
 import stbi "vendor:stb/image"
 import im "shared:imgui"
@@ -26,7 +27,8 @@ Renderer :: struct {
     swapchain_texture: ^sdl.GPUTexture,
     wireframe: bool,
     samplers: [4]^sdl.GPUSampler,
-    light: PointLight
+    light: PointLight,
+    draw_distance: f32
 }
 
 PointLight :: struct #packed {
@@ -122,8 +124,9 @@ RND_Init :: proc(flags: RND_InitFlags) -> Renderer {
     renderer.light = PointLight {
         position = vec3{0, 10, 0},
         color = 1,
-        power = 100
+        power = 200
     }
+    renderer.draw_distance = 100
     return renderer
 }
 
@@ -133,10 +136,11 @@ RND_DrawUI :: proc(state: ^AppState) {
     im_sdlgpu.NewFrame()
     im_sdl.NewFrame()
     im.NewFrame()
-    if im.Begin("Pointlight") {
-        im.DragFloat3("position", &renderer.light.position, 0.1, -50, 50)
-        im.DragFloat("intensity", &renderer.light.power, 0.5, 0, 1000)
-        im.ColorPicker3("color", transmute(^vec3)&renderer.light.color, {.InputRGB})
+    if im.Begin("Properties") {
+        im.DragFloat3("Light position", &renderer.light.position, 0.5, -200, 200)
+        im.DragFloat("Light intensity", &renderer.light.power, 10, 0, 10000)
+        im.ColorPicker3("Light color", transmute(^vec3)&renderer.light.color, {.InputRGB})
+        im.DragFloat("Draw distance", &state.renderer.draw_distance, 0.5, 10, 250)
         im.Checkbox("Wireframe", &renderer.wireframe)
         if im.Button("Random tiles") do randomize_tile_positions(state)
     }
@@ -172,6 +176,7 @@ RND_FrameSubmit :: proc(renderer: ^Renderer) -> bool {
     return ok
 }
 
+/*
 RND_DrawBounds :: proc(state: ^AppState) {
     using state
     assert(renderer.cmd_buff != nil)
@@ -197,7 +202,7 @@ RND_DrawBounds :: proc(state: ^AppState) {
     }
     sdl.EndGPURenderPass(bbox_pass)
 }
-
+*/
 RND_DrawEntities :: proc(state: ^AppState) {
     using state
     assert(renderer.cmd_buff != nil)
@@ -219,14 +224,15 @@ RND_DrawEntities :: proc(state: ^AppState) {
         clear_stencil = 0,
     }
 
+    proj_matrix := create_proj_matrix(renderer)
+    view_matrix := create_view_matrix(player)
+    frustum_planes := create_furstum_planes(proj_matrix * view_matrix)
+
     render_pass := sdl.BeginGPURenderPass(renderer.cmd_buff, &color_target, 1, &depth_target_info); assert(render_pass != nil)
     sdl.BindGPUGraphicsPipeline(render_pass, renderer.pipeline3D)
     sdl.PushGPUFragmentUniformData(renderer.cmd_buff, 0, &renderer.light, size_of(PointLight))
-    proj_matrix := create_proj_matrix(renderer)
     sdl.PushGPUVertexUniformData(renderer.cmd_buff, 0, &proj_matrix, size_of(matrix[4,4]f32))
-    for &entity in entities {
-        if entity.model.vbo == nil do continue
-        using entity
+    for &model in models {
         bindings: [1]sdl.GPUBufferBinding = { sdl.GPUBufferBinding { buffer = model.vbo } } 
         sdl.BindGPUVertexBuffers(render_pass, 0, &bindings[0], 1)
         texture_count := len(model.textures)
@@ -242,13 +248,26 @@ RND_DrawEntities :: proc(state: ^AppState) {
             )
         }
         sdl.BindGPUFragmentStorageBuffers(render_pass, 0, &model.material_buffer, 1)
-        vert_ubo := create_vertex_UBO(
-            renderer, 
-            entity,
-            player
-        )
-        sdl.PushGPUVertexUniformData(renderer.cmd_buff, 1, &vert_ubo, size_of(VertUniforms))
-        sdl.DrawGPUPrimitives(render_pass, model.num_vertices, 1, 0, 0)
+        rendered := 0
+        cull_time: time.Duration
+        draw_time: time.Duration
+        for &entity, i in entities {
+            now := time.now()
+            if entity.model.vbo != model.vbo do continue
+            if linalg.distance(player.position, entity.position) > renderer.draw_distance*1.2 do continue
+            culled := !aabb_intersects_frustum(frustum_planes, state.aabbs[i])
+            cull_time += time.since(now)
+            if culled do continue
+            rendered += 1
+            now = time.now()
+            vert_ubo := create_vertex_UBO(entity, view_matrix)
+            sdl.PushGPUVertexUniformData(renderer.cmd_buff, 1, &vert_ubo, size_of(VertUniforms))
+            sdl.DrawGPUPrimitives(render_pass, model.num_vertices, 1, 0, 0)
+            draw_time += time.since(now)
+        }
+        // fmt.println("Rendered", rendered, "entities")
+        // fmt.println("Culled in\t", cull_time)
+        // fmt.println("Rendered in\t", draw_time)
     }
     sdl.EndGPURenderPass(render_pass)
 }
@@ -350,16 +369,13 @@ create_proj_matrix :: proc(renderer: Renderer) -> matrix[4,4]f32 {
     x, y: i32;
     ok := sdl.GetWindowSize(renderer.window, &x, &y)
     aspect := f32(x) / f32(y)
-    return matrix4_perspective_f32(linalg.to_radians(f32(90)), aspect, 0.00001, 1000)
+    return matrix4_perspective_f32(linalg.to_radians(f32(90)), aspect, 0.0001, renderer.draw_distance)
 }
 
-create_vertex_UBO :: proc(renderer: Renderer, entity: Entity, player: Player) -> VertUniforms {
+create_vertex_UBO :: proc(entity: Entity, view_matrix: matrix[4,4]f32) -> VertUniforms {
     using linalg
-    view_matrix := create_view_matrix(player)
-    model_rotation_matrix := matrix4_rotate_f32(to_radians(entity.rotation.y), {0, 1, 0})
     model_translation_matrix := matrix4_translate_f32(entity.position)
-    model_matrix: matrix[4, 4]f32 = view_matrix  * model_translation_matrix * model_rotation_matrix
-    // if index != 0 do model_matrix *= model_rotation_matrix
+    model_matrix: matrix[4, 4]f32 = view_matrix * model_translation_matrix
     return VertUniforms {
         modelview = model_matrix,
         position_offset = to_vec4(entity.position, 1)

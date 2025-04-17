@@ -35,8 +35,9 @@ AppState :: struct {
     mode:               AppMode,
     player:             Player,
     renderer:           Renderer,
-    entities:           [dynamic]Entity,
     models:             [dynamic]Model,
+    entities:           [dynamic]Entity,
+    aabbs:              [dynamic]AABB,
     player_collisions:  []bool,
     checkpoint:         [2]vec3, // Position, Rotation
 }
@@ -62,25 +63,30 @@ init :: proc(state: ^AppState) {
     slab := load_object("assets/ref_cube"); defer delete_obj(slab)
     add_model(slab, state)
 
-    for i in 0..<5000 {
+    for i in 0..<100000 {
         create_entity(state, {.COLLIDER, .STATIC}, 0)
     }
-
     randomize_tile_positions(state)
 
     state.player_collisions = make([]bool, len(state.entities))
     init_imgui(state)
-} 
+}
 
 randomize_tile_positions :: proc(state: ^AppState) {
-    resert_player_pos(state, true)
+    assert(len(state.aabbs) == len(state.entities))
+    reset_player_pos(state, true)
     state.checkpoint = 0
+    static_collider_index := 0
     for &entity, i in state.entities {
         if i == 0 do continue
         entity.position = {
-            random_range(-50, 50),
+            random_range(-300, 300),
             random_range(0, 40),
-            random_range(-50, 50)
+            random_range(0, 300)
+        }
+        state.aabbs[i] = AABB {
+            min = entity.model.bbox.min + entity.position,
+            max = entity.model.bbox.max + entity.position
         }
     }
 }
@@ -99,6 +105,7 @@ init_imgui :: proc(state: ^AppState) {
 
 run :: proc(state: ^AppState) {
     main_loop: for {
+        // now := time.now()
         defer FRAMES += 1
         ev: sdl.Event
         for sdl.PollEvent(&ev) {
@@ -110,27 +117,20 @@ run :: proc(state: ^AppState) {
                     case .ESCAPE:
                         switch_mode(state)
                     case .Q:
-                        if !state.player.airborne {
-                            state.checkpoint = {state.player.position, state.player.rotation}
-                        }
+                        if !state.player.airborne do state.checkpoint = {state.player.position, state.player.rotation}
                     case .E:
-                        resert_player_pos(state)
+                        reset_player_pos(state)
                 }
             }
         }
         update(state)
         RND_FrameBegin(&state.renderer)
-        // now := time.now()
         RND_DrawEntities(state)
-        // elapsed := time.since(now)
-        RND_DrawBounds(state)
-
         wireframe := state.renderer.wireframe 
         RND_DrawUI(state)
         if wireframe != state.renderer.wireframe do RND_ToggleWireframe(&state.renderer)
         ok := RND_FrameSubmit(&state.renderer); assert(ok)
-        // fmt.println(elapsed)
-        if FRAMES % 60 == 0 {}
+        // fmt.println(time.since(now))
     }
 }
 
@@ -150,7 +150,7 @@ switch_mode :: proc(state: ^AppState) {
     }
 }
 
-resert_player_pos :: proc(state: ^AppState, at_zero := false) {
+reset_player_pos :: proc(state: ^AppState, at_zero := false) {
     using state
     if at_zero do player.position = 0; 
     else if checkpoint.x == 0 {
@@ -179,9 +179,9 @@ update :: proc(state: ^AppState) {
 }
 
 update_player :: proc(state: ^AppState, dt: f32) {
-    g: f32 = 16
+    g: f32 = 32
     using state
-    player.speed.y -= g*dt*2
+    player.speed.y -= g*dt
     if player.speed.y < -10 do player.speed.y = -10
     delta_pos := player.speed * dt
     player.position += delta_pos
@@ -211,8 +211,9 @@ update_player :: proc(state: ^AppState, dt: f32) {
         }
     }
     if player.position.y < -2 {
-        resert_player_pos(state)
+        reset_player_pos(state)
     }
+
 }
 
 process_keyboard :: proc(state: ^AppState, dt: f32) {

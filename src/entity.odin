@@ -2,6 +2,7 @@ package obj_viewer
 
 import "core:fmt"
 import "core:mem"
+import "core:math/linalg"
 import sdl "vendor:sdl3"
 
 /*
@@ -9,11 +10,10 @@ Constant entity id's:
     0: Player
 */
 Entity :: struct {
-    id: u32,
     model: ^Model,
     position: vec3,
     speed: vec3,
-    rotation: vec3,
+    // rotation: vec3,
     flags: PhysicsFlags,
 }
 
@@ -36,10 +36,11 @@ Player :: struct {
 
 create_entity :: proc(state: ^AppState, physics_flags: PhysicsFlags, model: u32) {
     entity: Entity
-    entity.id = u32(len(state.entities))
+    // entity.id = u32(len(state.entities))
     entity.flags = physics_flags
     entity.model = &state.models[model]
     append(&state.entities, entity)
+    append(&state.aabbs, entity.model.bbox)
 }
 
 add_model :: proc(data: ObjectData, state: ^AppState) {
