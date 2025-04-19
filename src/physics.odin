@@ -12,7 +12,8 @@ PhysicsFlag :: enum {
     DYNAMIC,
     COLLIDER,
     AIRBORNE,
-    PLAYER
+    PLAYER,
+    SHADOW_CASTER
 }
 
 AABB :: struct {
@@ -24,6 +25,52 @@ AABB_soa :: struct {
     min: #soa[dynamic]vec3,
     max: #soa[dynamic]vec3
 }
+
+update_player :: proc(state: ^AppState, dt: f32) {
+    g: f32 = 25
+    using state.player
+    if speed.y > 0 && !airborne {
+        speed.y = 9
+        airborne = true
+    } else {
+        speed.y -= g * dt
+    }
+    delta_pos := speed * dt
+    position += delta_pos
+    bbox.min += delta_pos
+    bbox.max += delta_pos
+
+    found_collision: bool
+    for entity, i in state.entities {
+        entity_bbox := state.aabbs[i]
+        if aabbs_collide(bbox, entity_bbox) {
+            found_collision = true
+            mtv := resolve_aabb_collision_mtv(bbox, entity_bbox)
+            for axis, j in mtv do if axis != 0 {
+                speed[j] *= 0.9
+                if j == 1 { 
+                    if axis > 0 { // This means we are standing on a block
+                        airborne = false
+                    } else {
+                        speed.y = -0.1
+                    }
+                }
+            } 
+            position += mtv
+            bbox.min += mtv
+            bbox.max += mtv
+        }
+    }
+    if !found_collision do airborne = true
+    if !airborne {
+        speed *= 0.8
+    }
+    if position.y < -2 {
+        reset_player_pos(state)
+    }
+}
+
+
 
 create_furstum_planes :: proc(vp: matrix[4,4]f32) -> [6]vec4 {
     vp := linalg.transpose(vp)
@@ -39,7 +86,6 @@ create_furstum_planes :: proc(vp: matrix[4,4]f32) -> [6]vec4 {
 
 aabb_intersects_frustum :: proc(frustum_planes: [6]vec4, aabb: AABB) -> bool {
     using aabb
-    if linalg.length((aabb.min + aabb.max)/2) > 100 do return false
     for p in frustum_planes {
         p_vertex: vec3
         if p.x >= 0 do p_vertex.x = max.x; else do p_vertex.x = min.x

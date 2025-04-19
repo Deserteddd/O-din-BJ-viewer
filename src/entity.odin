@@ -31,6 +31,7 @@ Player :: struct {
     speed: vec3,
     rotation: vec3,
     bbox: AABB,
+    crouching: bool,
     airborne: bool
 }
 
@@ -68,7 +69,7 @@ add_model :: proc(data: ObjectData, state: ^AppState) {
             width = u32(size.x),
             height = u32(size.y),
             layer_count_or_depth = 1,
-            num_levels = 1
+            num_levels = 1,
         })
 
         append(&textures, texture)

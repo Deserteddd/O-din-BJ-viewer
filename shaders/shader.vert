@@ -9,22 +9,29 @@ layout (location = 0) out vec3 v_position;
 layout (location = 1) out vec3 v_normal;
 layout (location = 2) out vec2 v_uv;
 layout (location = 3) flat out uint v_material;
+layout (location = 4) out vec4 v_light_space_position;
 
 
-layout(set=1, binding=0) uniform PROJ {
-    mat4 projection_matrix;
-};
 
-layout(set=1, binding=1) uniform UBO {
+layout(set=1, binding=0) uniform UBO {
     mat4 modelview;
     vec4 position_offset;
 };
 
+layout(set = 1, binding = 1) uniform LIGHT_MATRIX {
+    mat4 light_viewproj;
+};
+
+layout(set=1, binding=2) uniform PROJ {
+    mat4 projection_matrix;
+};
 
 void main() {
+    vec4 world_pos =  vec4(position + position_offset.xyz, 1.0);
     gl_Position = projection_matrix * modelview * vec4(position, 1.0);
-    v_position = position+position_offset.xyz;
+    v_position = world_pos.xyz;
     v_normal = normal;
     v_uv = uv;
     v_material = material;
+    v_light_space_position = light_viewproj * world_pos;
 }

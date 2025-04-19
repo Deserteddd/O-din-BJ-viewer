@@ -23,12 +23,16 @@ RENDERTIME := 0
 PHYSICSTIME := 0
 last_ticks := sdl.GetTicks();
 
+import "core:simd"
+
 main :: proc() {
     state: AppState
     init(&state)
     fmt.println("MAIN: init done")
     run(&state)
     fmt.println("MAIN: Exiting")
+
+
 }
 
 AppState :: struct {
@@ -38,7 +42,6 @@ AppState :: struct {
     models:             [dynamic]Model,
     entities:           [dynamic]Entity,
     aabbs:              [dynamic]AABB,
-    player_collisions:  []bool,
     checkpoint:         [2]vec3, // Position, Rotation
 }
 
@@ -60,29 +63,32 @@ init :: proc(state: ^AppState) {
     
     state.renderer = RND_Init({})
     state.player = create_player()
+    ground := load_object("assets/ref_tris"); defer delete_obj(ground)
+    add_model(ground, state)
     slab := load_object("assets/ref_cube"); defer delete_obj(slab)
     add_model(slab, state)
 
-    for i in 0..<100000 {
-        create_entity(state, {.COLLIDER, .STATIC}, 0)
+    create_entity(state, {.COLLIDER, .STATIC}, 0)
+    for i in 0..<10 {
+        create_entity(state, {.COLLIDER, .STATIC, .SHADOW_CASTER}, 1)
     }
     randomize_tile_positions(state)
 
-    state.player_collisions = make([]bool, len(state.entities))
+    // state.player_collisions = make([]bool, len(state.entities))
     init_imgui(state)
 }
 
 randomize_tile_positions :: proc(state: ^AppState) {
     assert(len(state.aabbs) == len(state.entities))
-    reset_player_pos(state, true)
-    state.checkpoint = 0
+    // reset_player_pos(state, true)
+    // state.checkpoint = 0
     static_collider_index := 0
     for &entity, i in state.entities {
-        if i == 0 do continue
+        if i < 1 do continue
         entity.position = {
-            random_range(-300, 300),
-            random_range(0, 40),
-            random_range(0, 300)
+            random_range(-10, 10),
+            random_range(0, 10),
+            random_range(-10, 10)
         }
         state.aabbs[i] = AABB {
             min = entity.model.bbox.min + entity.position,
@@ -105,7 +111,7 @@ init_imgui :: proc(state: ^AppState) {
 
 run :: proc(state: ^AppState) {
     main_loop: for {
-        // now := time.now()
+        now := time.now()
         defer FRAMES += 1
         ev: sdl.Event
         for sdl.PollEvent(&ev) {
@@ -172,79 +178,38 @@ update :: proc(state: ^AppState) {
     dt := f32(new_ticks - last_ticks) / 1000
     last_ticks = new_ticks
     if state.mode == .GAME {
-        process_keyboard(state, dt)
+        process_keyboard(state)
         update_player(state, dt)
         update_camera(&state.player)
     }
 }
 
-update_player :: proc(state: ^AppState, dt: f32) {
-    g: f32 = 32
-    using state
-    player.speed.y -= g*dt
-    if player.speed.y < -10 do player.speed.y = -10
-    delta_pos := player.speed * dt
-    player.position += delta_pos
-    player.bbox.min += delta_pos
-    player.bbox.max += delta_pos
-
-    player.airborne = true
-    for entity, i in state.entities {
-        entity_bbox := AABB {
-            min = entity.model.bbox.min + entity.position,
-            max = entity.model.bbox.max + entity.position
-        }
-        if aabbs_collide(player.bbox, entity_bbox) {
-            mtv := resolve_aabb_collision_mtv(player.bbox, entity_bbox)
-            for axis, j in mtv do if axis != 0 {
-                player.speed[j] *= 0.95
-                if j == 1 && axis > 0 { // This means we are standing on a block
-                    player.airborne = false
-                } 
-            } 
-            player.position += mtv
-            player.bbox.min += mtv
-            player.bbox.max += mtv
-            state.player_collisions[i] = true
-        } else {
-            state.player_collisions[i] = false
-        }
-    }
-    if player.position.y < -2 {
-        reset_player_pos(state)
-    }
-
-}
-
-process_keyboard :: proc(state: ^AppState, dt: f32) {
+process_keyboard :: proc(state: ^AppState) {
     using sdl.Scancode
     key_state := sdl.GetKeyboardState(nil)
-    f, b, l, r, u, d: f32
+    f, b, l, r, u: f32
     yaw_r, yaw_l, pitch_u, pitch_d : f32
-    move_speed: f32 = 75
     if key_state[W] do f = 1
     if key_state[S] do b = 1
     if key_state[A] do l = 1
     if key_state[D] do r = 1
     if key_state[SPACE] do u = 1
-    if key_state[LCTRL] do d = 1
     if key_state[RIGHT] do yaw_r = 1
     if key_state[LEFT] do yaw_l = 1
     if key_state[UP] do pitch_u = 1
     if key_state[DOWN] do pitch_d = 1
+    state.player.crouching = key_state[LCTRL]
 
     using state
     yaw_cos := math.cos(math.to_radians(player.rotation.y))
     yaw_sin := math.sin(math.to_radians(player.rotation.y))
-    player.rotation.x += (pitch_d-pitch_u) * dt * 100
-    player.rotation.y += (yaw_r-yaw_l) * dt * 100
+    player.rotation.x += (pitch_d-pitch_u)
+    player.rotation.y += (yaw_r-yaw_l)
     if !player.airborne {
         fb := b-f; lr := r-l
-        player.speed.y = (u-d)*move_speed * 0.15
-        if key_state[LSHIFT] do move_speed *= 2
-        player.speed.x += (lr * yaw_cos - fb * yaw_sin) * move_speed * dt
-        player.speed.z += (lr * yaw_sin + fb * yaw_cos) * move_speed * dt
-        player.speed *= 0.9
+        player.speed.y = u
+        player.speed.x += (lr * yaw_cos - fb * yaw_sin)
+        player.speed.z += (lr * yaw_sin + fb * yaw_cos)
     }
 }
 
