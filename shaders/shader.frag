@@ -87,8 +87,3 @@ void main() {
     float shadow = calculateShadow(v_light_space_position);
     frag_color = vec4(intensity * max(0.1, shadow), 1.0);
 }
-
-
-
-
-

@@ -16,14 +16,9 @@ frag_shader_code := #load("../shaders/spv/shader.frag.spv")
 bbox_vert_shader := #load("../shaders/spv/bbox.vert.spv")
 bbox_frag_shader := #load("../shaders/spv/bbox.frag.spv")
 shadow_shader_code := #load("../shaders/spv/shadow.vert.spv")
-bias: f32 = 0.052
-// px := linalg.matrix4_rotate_f32(linalg.to_radians(f32(90)), {1, 0, 0})
-// yx := linalg.matrix4_rotate_f32(linalg.to_radians(f32(0)), {0, 1, 0})
-// rx := linalg.matrix4_rotate_f32(linalg.to_radians(f32(0)), {0, 0, 1})
-// tx := linalg.matrix4_translate_f32({0, 50, 0})
+bias: f32
 
-light_proj := linalg.matrix_ortho3d_f32(-20, 20, -20, 20, 0.001, 1000);
-// light_view = linalg.transpose(light_view)
+light_proj := linalg.matrix_ortho3d_f32(WORLD_SIZE.x, -WORLD_SIZE.x, WORLD_SIZE.z, -WORLD_SIZE.z, 0.001, 1000);
 
 Renderer :: struct {
     window: ^sdl.Window,
@@ -35,6 +30,7 @@ Renderer :: struct {
     cmd_buff: ^sdl.GPUCommandBuffer,
     swapchain_texture: ^sdl.GPUTexture,
     wireframe: bool,
+    shadows: bool,
     samplers: [4]^sdl.GPUSampler,
     light: PointLight,
     shadow_map: ^sdl.GPUTexture,
@@ -52,6 +48,7 @@ PointLight :: struct #packed {
 
 VertUniforms :: struct {
     modelview: matrix[4,4]f32,
+    model: matrix[4,4]f32,
     position_offset: vec4,
 }
 
@@ -78,7 +75,7 @@ RND_Init :: proc(flags: RND_InitFlags) -> Renderer {
     ok = sdl.SetWindowRelativeMouseMode(window, true); assert(ok)
     width, height: i32
     sdl.GetWindowSize(window, &width, &height)
-    gpu := sdl.CreateGPUDevice({.SPIRV}, true, nil); assert(gpu != nil)
+    gpu := sdl.CreateGPUDevice({.SPIRV}, false, nil); assert(gpu != nil)
     ok = sdl.ClaimWindowForGPUDevice(gpu, window); assert(ok)
 
     renderer.window = window
@@ -142,10 +139,10 @@ RND_Init :: proc(flags: RND_InitFlags) -> Renderer {
 
     shadow_sampler := sdl.CreateGPUSampler(gpu, {
         enable_compare = true,
-        // address_mode_u = .CLAMP_TO_EDGE,
-        // address_mode_v = .CLAMP_TO_EDGE,
-        // address_mode_w = .CLAMP_TO_EDGE,
-        compare_op = .LESS,
+        address_mode_u = .CLAMP_TO_EDGE,
+        address_mode_v = .CLAMP_TO_EDGE,
+        address_mode_w = .CLAMP_TO_EDGE,
+        compare_op = .LESS_OR_EQUAL,
     }); assert(shadow_sampler != nil)
     renderer.shadow_sampler = shadow_sampler
 
@@ -165,6 +162,7 @@ RND_Init :: proc(flags: RND_InitFlags) -> Renderer {
     }
     renderer.light_orientation = {90, 0, 0}
     renderer.draw_distance = 100
+    renderer.shadows = true
     return renderer
 }
 
@@ -181,7 +179,7 @@ RND_DrawUI :: proc(state: ^AppState) {
         im.DragFloat("intensity", &renderer.light.power, 10, 0, 10000)
         im.ColorPicker3("color", transmute(^vec3)&renderer.light.color, {.InputRGB})
         im.LabelText("", "General")
-        im.DragFloat3("Player position", &state.player.position, 0.1, 0, 30)
+        im.DragFloat3("Player position", &state.player.position, 0.25, 0, 60)
         im.DragFloat("Draw distance", &state.renderer.draw_distance, 0.5, 10, 250)
         im.Checkbox("Wireframe", &renderer.wireframe)
         im.DragFloat("Depth bias", &bias, 0.001, -1, 1)
@@ -221,7 +219,10 @@ RND_FrameSubmit :: proc(renderer: ^Renderer) -> bool {
 
 RND_DrawEntities :: proc(state: ^AppState) {
     using state
-    shadow_pass(state)
+    if renderer.shadows {
+        shadow_pass(state)
+        renderer.shadows = false
+    }
     assert(renderer.cmd_buff != nil)
     assert(renderer.swapchain_texture != nil)
     color_target := sdl.GPUColorTargetInfo {
@@ -238,14 +239,14 @@ RND_DrawEntities :: proc(state: ^AppState) {
         stencil_load_op = .CLEAR,
         stencil_store_op = .STORE,
         cycle = true,
-        clear_stencil = 0,
+        clear_stencil = 1,
     }
 
     proj_matrix := create_proj_matrix(renderer)
     view_matrix := create_view_matrix(player.position, player.rotation)
     frustum_planes := create_furstum_planes(proj_matrix * view_matrix)
 
-    light_view := create_view_matrix(renderer.light.position, renderer.light_orientation)
+    light_view := create_view_matrix({0, WORLD_SIZE.y, 0}, renderer.light_orientation)
     light_viewproj := light_proj * light_view
 
     render_pass := sdl.BeginGPURenderPass(renderer.cmd_buff, &color_target, 1, &depth_target_info); assert(render_pass != nil)
@@ -254,7 +255,7 @@ RND_DrawEntities :: proc(state: ^AppState) {
     sdl.PushGPUFragmentUniformData(renderer.cmd_buff, 1, &bias, size_of(f32))
     sdl.PushGPUVertexUniformData(renderer.cmd_buff, 2, &proj_matrix, size_of(matrix[4,4]f32))
     sdl.PushGPUVertexUniformData(renderer.cmd_buff, 1, &light_viewproj, size_of(matrix[4,4]f32))
-    for &model in models {
+    for &model, model_index in models {
         bindings: [1]sdl.GPUBufferBinding = { sdl.GPUBufferBinding { buffer = model.vbo } } 
         sdl.BindGPUVertexBuffers(render_pass, 0, &bindings[0], 1)
         texture_count := len(model.textures)+1
@@ -280,7 +281,8 @@ RND_DrawEntities :: proc(state: ^AppState) {
         for &entity, i in entities {
             now := time.now()
             if entity.model.vbo != model.vbo do continue
-            if linalg.distance(player.position, entity.position) > renderer.draw_distance - 1 do continue
+            if linalg.distance(player.position, entity.position) > renderer.draw_distance - 1 &&
+                model_index != 0 { continue }
             culled := !aabb_intersects_frustum(frustum_planes, state.aabbs[i])
             cull_time += time.since(now)
             if culled do continue
@@ -316,19 +318,21 @@ shadow_pass :: proc(state: ^AppState) {
 
 
     using state.renderer
-    light_view := create_view_matrix(renderer.light.position, renderer.light_orientation)
+    light_view := create_view_matrix({0, WORLD_SIZE.y, 0}, renderer.light_orientation)
     light_viewproj := light_proj * light_view
 
     render_pass := sdl.BeginGPURenderPass(renderer.cmd_buff, nil, 0, &depth_target_info); assert(render_pass != nil)
     sdl.BindGPUGraphicsPipeline(render_pass, renderer.shadow_pipeline)
-    sdl.PushGPUVertexUniformData(renderer.cmd_buff, 0, &light_viewproj, size_of(matrix[4,4]f32))
-    for &model in models {
+    for &model, model_index in models {
         bindings: [1]sdl.GPUBufferBinding = { sdl.GPUBufferBinding { buffer = model.vbo } } 
         sdl.BindGPUVertexBuffers(render_pass, 0, &bindings[0], 1)
         for &entity, i in entities {
-            if entity.model.vbo != model.vbo || !(.SHADOW_CASTER in entity.flags) do continue
-            entity_pos := to_vec4(entity.position, 1)
-            sdl.PushGPUVertexUniformData(renderer.cmd_buff, 1, &entity_pos, size_of(vec4))
+            if entity.model.vbo != model.vbo || !(.SHADOW_CASTER in entity.flags) || 
+            linalg.distance(entity.position, player.position) > renderer.draw_distance { continue }
+            model_mat := linalg.matrix4_translate_f32(entity.position)
+            position_offset := to_vec4(entity.position, 1)
+            shadow_ubo := ShadowUBO {light_viewproj = light_viewproj, position_offset = position_offset}
+            sdl.PushGPUVertexUniformData(renderer.cmd_buff, 0, &shadow_ubo, size_of(ShadowUBO))
             assert(entity.model.vbo != state.models[0].vbo)
             sdl.DrawGPUPrimitives(render_pass, model.num_vertices, 1, 0, 0)
         }
@@ -336,14 +340,47 @@ shadow_pass :: proc(state: ^AppState) {
     sdl.EndGPURenderPass(render_pass)
 }
 
-RND_ToggleWireframe :: proc(renderer: ^Renderer) {
-    build_3D_pipeline(renderer)
+ShadowUBO :: struct {
+    light_viewproj: matrix[4,4]f32,
+    position_offset: vec4
 }
 
+
+
+create_view_matrix :: proc(position: vec3, rotation: vec3) -> linalg.Matrix4f32 {
+    using linalg
+    pitch_matrix := matrix4_rotate_f32(to_radians(rotation.x), {1, 0, 0})
+    yaw_matrix := matrix4_rotate_f32(to_radians(rotation.y), {0, 1, 0})
+    roll_matrix := matrix4_rotate_f32(to_radians(rotation.z), {0, 0, 1})
+    camera_position := -position
+    camera_position.y -= 2
+    position_matrix := matrix4_translate_f32(camera_position)
+
+    return pitch_matrix * yaw_matrix * roll_matrix * position_matrix
+}
+
+create_proj_matrix :: proc(renderer: Renderer) -> matrix[4,4]f32 {
+    using linalg
+    x, y: i32;
+    ok := sdl.GetWindowSize(renderer.window, &x, &y)
+    aspect := f32(x) / f32(y)
+    return matrix4_perspective_f32(linalg.to_radians(f32(70)), aspect, 0.0001, renderer.draw_distance)
+}
+
+create_vertex_UBO :: proc(entity: Entity, view_matrix: matrix[4,4]f32) -> VertUniforms {
+    using linalg
+    model_translation_matrix := matrix4_translate_f32(entity.position)
+    model_matrix: matrix[4, 4]f32 = view_matrix * model_translation_matrix
+    return VertUniforms {
+        modelview = model_matrix,
+        model = model_translation_matrix,
+        position_offset = to_vec4(entity.position, 1)
+    }
+}
 build_shadow_pipeline :: proc(renderer: ^Renderer) {
     using renderer
     sdl.ReleaseGPUGraphicsPipeline(gpu, shadow_pipeline)
-    vert_shader := load_shader(renderer.gpu, shadow_shader_code, .VERTEX, 2, 0, 0); defer sdl.ReleaseGPUShader(renderer.gpu, vert_shader)
+    vert_shader := load_shader(renderer.gpu, shadow_shader_code, .VERTEX, 1, 0, 0); defer sdl.ReleaseGPUShader(renderer.gpu, vert_shader)
     frag_shader := load_shader(renderer.gpu, bbox_frag_shader, .FRAGMENT, 0, 0, 0); defer sdl.ReleaseGPUShader(renderer.gpu, frag_shader)
     vb_descriptions: [1]sdl.GPUVertexBufferDescription
     vb_descriptions = {
@@ -380,14 +417,15 @@ build_shadow_pipeline :: proc(renderer: ^Renderer) {
         rasterizer_state = {
             fill_mode = .FILL,
             cull_mode = .BACK,
-            enable_depth_bias = true,
-            depth_bias_constant_factor = 1.25,
-            depth_bias_slope_factor = 1.75,
+            // enable_depth_bias = true,
+            // depth_bias_constant_factor = 1.25,
+            // depth_bias_slope_factor = 1,
+
         },
         depth_stencil_state = {
             enable_depth_test = true,
             enable_depth_write = true,
-            compare_op = .LESS,
+            compare_op = .LESS_OR_EQUAL,
         }
     })
 }
@@ -468,37 +506,6 @@ build_3D_pipeline :: proc(renderer: ^Renderer) {
         }
     })
 }
-
-create_view_matrix :: proc(position: vec3, rotation: vec3) -> linalg.Matrix4f32 {
-    using linalg
-    pitch_matrix := matrix4_rotate_f32(to_radians(rotation.x), {1, 0, 0})
-    yaw_matrix := matrix4_rotate_f32(to_radians(rotation.y), {0, 1, 0})
-    roll_matrix := matrix4_rotate_f32(to_radians(rotation.z), {0, 0, 1})
-    camera_position := -position
-    camera_position.y -= 2
-    position_matrix := matrix4_translate_f32(camera_position)
-
-    return pitch_matrix * yaw_matrix * roll_matrix * position_matrix
-}
-
-create_proj_matrix :: proc(renderer: Renderer) -> matrix[4,4]f32 {
-    using linalg
-    x, y: i32;
-    ok := sdl.GetWindowSize(renderer.window, &x, &y)
-    aspect := f32(x) / f32(y)
-    return matrix4_perspective_f32(linalg.to_radians(f32(90)), aspect, 0.0001, renderer.draw_distance)
-}
-
-create_vertex_UBO :: proc(entity: Entity, view_matrix: matrix[4,4]f32) -> VertUniforms {
-    using linalg
-    model_translation_matrix := matrix4_translate_f32(entity.position)
-    model_matrix: matrix[4, 4]f32 = view_matrix * model_translation_matrix
-    return VertUniforms {
-        modelview = model_matrix,
-        position_offset = to_vec4(entity.position, 1)
-    }
-}
-
 @(private="file")
 build_bbox_pipeline :: proc(renderer: ^Renderer) {
     sdl.ReleaseGPUGraphicsPipeline(renderer.gpu, renderer.pipeline3D)
@@ -594,4 +601,8 @@ load_shader :: proc(device: ^sdl.GPUDevice, code: []u8,
         num_samplers = num_samplers,
         num_storage_buffers = num_storage_buffers
     })
+}
+
+RND_ToggleWireframe :: proc(renderer: ^Renderer) {
+    build_3D_pipeline(renderer)
 }

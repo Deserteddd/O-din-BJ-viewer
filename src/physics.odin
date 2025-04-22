@@ -2,8 +2,12 @@ package obj_viewer
 
 import "core:math"
 import "core:math/linalg"
+import "core:time"
 import "core:fmt"
-import "core:simd"
+import "core:thread"
+import "core:sync"
+
+PHYSICS_THREADS :: 4
 
 PhysicsFlags :: distinct bit_set[PhysicsFlag]
 
@@ -21,30 +25,23 @@ AABB :: struct {
     max: vec3
 }
 
-AABB_soa :: struct {
-    min: #soa[dynamic]vec3,
-    max: #soa[dynamic]vec3
+workerData :: struct {
+    waitgroupdata: ^sync.Wait_Group,
+    player: ^Player,
+    entity_bboxes: ^[dynamic]AABB,
+    found_collision: ^bool,
+    start, end: int,
 }
 
-update_player :: proc(state: ^AppState, dt: f32) {
-    g: f32 = 25
-    using state.player
-    if speed.y > 0 && !airborne {
-        speed.y = 9
-        airborne = true
-    } else {
-        speed.y -= g * dt
-    }
-    delta_pos := speed * dt
-    position += delta_pos
-    bbox.min += delta_pos
-    bbox.max += delta_pos
-
-    found_collision: bool
-    for entity, i in state.entities {
-        entity_bbox := state.aabbs[i]
+check_aabb_collisions :: proc(t: ^thread.Thread) {
+    data := (cast(^workerData)t.data)
+    using data
+    using player
+    for i in start..<end {
+        now := time.now()
+        entity_bbox := entity_bboxes[i]
         if aabbs_collide(bbox, entity_bbox) {
-            found_collision = true
+            found_collision^ = true
             mtv := resolve_aabb_collision_mtv(bbox, entity_bbox)
             for axis, j in mtv do if axis != 0 {
                 speed[j] *= 0.9
@@ -61,6 +58,57 @@ update_player :: proc(state: ^AppState, dt: f32) {
             bbox.max += mtv
         }
     }
+    sync.wait_group_done(data.waitgroupdata)
+}
+
+update_player :: proc(state: ^AppState, dt: f32) {
+    g: f32 = 25
+    using state, player
+    if speed.y > 0 && !airborne {
+        speed.y = 9
+        airborne = true
+    } else {
+        speed.y -= g * dt
+    }
+    delta_pos := speed * dt
+    position += delta_pos
+    bbox.min += delta_pos
+    bbox.max += delta_pos
+    found_collision: bool
+
+    wg: sync.Wait_Group
+    aabb_checking := time.now()
+    aabb_count := len(state.aabbs)
+    chunkSize := (aabb_count + PHYSICS_THREADS - 1) / PHYSICS_THREADS
+    handles: [PHYSICS_THREADS]^thread.Thread
+    work_data: [PHYSICS_THREADS]workerData
+
+    for i in 0..<PHYSICS_THREADS {
+        start := i * chunkSize
+        end := (i + 1) * chunkSize
+        if end > aabb_count {
+            end = aabb_count
+        }
+        t := thread.create(check_aabb_collisions)
+        t.init_context = context
+        t.user_index = 1
+        work_data[i] = workerData {
+            waitgroupdata = &wg,
+            player = &state.player,
+            entity_bboxes = &state.aabbs,
+            start = start,
+            end = end,
+            found_collision = &found_collision
+        }
+        t.data = &work_data[i]
+        handles[i] = t
+    }
+
+    sync.wait_group_add(&wg, PHYSICS_THREADS)
+    for handle in handles do thread.start(handle)
+
+    sync.wait_group_wait(&wg)
+
     if !found_collision do airborne = true
     if !airborne {
         speed *= 0.8

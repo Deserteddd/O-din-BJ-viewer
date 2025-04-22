@@ -15,6 +15,7 @@ layout (location = 4) out vec4 v_light_space_position;
 
 layout(set=1, binding=0) uniform UBO {
     mat4 modelview;
+    mat4 model;
     vec4 position_offset;
 };
 
@@ -27,11 +28,11 @@ layout(set=1, binding=2) uniform PROJ {
 };
 
 void main() {
-    vec4 world_pos =  vec4(position + position_offset.xyz, 1.0);
+    vec4 world_pos = vec4(position + position_offset.xyz, 1.0);
     gl_Position = projection_matrix * modelview * vec4(position, 1.0);
     v_position = world_pos.xyz;
     v_normal = normal;
     v_uv = uv;
     v_material = material;
-    v_light_space_position = light_viewproj * world_pos;
+    v_light_space_position = model * light_viewproj * world_pos;
 }

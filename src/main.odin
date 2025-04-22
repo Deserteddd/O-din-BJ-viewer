@@ -22,8 +22,7 @@ FRAMES := 0
 RENDERTIME := 0
 PHYSICSTIME := 0
 last_ticks := sdl.GetTicks();
-
-import "core:simd"
+WORLD_SIZE: vec3 = {250, 30, 250}
 
 main :: proc() {
     state: AppState
@@ -69,12 +68,11 @@ init :: proc(state: ^AppState) {
     add_model(slab, state)
 
     create_entity(state, {.COLLIDER, .STATIC}, 0)
-    for i in 0..<10 {
+    for i in 0..<PHYSICS_THREADS*10000 {
         create_entity(state, {.COLLIDER, .STATIC, .SHADOW_CASTER}, 1)
     }
     randomize_tile_positions(state)
 
-    // state.player_collisions = make([]bool, len(state.entities))
     init_imgui(state)
 }
 
@@ -86,9 +84,9 @@ randomize_tile_positions :: proc(state: ^AppState) {
     for &entity, i in state.entities {
         if i < 1 do continue
         entity.position = {
-            random_range(-10, 10),
-            random_range(0, 10),
-            random_range(-10, 10)
+            random_range(-WORLD_SIZE.x, WORLD_SIZE.x),
+            random_range(0, WORLD_SIZE.y),
+            random_range(-WORLD_SIZE.z, WORLD_SIZE.z)
         }
         state.aabbs[i] = AABB {
             min = entity.model.bbox.min + entity.position,
@@ -136,7 +134,7 @@ run :: proc(state: ^AppState) {
         RND_DrawUI(state)
         if wireframe != state.renderer.wireframe do RND_ToggleWireframe(&state.renderer)
         ok := RND_FrameSubmit(&state.renderer); assert(ok)
-        // fmt.println(time.since(now))
+        fmt.println("frame time:", time.since(now))
     }
 }
 
@@ -207,6 +205,7 @@ process_keyboard :: proc(state: ^AppState) {
     player.rotation.y += (yaw_r-yaw_l)
     if !player.airborne {
         fb := b-f; lr := r-l
+        if key_state[LSHIFT] {fb *= 2; lr *= 2}
         player.speed.y = u
         player.speed.x += (lr * yaw_cos - fb * yaw_sin)
         player.speed.z += (lr * yaw_sin + fb * yaw_cos)
