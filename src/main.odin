@@ -17,10 +17,7 @@ import im_sdl "shared:imgui/imgui_impl_sdl3"
 import im_sdlgpu "shared:imgui/imgui_impl_sdlgpu3"
 
 default_context: runtime.Context
-DEBUG := false
 FRAMES := 0
-RENDERTIME := 0
-PHYSICSTIME := 0
 last_ticks := sdl.GetTicks();
 WORLD_SIZE: vec3 = {250, 30, 250}
 
@@ -30,18 +27,23 @@ main :: proc() {
     fmt.println("MAIN: init done")
     run(&state)
     fmt.println("MAIN: Exiting")
-
-
 }
 
 AppState :: struct {
     mode:               AppMode,
     player:             Player,
     renderer:           Renderer,
+    debug_info:         DebugInfo,
+    ui_context:         ^im.Context,
     models:             [dynamic]Model,
     entities:           [dynamic]Entity,
     aabbs:              [dynamic]AABB,
     checkpoint:         [2]vec3, // Position, Rotation
+}
+
+DebugInfo :: struct {
+    frame_time:     time.Duration,
+    rendered:       u32,
 }
 
 AppMode :: enum u8 {
@@ -68,7 +70,7 @@ init :: proc(state: ^AppState) {
     add_model(slab, state)
 
     create_entity(state, {.COLLIDER, .STATIC}, 0)
-    for i in 0..<PHYSICS_THREADS*10000 {
+    for i in 0..<100_000 {
         create_entity(state, {.COLLIDER, .STATIC, .SHADOW_CASTER}, 1)
     }
     randomize_tile_positions(state)
@@ -97,8 +99,15 @@ randomize_tile_positions :: proc(state: ^AppState) {
 
 init_imgui :: proc(state: ^AppState) {
     assert(state.renderer.window != nil)
+    if state.ui_context != nil {
+        im_sdlgpu.Shutdown()
+        im_sdl.Shutdown()
+        im.Shutdown()
+        im.DestroyContext(state.ui_context)
+        state.ui_context = nil
+    }
     im.CHECKVERSION()
-    im.CreateContext()
+    state.ui_context = im.CreateContext()
     using state.renderer
     im_sdl.InitForSDLGPU(window)
     im_sdlgpu.Init(&{
@@ -124,6 +133,8 @@ run :: proc(state: ^AppState) {
                         if !state.player.airborne do state.checkpoint = {state.player.position, state.player.rotation}
                     case .E:
                         reset_player_pos(state)
+                    case .F:
+                        RND_ToggleFullscreen(state)
                 }
             }
         }
@@ -134,7 +145,7 @@ run :: proc(state: ^AppState) {
         RND_DrawUI(state)
         if wireframe != state.renderer.wireframe do RND_ToggleWireframe(&state.renderer)
         ok := RND_FrameSubmit(&state.renderer); assert(ok)
-        fmt.println("frame time:", time.since(now))
+        state.debug_info.frame_time = time.since(now)
     }
 }
 

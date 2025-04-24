@@ -1,6 +1,7 @@
 package obj_viewer
 
 import "core:mem"
+import "core:math"
 import "core:math/linalg"
 import "core:fmt"
 import "core:c"
@@ -31,6 +32,7 @@ Renderer :: struct {
     swapchain_texture: ^sdl.GPUTexture,
     wireframe: bool,
     shadows: bool,
+    fullscreen: bool,
     samplers: [4]^sdl.GPUSampler,
     light: PointLight,
     shadow_map: ^sdl.GPUTexture,
@@ -56,9 +58,8 @@ RND_InitFlags :: distinct bit_set[RND_InitFlag; uint]
 
 RND_InitFlag :: enum uint {
     FULLSCREEN = 0,
-    WIREFRAME  = 1,
-    DRAW_UI    = 2,
 }
+
 
 RND_Init :: proc(flags: RND_InitFlags) -> Renderer {
     renderer: Renderer
@@ -67,6 +68,7 @@ RND_Init :: proc(flags: RND_InitFlags) -> Renderer {
     w, h: c.int = 1280, 720
     if .FULLSCREEN in flags {
         window_flags += {.FULLSCREEN}
+        renderer.fullscreen = true
         w = 1920
         h = 1080
     } 
@@ -146,7 +148,6 @@ RND_Init :: proc(flags: RND_InitFlags) -> Renderer {
     }); assert(shadow_sampler != nil)
     renderer.shadow_sampler = shadow_sampler
 
-    if .WIREFRAME in flags do renderer.wireframe = true
     build_bbox_pipeline(&renderer)
     build_3D_pipeline(&renderer)
     build_shadow_pipeline(&renderer)
@@ -166,24 +167,77 @@ RND_Init :: proc(flags: RND_InitFlags) -> Renderer {
     return renderer
 }
 
+RND_ToggleFullscreen :: proc(state: ^AppState) {
+    using state.renderer
+    fullscreen = !fullscreen   
+    ok: bool
+    sdl.ReleaseWindowFromGPUDevice(gpu, window)
+    sdl.DestroyWindow(window)
+    width, height: i32
+    if fullscreen {
+        width = 1920
+        height = 1080
+        new_window := sdl.CreateWindow("Demo window", width, height, {.FULLSCREEN}); assert(new_window != nil)
+        window = new_window
+        ok = sdl.ClaimWindowForGPUDevice(gpu, window)
+        if !ok do fmt.println(sdl.GetError())
+    } else {
+        width = 1280
+        height = 720
+        new_window := sdl.CreateWindow("Demo window", width, height, {}); assert(window != nil)
+        window = new_window
+        ok = sdl.ClaimWindowForGPUDevice(gpu, window)
+    }
+    depth := sdl.CreateGPUTexture(gpu, {
+        type = .D2,
+        width = u32(width),
+        height = u32(height),
+        layer_count_or_depth = 1,
+        num_levels = 1,
+        format = .D32_FLOAT,
+        usage = {.SAMPLER, .DEPTH_STENCIL_TARGET}
+    })
+    sdl.ReleaseGPUTexture(gpu, depth_texture)
+    depth_texture = depth
+    if state.mode == .MENU {
+        ok = sdl.ShowCursor(); assert(ok)
+        ok = sdl.SetWindowRelativeMouseMode(window, false); assert(ok)
+    } else {
+        ok = sdl.SetWindowRelativeMouseMode(window, true)
+        ok = sdl.HideCursor(); assert(ok)
+    }
+    assert(ok)
+    init_imgui(state)
+}
+
 RND_DrawUI :: proc(state: ^AppState) {
     using state
-    if state.mode != .MENU do return
     im_sdlgpu.NewFrame()
     im_sdl.NewFrame()
     im.NewFrame()
-    if im.Begin("Properties") {
-        im.LabelText("", "Point light")
-        im.DragFloat3("position", &renderer.light.position, 0.5, -200, 200)
-        im.DragFloat3("orientation", &renderer.light_orientation, 0.5, -180, 200)
-        im.DragFloat("intensity", &renderer.light.power, 10, 0, 10000)
-        im.ColorPicker3("color", transmute(^vec3)&renderer.light.color, {.InputRGB})
-        im.LabelText("", "General")
-        im.DragFloat3("Player position", &state.player.position, 0.25, 0, 60)
-        im.DragFloat("Draw distance", &state.renderer.draw_distance, 0.5, 10, 250)
-        im.Checkbox("Wireframe", &renderer.wireframe)
-        im.DragFloat("Depth bias", &bias, 0.001, -1, 1)
-        if im.Button("Random tiles") do randomize_tile_positions(state)
+    if state.mode == .MENU {
+        if im.Begin("Properties") {
+            im.LabelText("", "Light")
+            im.DragFloat3("position", &renderer.light.position, 0.5, -200, 200)
+            im.DragFloat3("orientation", &renderer.light_orientation, 0.5, -180, 200)
+            im.DragFloat("intensity", &renderer.light.power, 10, 0, 10000)
+            im.ColorPicker3("color", transmute(^vec3)&renderer.light.color, {.InputRGB})
+            im.LabelText("", "General")
+            im.DragFloat3("Player position", &state.player.position, 0.25, 0, 60)
+            im.DragFloat("Draw distance", &state.renderer.draw_distance, 0.5, 10, 250)
+            // im.DragFloat("Depth bias", &bias, 0.001, -1, 1)
+            if im.Button("Random tiles") do randomize_tile_positions(state)
+            im.Checkbox("Wireframe", &renderer.wireframe)
+        }
+        im.End()
+    }
+    if im.Begin("info") {
+        w, h: i32
+        sdl.GetWindowSize(state.renderer.window, &w, &h)
+        im.SetWindowPos(vec2{f32(w-150), 0})
+        im.SetWindowSize(vec2{150, 0})
+        frame_time_float := math.round(1/f32(time.duration_seconds(debug_info.frame_time)))
+        im.DragFloat("FPS", &frame_time_float)
     }
     im.End()
     im.Render()
@@ -205,7 +259,8 @@ RND_FrameBegin :: proc(renderer: ^Renderer) {
     assert(renderer.swapchain_texture == nil)
     cmd_buff := sdl.AcquireGPUCommandBuffer(renderer.gpu); assert(cmd_buff != nil)
     swapchain_texture: ^sdl.GPUTexture
-    ok := sdl.WaitAndAcquireGPUSwapchainTexture(cmd_buff, renderer.window, &swapchain_texture, nil, nil); assert(ok)
+    ok := sdl.WaitAndAcquireGPUSwapchainTexture(cmd_buff, renderer.window, &swapchain_texture, nil, nil)
+    if !ok do fmt.println(sdl.GetError())
     renderer.cmd_buff = cmd_buff
     renderer.swapchain_texture = swapchain_texture
 }
@@ -275,25 +330,24 @@ RND_DrawEntities :: proc(state: ^AppState) {
         }
 
         sdl.BindGPUFragmentStorageBuffers(render_pass, 0, &model.material_buffer, 1)
-        rendered := 0
-        cull_time: time.Duration
-        draw_time: time.Duration
+        // rendered := 0
+        // cull_time: time.Duration
+        // draw_time: time.Duration
         for &entity, i in entities {
-            now := time.now()
+            // now := time.now()
             if entity.model.vbo != model.vbo do continue
             if linalg.distance(player.position, entity.position) > renderer.draw_distance - 1 &&
                 model_index != 0 { continue }
             culled := !aabb_intersects_frustum(frustum_planes, state.aabbs[i])
-            cull_time += time.since(now)
+            // cull_time += time.since(now)
             if culled do continue
-            rendered += 1
-            now = time.now()
+            // rendered += 1
             vert_ubo := create_vertex_UBO(entity, view_matrix)
             sdl.PushGPUVertexUniformData(renderer.cmd_buff, 0, &vert_ubo, size_of(VertUniforms))
             sdl.DrawGPUPrimitives(render_pass, model.num_vertices, 1, 0, 0)
-            draw_time += time.since(now)
+            // draw_time += time.since(now)
         }
-        // fmt.println("Rendered", rendered, "entities")
+        // if rendered > 1 do fmt.println("Rendered", rendered, "entities")
         // fmt.println("Culled in\t", cull_time)
         // fmt.println("Rendered in\t", draw_time)
     }

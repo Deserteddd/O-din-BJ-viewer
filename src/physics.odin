@@ -38,7 +38,7 @@ check_aabb_collisions :: proc(t: ^thread.Thread) {
     using data
     using player
     for i in start..<end {
-        now := time.now()
+        // now := time.now()
         entity_bbox := entity_bboxes[i]
         if aabbs_collide(bbox, entity_bbox) {
             found_collision^ = true
@@ -77,10 +77,9 @@ update_player :: proc(state: ^AppState, dt: f32) {
     found_collision: bool
 
     wg: sync.Wait_Group
-    aabb_checking := time.now()
+    // aabb_checking := time.now()
     aabb_count := len(state.aabbs)
     chunkSize := (aabb_count + PHYSICS_THREADS - 1) / PHYSICS_THREADS
-    handles: [PHYSICS_THREADS]^thread.Thread
     work_data: [PHYSICS_THREADS]workerData
 
     for i in 0..<PHYSICS_THREADS {
@@ -101,11 +100,12 @@ update_player :: proc(state: ^AppState, dt: f32) {
             found_collision = &found_collision
         }
         t.data = &work_data[i]
-        handles[i] = t
+        sync.wait_group_add(&wg, 1)
+        thread.start(t)
     }
 
-    sync.wait_group_add(&wg, PHYSICS_THREADS)
-    for handle in handles do thread.start(handle)
+    // sync.wait_group_add(&wg, PHYSICS_THREADS)
+    // for handle in handles do thread.start(handle)
 
     sync.wait_group_wait(&wg)
 
