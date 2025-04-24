@@ -235,7 +235,7 @@ new_texture :: proc(tex_path: string, data: ^TextureData) -> f32 {
     tex_path_cstring := strings.clone_to_cstring(tex_path); 
     path_split       := strings.split(tex_path, "/");
     tex_name         := strings.clone(path_split[len(path_split)-1])
-    // fmt.println("TEXTURE PATH:", tex_path)
+    fmt.println("TEXTURE PATH:", tex_path)
 
     i: int
     for i = 0; i<len(data.textures); i += 1 {

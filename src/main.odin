@@ -7,6 +7,7 @@ import "core:fmt"
 import "core:mem"
 import "core:os"
 import "core:strings"
+import "core:strconv"
 import "core:math/linalg"
 import "core:math/rand"
 import "core:path/filepath"
@@ -70,7 +71,10 @@ init :: proc(state: ^AppState) {
     add_model(slab, state)
 
     create_entity(state, {.COLLIDER, .STATIC}, 0)
-    for i in 0..<100_000 {
+    args := os.args
+    if len(args) != 2 do panic("Missing argument: slab count")
+    slab_count, ok := strconv.parse_int(args[1]); assert(ok)
+    for i in 0..<slab_count {
         create_entity(state, {.COLLIDER, .STATIC, .SHADOW_CASTER}, 1)
     }
     randomize_tile_positions(state)
@@ -142,10 +146,10 @@ run :: proc(state: ^AppState) {
         RND_FrameBegin(&state.renderer)
         RND_DrawEntities(state)
         wireframe := state.renderer.wireframe 
+        state.debug_info.frame_time = time.since(now)
         RND_DrawUI(state)
         if wireframe != state.renderer.wireframe do RND_ToggleWireframe(&state.renderer)
         ok := RND_FrameSubmit(&state.renderer); assert(ok)
-        state.debug_info.frame_time = time.since(now)
     }
 }
 

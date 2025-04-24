@@ -222,22 +222,26 @@ RND_DrawUI :: proc(state: ^AppState) {
             im.DragFloat3("orientation", &renderer.light_orientation, 0.5, -180, 200)
             im.DragFloat("intensity", &renderer.light.power, 10, 0, 10000)
             im.ColorPicker3("color", transmute(^vec3)&renderer.light.color, {.InputRGB})
+            im.DragFloat("Depth bias", &bias, 0.001, -1, 1)
             im.LabelText("", "General")
             im.DragFloat3("Player position", &state.player.position, 0.25, 0, 60)
             im.DragFloat("Draw distance", &state.renderer.draw_distance, 0.5, 10, 250)
-            // im.DragFloat("Depth bias", &bias, 0.001, -1, 1)
             if im.Button("Random tiles") do randomize_tile_positions(state)
             im.Checkbox("Wireframe", &renderer.wireframe)
         }
         im.End()
     }
-    if im.Begin("info") {
+    if im.Begin("info", nil, {.NoTitleBar, .NoMouseInputs}) {
         w, h: i32
         sdl.GetWindowSize(state.renderer.window, &w, &h)
-        im.SetWindowPos(vec2{f32(w-150), 0})
-        im.SetWindowSize(vec2{150, 0})
-        frame_time_float := math.round(1/f32(time.duration_seconds(debug_info.frame_time)))
-        im.DragFloat("FPS", &frame_time_float)
+        im.SetWindowPos(vec2{f32(w-120), 0})
+        im.SetWindowSize(vec2{120, 0})
+        frame_time_float := i32(math.round(1/f32(time.duration_seconds(debug_info.frame_time))))
+        im.SetNextItemWidth(50)
+        im.DragInt("FPS", &frame_time_float)
+        rendered := i32(debug_info.rendered)
+        im.SetNextItemWidth(50)
+        im.DragInt("Slabs", &rendered)
     }
     im.End()
     im.Render()
@@ -296,6 +300,7 @@ RND_DrawEntities :: proc(state: ^AppState) {
         cycle = true,
         clear_stencil = 1,
     }
+    debug_info.rendered = 0
 
     proj_matrix := create_proj_matrix(renderer)
     view_matrix := create_view_matrix(player.position, player.rotation)
@@ -330,7 +335,6 @@ RND_DrawEntities :: proc(state: ^AppState) {
         }
 
         sdl.BindGPUFragmentStorageBuffers(render_pass, 0, &model.material_buffer, 1)
-        // rendered := 0
         // cull_time: time.Duration
         // draw_time: time.Duration
         for &entity, i in entities {
@@ -341,7 +345,7 @@ RND_DrawEntities :: proc(state: ^AppState) {
             culled := !aabb_intersects_frustum(frustum_planes, state.aabbs[i])
             // cull_time += time.since(now)
             if culled do continue
-            // rendered += 1
+            debug_info.rendered += 1
             vert_ubo := create_vertex_UBO(entity, view_matrix)
             sdl.PushGPUVertexUniformData(renderer.cmd_buff, 0, &vert_ubo, size_of(VertUniforms))
             sdl.DrawGPUPrimitives(render_pass, model.num_vertices, 1, 0, 0)
