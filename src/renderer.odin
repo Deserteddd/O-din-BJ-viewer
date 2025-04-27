@@ -22,24 +22,22 @@ bias: f32
 light_proj := linalg.matrix_ortho3d_f32(WORLD_SIZE.x, -WORLD_SIZE.x, WORLD_SIZE.z, -WORLD_SIZE.z, 0.001, 1000);
 
 Renderer :: struct {
-    window: ^sdl.Window,
-    gpu: ^sdl.GPUDevice,
-    pipeline3D: ^sdl.GPUGraphicsPipeline,
-    bbox_pipeline: ^sdl.GPUGraphicsPipeline,
-    depth_texture: ^sdl.GPUTexture,
-    fallback_texture: ^sdl.GPUTexture,
-    cmd_buff: ^sdl.GPUCommandBuffer,
-    swapchain_texture: ^sdl.GPUTexture,
-    wireframe: bool,
-    shadows: bool,
-    fullscreen: bool,
-    samplers: [4]^sdl.GPUSampler,
-    light: PointLight,
-    shadow_map: ^sdl.GPUTexture,
-    shadow_sampler: ^sdl.GPUSampler,
-    shadow_pipeline: ^sdl.GPUGraphicsPipeline,
-    light_orientation: vec3,
-    draw_distance: f32
+    window:             ^sdl.Window,
+    gpu:                ^sdl.GPUDevice,
+    pipeline3D:         ^sdl.GPUGraphicsPipeline,
+    bbox_pipeline:      ^sdl.GPUGraphicsPipeline,
+    depth_texture:      ^sdl.GPUTexture,
+    fallback_texture:   ^sdl.GPUTexture,
+    swapchain_texture:  ^sdl.GPUTexture,
+    shadow_map:         ^sdl.GPUTexture,
+    shadow_sampler:     ^sdl.GPUSampler,
+    cmd_buff:           ^sdl.GPUCommandBuffer,
+    shadow_pipeline:    ^sdl.GPUGraphicsPipeline,
+    samplers:           [4]^sdl.GPUSampler,
+    props:              RND_Props,
+    light:              PointLight,
+    light_orientation:  vec3,
+    draw_distance:      f32
 }
 
 PointLight :: struct #packed {
@@ -54,21 +52,23 @@ VertUniforms :: struct {
     position_offset: vec4,
 }
 
-RND_InitFlags :: distinct bit_set[RND_InitFlag; uint]
+RND_Props :: distinct bit_set[RND_Prop; u16]
 
-RND_InitFlag :: enum uint {
+RND_Prop :: enum u16 {
     FULLSCREEN = 0,
+    SHADOWS = 1,
+    WIREFRAME = 2,
 }
 
 
-RND_Init :: proc(flags: RND_InitFlags) -> Renderer {
+RND_Init :: proc(props: RND_Props) -> Renderer {
     renderer: Renderer
+    renderer.props = props
     ok := sdl.Init({.VIDEO}); assert(ok)
     window_flags: sdl.WindowFlags
     w, h: c.int = 1280, 720
-    if .FULLSCREEN in flags {
+    if .FULLSCREEN in props {
         window_flags += {.FULLSCREEN}
-        renderer.fullscreen = true
         w = 1920
         h = 1080
     } 
@@ -163,18 +163,35 @@ RND_Init :: proc(flags: RND_InitFlags) -> Renderer {
     }
     renderer.light_orientation = {90, 0, 0}
     renderer.draw_distance = 100
-    renderer.shadows = true
+    renderer.props += {.SHADOWS}
     return renderer
+}
+
+RND_Destroy :: proc(renderer: ^Renderer) {
+    using renderer
+    sdl.ReleaseGPUGraphicsPipeline(gpu, shadow_pipeline)
+    sdl.ReleaseGPUGraphicsPipeline(gpu, pipeline3D)
+    sdl.ReleaseGPUTexture(gpu, depth_texture)
+    sdl.ReleaseGPUTexture(gpu, fallback_texture)
+    sdl.ReleaseGPUTexture(gpu, swapchain_texture)
+    sdl.ReleaseGPUTexture(gpu, shadow_map)
+    for sampler in samplers {
+        sdl.ReleaseGPUSampler(gpu, sampler)
+    }
+    sdl.ReleaseWindowFromGPUDevice(gpu, window)
+    sdl.DestroyWindow(window)
+    sdl.DestroyGPUDevice(gpu)
 }
 
 RND_ToggleFullscreen :: proc(state: ^AppState) {
     using state.renderer
-    fullscreen = !fullscreen   
+    if .FULLSCREEN in props do props -= {.FULLSCREEN}
+    else do props += {.FULLSCREEN}
     ok: bool
     sdl.ReleaseWindowFromGPUDevice(gpu, window)
     sdl.DestroyWindow(window)
     width, height: i32
-    if fullscreen {
+    if .FULLSCREEN in props {
         width = 1920
         height = 1080
         new_window := sdl.CreateWindow("Demo window", width, height, {.FULLSCREEN}); assert(new_window != nil)
@@ -227,7 +244,10 @@ RND_DrawUI :: proc(state: ^AppState) {
             im.DragFloat3("Player position", &state.player.position, 0.25, 0, 60)
             im.DragFloat("Draw distance", &state.renderer.draw_distance, 0.5, 10, 250)
             if im.Button("Random tiles") do randomize_tile_positions(state)
-            im.Checkbox("Wireframe", &renderer.wireframe)
+            wireframe := .WIREFRAME in renderer.props
+            im.Checkbox("Wireframe", &wireframe)
+            if wireframe do renderer.props += {.WIREFRAME}
+            else do renderer.props -= {.WIREFRAME}
         }
         im.End()
     }
@@ -242,6 +262,8 @@ RND_DrawUI :: proc(state: ^AppState) {
         rendered := i32(debug_info.rendered)
         im.SetNextItemWidth(50)
         im.DragInt("Slabs", &rendered)
+        im.SetNextItemWidth(50)
+        im.DragFloat("Speed", &debug_info.player_speed)
     }
     im.End()
     im.Render()
@@ -262,11 +284,9 @@ RND_FrameBegin :: proc(renderer: ^Renderer) {
     assert(renderer.cmd_buff == nil)
     assert(renderer.swapchain_texture == nil)
     cmd_buff := sdl.AcquireGPUCommandBuffer(renderer.gpu); assert(cmd_buff != nil)
-    swapchain_texture: ^sdl.GPUTexture
-    ok := sdl.WaitAndAcquireGPUSwapchainTexture(cmd_buff, renderer.window, &swapchain_texture, nil, nil)
+    ok := sdl.WaitAndAcquireGPUSwapchainTexture(cmd_buff, renderer.window, &renderer.swapchain_texture, nil, nil)
     if !ok do fmt.println(sdl.GetError())
     renderer.cmd_buff = cmd_buff
-    renderer.swapchain_texture = swapchain_texture
 }
 
 RND_FrameSubmit :: proc(renderer: ^Renderer) -> bool {
@@ -278,9 +298,9 @@ RND_FrameSubmit :: proc(renderer: ^Renderer) -> bool {
 
 RND_DrawEntities :: proc(state: ^AppState) {
     using state
-    if renderer.shadows {
+    if .SHADOWS in renderer.props {
         shadow_pass(state)
-        renderer.shadows = false
+        renderer.props -= {.SHADOWS}
     }
     assert(renderer.cmd_buff != nil)
     assert(renderer.swapchain_texture != nil)
@@ -335,25 +355,16 @@ RND_DrawEntities :: proc(state: ^AppState) {
         }
 
         sdl.BindGPUFragmentStorageBuffers(render_pass, 0, &model.material_buffer, 1)
-        // cull_time: time.Duration
-        // draw_time: time.Duration
         for &entity, i in entities {
-            // now := time.now()
             if entity.model.vbo != model.vbo do continue
             if linalg.distance(player.position, entity.position) > renderer.draw_distance - 1 &&
                 model_index != 0 { continue }
-            culled := !aabb_intersects_frustum(frustum_planes, state.aabbs[i])
-            // cull_time += time.since(now)
-            if culled do continue
+            if !aabb_intersects_frustum(frustum_planes, state.aabbs[i]) do continue
             debug_info.rendered += 1
             vert_ubo := create_vertex_UBO(entity, view_matrix)
             sdl.PushGPUVertexUniformData(renderer.cmd_buff, 0, &vert_ubo, size_of(VertUniforms))
             sdl.DrawGPUPrimitives(render_pass, model.num_vertices, 1, 0, 0)
-            // draw_time += time.since(now)
         }
-        // if rendered > 1 do fmt.println("Rendered", rendered, "entities")
-        // fmt.println("Culled in\t", cull_time)
-        // fmt.println("Rendered in\t", draw_time)
     }
     sdl.EndGPURenderPass(render_pass)
 }
@@ -422,7 +433,7 @@ create_proj_matrix :: proc(renderer: Renderer) -> matrix[4,4]f32 {
     x, y: i32;
     ok := sdl.GetWindowSize(renderer.window, &x, &y)
     aspect := f32(x) / f32(y)
-    return matrix4_perspective_f32(linalg.to_radians(f32(70)), aspect, 0.0001, renderer.draw_distance)
+    return matrix4_perspective_f32(linalg.to_radians(f32(90)), aspect, 0.0001, renderer.draw_distance)
 }
 
 create_vertex_UBO :: proc(entity: Entity, view_matrix: matrix[4,4]f32) -> VertUniforms {
@@ -490,9 +501,10 @@ build_shadow_pipeline :: proc(renderer: ^Renderer) {
 
 @(private="file")
 build_3D_pipeline :: proc(renderer: ^Renderer) {
-    sdl.ReleaseGPUGraphicsPipeline(renderer.gpu, renderer.pipeline3D)
-    vert_shader := load_shader(renderer.gpu, vert_shader_code, .VERTEX, 3, 0, 0); defer sdl.ReleaseGPUShader(renderer.gpu, vert_shader)
-    frag_shader := load_shader(renderer.gpu, frag_shader_code, .FRAGMENT, 2, 5, 1); defer sdl.ReleaseGPUShader(renderer.gpu, frag_shader)
+    using renderer
+    sdl.ReleaseGPUGraphicsPipeline(gpu, pipeline3D)
+    vert_shader := load_shader(gpu, vert_shader_code, .VERTEX, 3, 0, 0); defer sdl.ReleaseGPUShader(renderer.gpu, vert_shader)
+    frag_shader := load_shader(gpu, frag_shader_code, .FRAGMENT, 2, 5, 1); defer sdl.ReleaseGPUShader(renderer.gpu, frag_shader)
 
     vb_descriptions: [1]sdl.GPUVertexBufferDescription
     vb_descriptions = {
@@ -532,10 +544,10 @@ build_3D_pipeline :: proc(renderer: ^Renderer) {
     }
     fill_mode: sdl.GPUFillMode;
     cull_mode: sdl.GPUCullMode; 
-    if renderer.wireframe {fill_mode = .LINE; cull_mode = .NONE} else {fill_mode = .FILL; cull_mode = .BACK}
+    if .WIREFRAME in renderer.props {fill_mode = .LINE; cull_mode = .NONE} else {fill_mode = .FILL; cull_mode = .BACK}
 
-    format := sdl.GetGPUSwapchainTextureFormat(renderer.gpu, renderer.window)
-    renderer.pipeline3D = sdl.CreateGPUGraphicsPipeline(renderer.gpu, {
+    format := sdl.GetGPUSwapchainTextureFormat(gpu, window)
+    renderer.pipeline3D = sdl.CreateGPUGraphicsPipeline(gpu, {
         vertex_shader = vert_shader,
         fragment_shader = frag_shader,
         primitive_type = .TRIANGLELIST,
@@ -564,6 +576,7 @@ build_3D_pipeline :: proc(renderer: ^Renderer) {
         }
     })
 }
+
 @(private="file")
 build_bbox_pipeline :: proc(renderer: ^Renderer) {
     sdl.ReleaseGPUGraphicsPipeline(renderer.gpu, renderer.pipeline3D)

@@ -7,8 +7,6 @@ import "core:fmt"
 import "core:thread"
 import "core:sync"
 
-PHYSICS_THREADS :: 4
-
 PhysicsFlags :: distinct bit_set[PhysicsFlag]
 
 PhysicsFlag :: enum {
@@ -33,16 +31,14 @@ workerData :: struct {
     start, end: int,
 }
 
-check_aabb_collisions :: proc(t: ^thread.Thread) {
+resolve_aabb_collisions :: proc(t: ^thread.Thread) {
     data := (cast(^workerData)t.data)
     using data
     using player
     for i in start..<end {
-        // now := time.now()
-        entity_bbox := entity_bboxes[i]
-        if aabbs_collide(bbox, entity_bbox) {
+        if aabbs_collide(bbox, entity_bboxes[i]) {
             found_collision^ = true
-            mtv := resolve_aabb_collision_mtv(bbox, entity_bbox)
+            mtv := resolve_aabb_collision_mtv(bbox, entity_bboxes[i])
             for axis, j in mtv do if axis != 0 {
                 speed[j] *= 0.9
                 if j == 1 { 
@@ -52,7 +48,7 @@ check_aabb_collisions :: proc(t: ^thread.Thread) {
                         speed.y = -0.1
                     }
                 }
-            } 
+            }
             position += mtv
             bbox.min += mtv
             bbox.max += mtv
@@ -61,13 +57,41 @@ check_aabb_collisions :: proc(t: ^thread.Thread) {
     sync.wait_group_done(data.waitgroupdata)
 }
 
-update_player :: proc(state: ^AppState, dt: f32) {
+air_accelerate :: proc(wishveloc: ^vec3, player: ^Player, dt: f32) {
+    addspeed, wishspd, accelspeed, currentspeed: f32
+    wishveloc^ *= 10
+    wishspd = vector_normalize(wishveloc);
+    grounded_wishspd := wishspd
+    if wishspd > 2 do wishspd = 2
+    currentspeed = linalg.dot(player.speed, wishveloc^)
+    addspeed = wishspd - currentspeed
+    if addspeed <= 0 do return
+
+    accelspeed = grounded_wishspd * 5 * dt
+    player.speed += accelspeed * wishveloc^
+}
+
+vector_normalize :: proc(v: ^vec3) -> f32 {
+    length := v.x*v.x + v.y*v.y + v.z*v.z
+    length = math.sqrt(length)
+    if length != 0 {
+        ilength := 1/length
+        v^ *= ilength
+    }
+    return length
+}
+
+update_player :: proc(state: ^AppState, wishveloc: ^vec3, dt: f32) {
     g: f32 = 25
     using state, player
-    if speed.y > 0 && !airborne {
+    airborne_at_start := airborne
+    if wishveloc.y > 0 && !airborne {
         speed.y = 9
         airborne = true
+    } else if !airborne {
+        speed += wishveloc^
     } else {
+        air_accelerate(wishveloc, &player, dt)
         speed.y -= g * dt
     }
     delta_pos := speed * dt
@@ -76,44 +100,34 @@ update_player :: proc(state: ^AppState, dt: f32) {
     bbox.max += delta_pos
     found_collision: bool
 
-    wg: sync.Wait_Group
-    // aabb_checking := time.now()
-    aabb_count := len(state.aabbs)
-    chunkSize := (aabb_count + PHYSICS_THREADS - 1) / PHYSICS_THREADS
-    work_data: [PHYSICS_THREADS]workerData
-
-    for i in 0..<PHYSICS_THREADS {
-        start := i * chunkSize
-        end := (i + 1) * chunkSize
-        if end > aabb_count {
-            end = aabb_count
+    for i in 0..<len(aabbs) {
+        if aabbs_collide(bbox, state.aabbs[i]) {
+            found_collision = true
+            mtv := resolve_aabb_collision_mtv(bbox, state.aabbs[i])
+            for axis, j in mtv do if axis != 0 {
+                speed[j] *= 0.9
+                if j == 1 { 
+                    if axis > 0 { // This means we are standing on a block
+                        airborne = false
+                    } else {
+                        speed.y = -0.1
+                    }
+                }
+            }
+            position += mtv
+            bbox.min += mtv
+            bbox.max += mtv
         }
-        t := thread.create(check_aabb_collisions)
-        t.init_context = context
-        t.user_index = 1
-        work_data[i] = workerData {
-            waitgroupdata = &wg,
-            player = &state.player,
-            entity_bboxes = &state.aabbs,
-            start = start,
-            end = end,
-            found_collision = &found_collision
-        }
-        t.data = &work_data[i]
-        sync.wait_group_add(&wg, 1)
-        thread.start(t)
     }
 
-    // sync.wait_group_add(&wg, PHYSICS_THREADS)
-    // for handle in handles do thread.start(handle)
-
-    sync.wait_group_wait(&wg)
+    // sync.wait_group_wait(&wg)
 
     if !found_collision do airborne = true
-    if !airborne {
+    if !airborne_at_start && !airborne {
         speed *= 0.8
     }
-    if position.y < -2 {
+    if linalg.length(speed) > 20 do speed *= 0.9
+    if position.y < -5 {
         reset_player_pos(state)
     }
 }

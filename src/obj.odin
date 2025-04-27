@@ -73,14 +73,16 @@ material_matrix :: proc(m: Material) -> [4]vec4 {
 delete_obj :: proc(data: ObjectData) {
     using data
     using texture_data
+    fmt.printfln("names: {}, sizes: {}, textures: {}", len(names), len(sizes), len(textures))
+    assert(len(names) == len(sizes) && len(sizes) == len(textures))
+    delete(vertices)
+    delete(materials)
     for i in 0..<len(names) {
         delete(names[i])
     }
     delete(names)
     delete(textures)
     delete(sizes)
-    delete(vertices)
-    delete(materials)
 }
 
 load_object :: proc(dir_path: string) -> ObjectData {

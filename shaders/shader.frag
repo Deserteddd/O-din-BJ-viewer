@@ -84,6 +84,5 @@ void main() {
     float diffuse = max(0.0, dot(v_normal, to_light));
     float distance = distance(v_pos.xyz, light.position);
     vec3 intensity = light.power * light.color * color.xyz * diffuse * (1/(distance*distance));
-    float shadow = calculateShadow(v_light_space_position);
-    frag_color = vec4(intensity * max(0.1, shadow), 1.0);
+    frag_color = vec4(intensity, 1.0);
 }

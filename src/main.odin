@@ -20,7 +20,6 @@ import im_sdlgpu "shared:imgui/imgui_impl_sdlgpu3"
 default_context: runtime.Context
 FRAMES := 0
 last_ticks := sdl.GetTicks();
-WORLD_SIZE: vec3 = {250, 30, 250}
 
 main :: proc() {
     state: AppState
@@ -45,6 +44,7 @@ AppState :: struct {
 DebugInfo :: struct {
     frame_time:     time.Duration,
     rendered:       u32,
+    player_speed:   f32,
 }
 
 AppMode :: enum u8 {
@@ -71,10 +71,7 @@ init :: proc(state: ^AppState) {
     add_model(slab, state)
 
     create_entity(state, {.COLLIDER, .STATIC}, 0)
-    args := os.args
-    if len(args) != 2 do panic("Missing argument: slab count")
-    slab_count, ok := strconv.parse_int(args[1]); assert(ok)
-    for i in 0..<slab_count {
+    for i in 0..<SLAB_COUNT {
         create_entity(state, {.COLLIDER, .STATIC, .SHADOW_CASTER}, 1)
     }
     randomize_tile_positions(state)
@@ -82,23 +79,20 @@ init :: proc(state: ^AppState) {
     init_imgui(state)
 }
 
-randomize_tile_positions :: proc(state: ^AppState) {
-    assert(len(state.aabbs) == len(state.entities))
-    // reset_player_pos(state, true)
-    // state.checkpoint = 0
-    static_collider_index := 0
-    for &entity, i in state.entities {
-        if i < 1 do continue
-        entity.position = {
-            random_range(-WORLD_SIZE.x, WORLD_SIZE.x),
-            random_range(0, WORLD_SIZE.y),
-            random_range(-WORLD_SIZE.z, WORLD_SIZE.z)
-        }
-        state.aabbs[i] = AABB {
-            min = entity.model.bbox.min + entity.position,
-            max = entity.model.bbox.max + entity.position
+release :: proc(state: ^AppState) {
+    using state
+    for &model in models {
+        sdl.ReleaseGPUBuffer(renderer.gpu, model.vbo)
+        sdl.ReleaseGPUBuffer(renderer.gpu, model.bbox_vbo)
+        sdl.ReleaseGPUBuffer(renderer.gpu, model.material_buffer)
+        for &texture in model.textures {
+            sdl.ReleaseGPUTexture(renderer.gpu, texture)
         }
     }
+    delete(state.models)
+    delete(state.entities)
+    delete(state.aabbs)
+    RND_Destroy(&state.renderer)
 }
 
 init_imgui :: proc(state: ^AppState) {
@@ -139,16 +133,21 @@ run :: proc(state: ^AppState) {
                         reset_player_pos(state)
                     case .F:
                         RND_ToggleFullscreen(state)
+                    case .C:
+                        if .LCTRL in ev.key.mod {
+                            release(state)
+                            return
+                        }
                 }
             }
         }
         update(state)
         RND_FrameBegin(&state.renderer)
         RND_DrawEntities(state)
-        wireframe := state.renderer.wireframe 
+        wireframe := .WIREFRAME in state.renderer.props
         state.debug_info.frame_time = time.since(now)
         RND_DrawUI(state)
-        if wireframe != state.renderer.wireframe do RND_ToggleWireframe(&state.renderer)
+        if wireframe != .WIREFRAME in state.renderer.props do RND_ToggleWireframe(&state.renderer)
         ok := RND_FrameSubmit(&state.renderer); assert(ok)
     }
 }
@@ -169,9 +168,28 @@ switch_mode :: proc(state: ^AppState) {
     }
 }
 
-reset_player_pos :: proc(state: ^AppState, at_zero := false) {
+randomize_tile_positions :: proc(state: ^AppState) {
+    assert(len(state.aabbs) == len(state.entities))
+    // reset_player_pos(state, true)
+    // state.checkpoint = 0
+    static_collider_index := 0
+    for &entity, i in state.entities {
+        if i < 1 do continue
+        entity.position = {
+            random_range(-WORLD_SIZE.x, WORLD_SIZE.x),
+            random_range(0, WORLD_SIZE.y),
+            random_range(-WORLD_SIZE.z, WORLD_SIZE.z)
+        }
+        state.aabbs[i] = AABB {
+            min = entity.model.bbox.min + entity.position,
+            max = entity.model.bbox.max + entity.position
+        }
+    }
+}
+
+reset_player_pos :: proc(state: ^AppState, at_origin := false) {
     using state
-    if at_zero do player.position = 0; 
+    if at_origin do player.position = 0; 
     else if checkpoint.x == 0 {
         player.position = checkpoint.x
     } else {
@@ -191,15 +209,17 @@ update :: proc(state: ^AppState) {
     dt := f32(new_ticks - last_ticks) / 1000
     last_ticks = new_ticks
     if state.mode == .GAME {
-        process_keyboard(state)
-        update_player(state, dt)
+        wish_speed := player_wish_speed(state.player)
+        update_player(state, &wish_speed, dt)
         update_camera(&state.player)
     }
+    debug_info.player_speed = linalg.length(player.speed)
 }
 
-process_keyboard :: proc(state: ^AppState) {
+player_wish_speed :: proc(player: Player) -> vec3 {
     using sdl.Scancode
     key_state := sdl.GetKeyboardState(nil)
+    wish_speed: vec3
     f, b, l, r, u: f32
     yaw_r, yaw_l, pitch_u, pitch_d : f32
     if key_state[W] do f = 1
@@ -211,28 +231,25 @@ process_keyboard :: proc(state: ^AppState) {
     if key_state[LEFT] do yaw_l = 1
     if key_state[UP] do pitch_u = 1
     if key_state[DOWN] do pitch_d = 1
-    state.player.crouching = key_state[LCTRL]
 
-    using state
+    fb := b-f; lr := r-l
+    if key_state[LSHIFT] {fb *= 2; lr *= 2}
+
     yaw_cos := math.cos(math.to_radians(player.rotation.y))
     yaw_sin := math.sin(math.to_radians(player.rotation.y))
-    player.rotation.x += (pitch_d-pitch_u)
-    player.rotation.y += (yaw_r-yaw_l)
-    if !player.airborne {
-        fb := b-f; lr := r-l
-        if key_state[LSHIFT] {fb *= 2; lr *= 2}
-        player.speed.y = u
-        player.speed.x += (lr * yaw_cos - fb * yaw_sin)
-        player.speed.z += (lr * yaw_sin + fb * yaw_cos)
-    }
+
+    if !player.airborne do wish_speed.y = u
+    wish_speed.x += (lr * yaw_cos - fb * yaw_sin)
+    wish_speed.z += (lr * yaw_sin + fb * yaw_cos)
+    return wish_speed
 }
 
 update_camera :: proc(player: ^Player) {
     x, y: f32
     using player
     _ = sdl.GetRelativeMouseState(&x, &y)
-    rotation.y += x * 0.05
-    rotation.x += y * 0.05
+    rotation.y += x * 0.03
+    rotation.x += y * 0.03
     if rotation.x >  90 do rotation.x =  90
     if rotation.x < -90 do rotation.x = -90
 }

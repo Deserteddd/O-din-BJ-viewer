@@ -13,7 +13,6 @@ Entity :: struct {
     model: ^Model,
     position: vec3,
     speed: vec3,
-    // rotation: vec3,
     flags: PhysicsFlags,
 }
 
@@ -31,13 +30,11 @@ Player :: struct {
     speed: vec3,
     rotation: vec3,
     bbox: AABB,
-    crouching: bool,
     airborne: bool
 }
 
 create_entity :: proc(state: ^AppState, physics_flags: PhysicsFlags, model: u32) {
     entity: Entity
-    // entity.id = u32(len(state.entities))
     entity.flags = physics_flags
     entity.model = &state.models[model]
     append(&state.entities, entity)
