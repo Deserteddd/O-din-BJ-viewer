@@ -9,6 +9,7 @@ import "core:c"
 import "core:time"
 import "core:os"
 import "core:path/filepath"
+import "core:encoding/json"
 import sdl "vendor:sdl3"
 import stbi "vendor:stb/image"
 import im "shared:imgui"
@@ -66,6 +67,7 @@ RND_Init :: proc(props: RND_Props) -> Renderer {
     sdl.GetWindowSize(window, &width, &height)
     gpu := sdl.CreateGPUDevice({.SPIRV}, false, nil); assert(gpu != nil)
     ok = sdl.ClaimWindowForGPUDevice(gpu, window); assert(ok)
+    ok = sdl.SetGPUSwapchainParameters(gpu, window, .SDR_LINEAR, .IMMEDIATE); assert(ok)
 
     renderer.window = window
     renderer.gpu = gpu
@@ -124,7 +126,7 @@ RND_Init :: proc(props: RND_Props) -> Renderer {
         color = 1,
         power = 2000
     }
-    renderer.draw_distance = 100
+    renderer.draw_distance = 250
     return renderer
 }
 
@@ -168,6 +170,8 @@ RND_ToggleFullscreen :: proc(state: ^AppState) {
         window = new_window
         ok = sdl.ClaimWindowForGPUDevice(gpu, window)
     }
+
+    ok = sdl.SetGPUSwapchainParameters(gpu, window, .SDR_LINEAR, .IMMEDIATE); assert(ok)
     depth := sdl.CreateGPUTexture(gpu, {
         type = .D2,
         width = u32(width),
@@ -261,11 +265,12 @@ RND_DrawEntities :: proc(state: ^AppState) #no_bounds_check {
     using state
     assert(renderer.cmd_buff != nil)
     assert(renderer.swapchain_texture != nil)
+
     color_target := sdl.GPUColorTargetInfo {
         texture = renderer.swapchain_texture,
         load_op = .CLEAR,
         store_op = .STORE,
-        clear_color = {0.2, 0.2, 0.2, 1},
+        clear_color = {0.24, 0.5, 0.5, 1},
     }
     depth_target_info := sdl.GPUDepthStencilTargetInfo {
         texture = renderer.depth_texture,
@@ -315,7 +320,6 @@ RND_DrawEntities :: proc(state: ^AppState) #no_bounds_check {
             sdl.DrawGPUPrimitives(render_pass, model.num_vertices, 1, 0, 0)
         }
     }
-    // fmt.println("Culling took:", culltime)
     sdl.EndGPURenderPass(render_pass)
 }
 
@@ -352,8 +356,8 @@ create_vertex_UBO :: proc(entity: Entity, view_matrix: matrix[4,4]f32) -> VertUn
 build_3D_pipeline :: proc(renderer: ^Renderer) {
     using renderer
     sdl.ReleaseGPUGraphicsPipeline(gpu, pipeline3D)
-    vert_shader := load_shader(gpu, "shaders/spv/shader.vert", 2, 0, 0); defer sdl.ReleaseGPUShader(renderer.gpu, vert_shader)
-    frag_shader := load_shader(gpu, "shaders/spv/shader.frag", 1, 4, 1); defer sdl.ReleaseGPUShader(renderer.gpu, frag_shader)
+    vert_shader := load_shader(gpu, "shader.vert"); defer sdl.ReleaseGPUShader(renderer.gpu, vert_shader)
+    frag_shader := load_shader(gpu, "shader.frag"); defer sdl.ReleaseGPUShader(renderer.gpu, frag_shader)
 
     vb_descriptions: [1]sdl.GPUVertexBufferDescription
     vb_descriptions = {
@@ -426,7 +430,6 @@ build_3D_pipeline :: proc(renderer: ^Renderer) {
     })
 }
 
-
 create_buffer_with_data :: proc(
     gpu: ^sdl.GPUDevice, 
     transfer_buffer: ^sdl.GPUTransferBuffer,
@@ -459,29 +462,43 @@ create_buffer_with_data :: proc(
     return buffer
 }
 
-load_shader :: proc(device: ^sdl.GPUDevice, file: string,
-    num_uniform_buffers: u32, num_samplers: u32,
-    num_storage_buffers: u32
-) -> ^sdl.GPUShader {
+load_shader :: proc(device: ^sdl.GPUDevice, shaderfile: string) -> ^sdl.GPUShader {
     stage: sdl.GPUShaderStage
-    switch filepath.ext(file) {
+    switch filepath.ext(shaderfile) {
         case ".vert":
             stage = .VERTEX
         case ".frag":
             stage = .FRAGMENT
     }
-    filename := strings.concatenate({file, ".spv"})
-    fmt.println(filename)
-    code, ok := os.read_entire_file_from_filename(filename); assert(ok)
-    defer delete(code)
+
+    shaderfile := filepath.join({"shaders", "out", shaderfile})
+    filename := strings.concatenate({shaderfile, ".spv"}, context.temp_allocator)
+    code, ok := os.read_entire_file_from_filename(filename, context.temp_allocator); assert(ok)
+    info := load_shader_info(shaderfile)
     return sdl.CreateGPUShader(device, {
         code_size = len(code),
         code = raw_data(code),
         entrypoint = "main",
         format = {.SPIRV},
         stage = stage,
-        num_uniform_buffers = num_uniform_buffers,
-        num_samplers = num_samplers,
-        num_storage_buffers = num_storage_buffers
+        num_uniform_buffers = info.uniform_buffers,
+        num_samplers = info.samplers,
+        num_storage_buffers = info.storage_buffers,
+        num_storage_textures = info.storage_textures
     })
+}
+
+Shader_Info :: struct {
+    samplers:           u32,
+    storage_textures:   u32,
+    storage_buffers:    u32,
+    uniform_buffers:    u32
+}
+
+load_shader_info :: proc(shaderfile: string) -> Shader_Info {
+    json_filename := strings.concatenate({shaderfile, ".json"}, context.temp_allocator)
+    json_data, ok := os.read_entire_file_from_filename(json_filename, context.temp_allocator); assert(ok)
+    result: Shader_Info
+    err := json.unmarshal(json_data, &result, allocator = context.temp_allocator); assert(err == nil)
+    return result
 }

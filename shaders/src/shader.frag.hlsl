@@ -53,10 +53,12 @@ float4 getColor(Input input) {
 
 float4 main(Input input) : SV_Target0 {
     float4 color = getColor(input);
+
     float3 to_light = normalize(light.position - input.position);
     float3 normal = normalize(input.normal);
     float diffuse = max(0.0, dot(input.normal, to_light));
     float dist = distance(input.position.xyz, light.position);
-    float3 intensity = light.power * light.color * color.xyz * diffuse * (1/(dist*dist));
+    float3 intensity = light.power * light.color * color.rgb * diffuse * (1/(dist*dist));
+    
     return float4(intensity, 1);
 }

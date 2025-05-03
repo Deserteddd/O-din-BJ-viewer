@@ -75,7 +75,7 @@ update_player :: proc(state: ^AppState, wishveloc: ^vec3, dt: f32) #no_bounds_ch
     if !airborne_at_start && !airborne {
         speed *= 0.8
     }
-    if linalg.length(speed) > 20 do speed *= 0.9
+    if linalg.length(speed.xz) > 20 do speed.xz *= 0.9
     if position.y < -5 {
         reset_player_pos(state)
     }

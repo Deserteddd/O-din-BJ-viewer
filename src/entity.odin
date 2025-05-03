@@ -68,7 +68,7 @@ add_model :: proc(data: ObjectData, state: ^AppState) {
         pixels_byte_size := u32(size.x * size.y * 4)
         texture := sdl.CreateGPUTexture(gpu, {
             type = .D2,
-            format = .R8G8B8A8_UNORM,
+            format = .R8G8B8A8_UNORM_SRGB,
             usage = {.SAMPLER},
             width = u32(size.x),
             height = u32(size.y),

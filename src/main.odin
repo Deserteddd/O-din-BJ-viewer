@@ -66,6 +66,8 @@ init :: proc(state: ^AppState) {
     slab := load_object("assets/ref_cube"); defer delete_obj(slab)
     add_model(slab, state)
     create_entity(state, 0)
+    for i in 0..<SLAB_COUNT do create_entity(state, 1)
+    randomize_tile_positions(state)
     init_imgui(state)
 }
 
@@ -90,7 +92,6 @@ init_imgui :: proc(state: ^AppState) {
         im_sdl.Shutdown()
         im.Shutdown()
         im.DestroyContext(state.ui_context)
-        state.ui_context = nil
     }
     im.CHECKVERSION()
     state.ui_context = im.CreateContext()
@@ -100,6 +101,10 @@ init_imgui :: proc(state: ^AppState) {
         Device = state.renderer.gpu,
         ColorTargetFormat = sdl.GetGPUSwapchainTextureFormat(gpu, window)
     })
+    style := im.GetStyle()
+    for &color in style.Colors {
+        color.rgb = linalg.pow(color.rgb, 2.2)
+    }
 }
 
 run :: proc(state: ^AppState) {
