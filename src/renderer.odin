@@ -4,39 +4,28 @@ import "core:mem"
 import "core:math"
 import "core:math/linalg"
 import "core:fmt"
+import "core:strings"
 import "core:c"
 import "core:time"
+import "core:os"
+import "core:path/filepath"
 import sdl "vendor:sdl3"
 import stbi "vendor:stb/image"
 import im "shared:imgui"
 import im_sdl "shared:imgui/imgui_impl_sdl3"
 import im_sdlgpu "shared:imgui/imgui_impl_sdlgpu3"
 
-vert_shader_code := #load("../shaders/spv/shader.vert.spv")
-frag_shader_code := #load("../shaders/spv/shader.frag.spv")
-bbox_vert_shader := #load("../shaders/spv/bbox.vert.spv")
-bbox_frag_shader := #load("../shaders/spv/bbox.frag.spv")
-shadow_shader_code := #load("../shaders/spv/shadow.vert.spv")
-bias: f32
-
-light_proj := linalg.matrix_ortho3d_f32(WORLD_SIZE.x, -WORLD_SIZE.x, WORLD_SIZE.z, -WORLD_SIZE.z, 0.001, 1000);
-
 Renderer :: struct {
     window:             ^sdl.Window,
     gpu:                ^sdl.GPUDevice,
     pipeline3D:         ^sdl.GPUGraphicsPipeline,
-    bbox_pipeline:      ^sdl.GPUGraphicsPipeline,
     depth_texture:      ^sdl.GPUTexture,
     fallback_texture:   ^sdl.GPUTexture,
     swapchain_texture:  ^sdl.GPUTexture,
-    shadow_map:         ^sdl.GPUTexture,
-    shadow_sampler:     ^sdl.GPUSampler,
     cmd_buff:           ^sdl.GPUCommandBuffer,
-    shadow_pipeline:    ^sdl.GPUGraphicsPipeline,
     samplers:           [4]^sdl.GPUSampler,
     props:              RND_Props,
     light:              PointLight,
-    light_orientation:  vec3,
     draw_distance:      f32
 }
 
@@ -48,16 +37,14 @@ PointLight :: struct #packed {
 
 VertUniforms :: struct {
     modelview: matrix[4,4]f32,
-    model: matrix[4,4]f32,
     position_offset: vec4,
 }
 
-RND_Props :: distinct bit_set[RND_Prop; u16]
+RND_Props :: distinct bit_set[RND_Prop; u8]
 
-RND_Prop :: enum u16 {
+RND_Prop :: enum u8 {
     FULLSCREEN = 0,
-    SHADOWS = 1,
-    WIREFRAME = 2,
+    WIREFRAME = 1,
 }
 
 
@@ -127,54 +114,26 @@ RND_Init :: proc(props: RND_Props) -> Renderer {
     })
     renderer.depth_texture = depth_texture
 
-    shadow_map := sdl.CreateGPUTexture(gpu, {
-        type = .D2,
-        width = 2048,
-        height = 2048,
-        layer_count_or_depth = 1,
-        num_levels = 1,
-        format = .D32_FLOAT,
-        usage = {.SAMPLER, .DEPTH_STENCIL_TARGET}
-
-    })
-    renderer.shadow_map = shadow_map
-
-    shadow_sampler := sdl.CreateGPUSampler(gpu, {
-        enable_compare = true,
-        address_mode_u = .CLAMP_TO_EDGE,
-        address_mode_v = .CLAMP_TO_EDGE,
-        address_mode_w = .CLAMP_TO_EDGE,
-        compare_op = .LESS_OR_EQUAL,
-    }); assert(shadow_sampler != nil)
-    renderer.shadow_sampler = shadow_sampler
-
-    build_bbox_pipeline(&renderer)
     build_3D_pipeline(&renderer)
-    build_shadow_pipeline(&renderer)
     for i in 0..<4 {
         sampler := sdl.CreateGPUSampler(gpu, {}); assert(sampler != nil)
         renderer.samplers[i] = sampler
     }
-    assert(renderer.bbox_pipeline != nil)
     renderer.light = PointLight {
         position = vec3{0, 50, 0},
         color = 1,
         power = 2000
     }
-    renderer.light_orientation = {90, 0, 0}
     renderer.draw_distance = 100
-    renderer.props += {.SHADOWS}
     return renderer
 }
 
 RND_Destroy :: proc(renderer: ^Renderer) {
     using renderer
-    sdl.ReleaseGPUGraphicsPipeline(gpu, shadow_pipeline)
     sdl.ReleaseGPUGraphicsPipeline(gpu, pipeline3D)
     sdl.ReleaseGPUTexture(gpu, depth_texture)
     sdl.ReleaseGPUTexture(gpu, fallback_texture)
     sdl.ReleaseGPUTexture(gpu, swapchain_texture)
-    sdl.ReleaseGPUTexture(gpu, shadow_map)
     for sampler in samplers {
         sdl.ReleaseGPUSampler(gpu, sampler)
     }
@@ -188,12 +147,16 @@ RND_ToggleFullscreen :: proc(state: ^AppState) {
     if .FULLSCREEN in props do props -= {.FULLSCREEN}
     else do props += {.FULLSCREEN}
     ok: bool
+    window_bounds: sdl.Rect
+    if !sdl.GetDisplayBounds(1, &window_bounds) {
+        fmt.println(sdl.GetError())
+    }
     sdl.ReleaseWindowFromGPUDevice(gpu, window)
     sdl.DestroyWindow(window)
     width, height: i32
     if .FULLSCREEN in props {
-        width = 1920
-        height = 1080
+        width = window_bounds.w
+        height = window_bounds.h
         new_window := sdl.CreateWindow("Demo window", width, height, {.FULLSCREEN}); assert(new_window != nil)
         window = new_window
         ok = sdl.ClaimWindowForGPUDevice(gpu, window)
@@ -216,7 +179,7 @@ RND_ToggleFullscreen :: proc(state: ^AppState) {
     })
     sdl.ReleaseGPUTexture(gpu, depth_texture)
     depth_texture = depth
-    if state.mode == .MENU {
+    if state.ui_visible {
         ok = sdl.ShowCursor(); assert(ok)
         ok = sdl.SetWindowRelativeMouseMode(window, false); assert(ok)
     } else {
@@ -232,14 +195,12 @@ RND_DrawUI :: proc(state: ^AppState) {
     im_sdlgpu.NewFrame()
     im_sdl.NewFrame()
     im.NewFrame()
-    if state.mode == .MENU {
+    if ui_visible {
         if im.Begin("Properties") {
             im.LabelText("", "Light")
             im.DragFloat3("position", &renderer.light.position, 0.5, -200, 200)
-            im.DragFloat3("orientation", &renderer.light_orientation, 0.5, -180, 200)
             im.DragFloat("intensity", &renderer.light.power, 10, 0, 10000)
             im.ColorPicker3("color", transmute(^vec3)&renderer.light.color, {.InputRGB})
-            im.DragFloat("Depth bias", &bias, 0.001, -1, 1)
             im.LabelText("", "General")
             im.DragFloat3("Player position", &state.player.position, 0.25, 0, 60)
             im.DragFloat("Draw distance", &state.renderer.draw_distance, 0.5, 10, 250)
@@ -296,12 +257,8 @@ RND_FrameSubmit :: proc(renderer: ^Renderer) -> bool {
     return ok
 }
 
-RND_DrawEntities :: proc(state: ^AppState) {
+RND_DrawEntities :: proc(state: ^AppState) #no_bounds_check {
     using state
-    if .SHADOWS in renderer.props {
-        shadow_pass(state)
-        renderer.props -= {.SHADOWS}
-    }
     assert(renderer.cmd_buff != nil)
     assert(renderer.swapchain_texture != nil)
     color_target := sdl.GPUColorTargetInfo {
@@ -326,29 +283,21 @@ RND_DrawEntities :: proc(state: ^AppState) {
     view_matrix := create_view_matrix(player.position, player.rotation)
     frustum_planes := create_furstum_planes(proj_matrix * view_matrix)
 
-    light_view := create_view_matrix({0, WORLD_SIZE.y, 0}, renderer.light_orientation)
-    light_viewproj := light_proj * light_view
-
     render_pass := sdl.BeginGPURenderPass(renderer.cmd_buff, &color_target, 1, &depth_target_info); assert(render_pass != nil)
     sdl.BindGPUGraphicsPipeline(render_pass, renderer.pipeline3D)
     sdl.PushGPUFragmentUniformData(renderer.cmd_buff, 0, &renderer.light, size_of(PointLight))
-    sdl.PushGPUFragmentUniformData(renderer.cmd_buff, 1, &bias, size_of(f32))
-    sdl.PushGPUVertexUniformData(renderer.cmd_buff, 2, &proj_matrix, size_of(matrix[4,4]f32))
-    sdl.PushGPUVertexUniformData(renderer.cmd_buff, 1, &light_viewproj, size_of(matrix[4,4]f32))
+    sdl.PushGPUVertexUniformData(renderer.cmd_buff, 1, &proj_matrix, size_of(matrix[4,4]f32))
     for &model, model_index in models {
         bindings: [1]sdl.GPUBufferBinding = { sdl.GPUBufferBinding { buffer = model.vbo } } 
         sdl.BindGPUVertexBuffers(render_pass, 0, &bindings[0], 1)
-        texture_count := len(model.textures)+1
-        sdl.BindGPUFragmentSamplers(render_pass, 0, 
-            &(sdl.GPUTextureSamplerBinding{texture = renderer.shadow_map, sampler = renderer.shadow_sampler}), u32(texture_count)
-        )
+        texture_count := len(model.textures)
         for tex, i in model.textures {
-            sdl.BindGPUFragmentSamplers(render_pass, u32(i+1), 
+            sdl.BindGPUFragmentSamplers(render_pass, u32(i), 
                 &(sdl.GPUTextureSamplerBinding{texture = tex, sampler = renderer.samplers[i]}), u32(texture_count)
             )
         }
         for i in texture_count..<4 {
-            if texture_count == 1 do texture_count = 2
+            if texture_count == 0 do texture_count = 1
             sdl.BindGPUFragmentSamplers(render_pass, u32(i), 
                 &(sdl.GPUTextureSamplerBinding{texture = renderer.fallback_texture, sampler = renderer.samplers[i]}), u32(texture_count)
             )
@@ -359,62 +308,16 @@ RND_DrawEntities :: proc(state: ^AppState) {
             if entity.model.vbo != model.vbo do continue
             if linalg.distance(player.position, entity.position) > renderer.draw_distance - 1 &&
                 model_index != 0 { continue }
-            if !aabb_intersects_frustum(frustum_planes, state.aabbs[i]) do continue
+            if !aabb_intersects_frustum(frustum_planes, entity.aabb) do continue
             debug_info.rendered += 1
             vert_ubo := create_vertex_UBO(entity, view_matrix)
             sdl.PushGPUVertexUniformData(renderer.cmd_buff, 0, &vert_ubo, size_of(VertUniforms))
             sdl.DrawGPUPrimitives(render_pass, model.num_vertices, 1, 0, 0)
         }
     }
+    // fmt.println("Culling took:", culltime)
     sdl.EndGPURenderPass(render_pass)
 }
-
-shadow_pass :: proc(state: ^AppState) {
-    using state
-    assert(renderer.cmd_buff != nil)
-    assert(renderer.swapchain_texture != nil)
-
-    depth_target_info := sdl.GPUDepthStencilTargetInfo {
-        texture = renderer.shadow_map,
-        clear_depth = 1,
-        load_op = .CLEAR,
-        store_op = .STORE,
-        stencil_load_op = .CLEAR,
-        stencil_store_op = .STORE,
-        cycle = true,
-        clear_stencil = 0,
-    }
-
-
-    using state.renderer
-    light_view := create_view_matrix({0, WORLD_SIZE.y, 0}, renderer.light_orientation)
-    light_viewproj := light_proj * light_view
-
-    render_pass := sdl.BeginGPURenderPass(renderer.cmd_buff, nil, 0, &depth_target_info); assert(render_pass != nil)
-    sdl.BindGPUGraphicsPipeline(render_pass, renderer.shadow_pipeline)
-    for &model, model_index in models {
-        bindings: [1]sdl.GPUBufferBinding = { sdl.GPUBufferBinding { buffer = model.vbo } } 
-        sdl.BindGPUVertexBuffers(render_pass, 0, &bindings[0], 1)
-        for &entity, i in entities {
-            if entity.model.vbo != model.vbo || !(.SHADOW_CASTER in entity.flags) || 
-            linalg.distance(entity.position, player.position) > renderer.draw_distance { continue }
-            model_mat := linalg.matrix4_translate_f32(entity.position)
-            position_offset := to_vec4(entity.position, 1)
-            shadow_ubo := ShadowUBO {light_viewproj = light_viewproj, position_offset = position_offset}
-            sdl.PushGPUVertexUniformData(renderer.cmd_buff, 0, &shadow_ubo, size_of(ShadowUBO))
-            assert(entity.model.vbo != state.models[0].vbo)
-            sdl.DrawGPUPrimitives(render_pass, model.num_vertices, 1, 0, 0)
-        }
-    }
-    sdl.EndGPURenderPass(render_pass)
-}
-
-ShadowUBO :: struct {
-    light_viewproj: matrix[4,4]f32,
-    position_offset: vec4
-}
-
-
 
 create_view_matrix :: proc(position: vec3, rotation: vec3) -> linalg.Matrix4f32 {
     using linalg
@@ -442,69 +345,15 @@ create_vertex_UBO :: proc(entity: Entity, view_matrix: matrix[4,4]f32) -> VertUn
     model_matrix: matrix[4, 4]f32 = view_matrix * model_translation_matrix
     return VertUniforms {
         modelview = model_matrix,
-        model = model_translation_matrix,
         position_offset = to_vec4(entity.position, 1)
     }
 }
-build_shadow_pipeline :: proc(renderer: ^Renderer) {
-    using renderer
-    sdl.ReleaseGPUGraphicsPipeline(gpu, shadow_pipeline)
-    vert_shader := load_shader(renderer.gpu, shadow_shader_code, .VERTEX, 1, 0, 0); defer sdl.ReleaseGPUShader(renderer.gpu, vert_shader)
-    frag_shader := load_shader(renderer.gpu, bbox_frag_shader, .FRAGMENT, 0, 0, 0); defer sdl.ReleaseGPUShader(renderer.gpu, frag_shader)
-    vb_descriptions: [1]sdl.GPUVertexBufferDescription
-    vb_descriptions = {
-        sdl.GPUVertexBufferDescription {
-            slot = u32(0),
-            pitch = size_of(Vertex),
-            input_rate = .VERTEX,
-            instance_step_rate = 0
-        },
-    }  
 
-    vb_attributes: []sdl.GPUVertexAttribute = {
-        sdl.GPUVertexAttribute {
-            location = 0,
-            buffer_slot = 0,
-            format = .FLOAT3,
-            offset = 0
-        }
-    }
-    shadow_pipeline = sdl.CreateGPUGraphicsPipeline(gpu, {
-        vertex_shader = vert_shader,
-        fragment_shader = frag_shader,
-        primitive_type = .TRIANGLELIST,
-        vertex_input_state = {
-            vertex_buffer_descriptions = &vb_descriptions[0],
-            num_vertex_buffers = 1,
-            vertex_attributes = &vb_attributes[0],
-            num_vertex_attributes = 1
-        },
-        target_info = {
-            has_depth_stencil_target = true,
-            depth_stencil_format = .D32_FLOAT
-        },
-        rasterizer_state = {
-            fill_mode = .FILL,
-            cull_mode = .BACK,
-            // enable_depth_bias = true,
-            // depth_bias_constant_factor = 1.25,
-            // depth_bias_slope_factor = 1,
-
-        },
-        depth_stencil_state = {
-            enable_depth_test = true,
-            enable_depth_write = true,
-            compare_op = .LESS_OR_EQUAL,
-        }
-    })
-}
-
-@(private="file")
 build_3D_pipeline :: proc(renderer: ^Renderer) {
     using renderer
     sdl.ReleaseGPUGraphicsPipeline(gpu, pipeline3D)
-    vert_shader := load_shader(gpu, vert_shader_code, .VERTEX, 3, 0, 0); defer sdl.ReleaseGPUShader(renderer.gpu, vert_shader)
-    frag_shader := load_shader(gpu, frag_shader_code, .FRAGMENT, 2, 5, 1); defer sdl.ReleaseGPUShader(renderer.gpu, frag_shader)
+    vert_shader := load_shader(gpu, "shaders/spv/shader.vert", 2, 0, 0); defer sdl.ReleaseGPUShader(renderer.gpu, vert_shader)
+    frag_shader := load_shader(gpu, "shaders/spv/shader.frag", 1, 4, 1); defer sdl.ReleaseGPUShader(renderer.gpu, frag_shader)
 
     vb_descriptions: [1]sdl.GPUVertexBufferDescription
     vb_descriptions = {
@@ -577,54 +426,6 @@ build_3D_pipeline :: proc(renderer: ^Renderer) {
     })
 }
 
-@(private="file")
-build_bbox_pipeline :: proc(renderer: ^Renderer) {
-    sdl.ReleaseGPUGraphicsPipeline(renderer.gpu, renderer.pipeline3D)
-    vert_shader := load_shader(renderer.gpu, bbox_vert_shader, .VERTEX, 1, 0, 0); defer sdl.ReleaseGPUShader(renderer.gpu, vert_shader)
-    frag_shader := load_shader(renderer.gpu, bbox_frag_shader, .FRAGMENT, 0, 0, 0); defer sdl.ReleaseGPUShader(renderer.gpu, frag_shader)
-
-    vb_descriptions: [1]sdl.GPUVertexBufferDescription
-    vb_descriptions = {
-        sdl.GPUVertexBufferDescription {
-            slot = u32(0),
-            pitch = size_of(vec3),
-            input_rate = .VERTEX,
-            instance_step_rate = 0
-        },
-    }  
-
-    vb_attributes: []sdl.GPUVertexAttribute = {
-        sdl.GPUVertexAttribute {
-            location = 0,
-            buffer_slot = 0,
-            format = .FLOAT3,
-            offset = 0
-        }
-    }
-
-    format := sdl.GetGPUSwapchainTextureFormat(renderer.gpu, renderer.window)
-    renderer.bbox_pipeline = sdl.CreateGPUGraphicsPipeline(renderer.gpu, {
-        vertex_shader = vert_shader,
-        fragment_shader = frag_shader,
-        primitive_type = .LINELIST,
-        target_info = {
-            num_color_targets = 1,
-            color_target_descriptions = &(sdl.GPUColorTargetDescription {
-                format = format
-            }),
-        },
-        vertex_input_state = {
-            vertex_buffer_descriptions = &vb_descriptions[0],
-            num_vertex_buffers = 1,
-            vertex_attributes = &vb_attributes[0],
-            num_vertex_attributes = 1
-        },
-        rasterizer_state = {
-            fill_mode = .LINE,
-            cull_mode = .NONE,
-        },
-    })
-}
 
 create_buffer_with_data :: proc(
     gpu: ^sdl.GPUDevice, 
@@ -658,10 +459,21 @@ create_buffer_with_data :: proc(
     return buffer
 }
 
-load_shader :: proc(device: ^sdl.GPUDevice, code: []u8,
-    stage: sdl.GPUShaderStage, num_uniform_buffers: u32, num_samplers: u32,
+load_shader :: proc(device: ^sdl.GPUDevice, file: string,
+    num_uniform_buffers: u32, num_samplers: u32,
     num_storage_buffers: u32
 ) -> ^sdl.GPUShader {
+    stage: sdl.GPUShaderStage
+    switch filepath.ext(file) {
+        case ".vert":
+            stage = .VERTEX
+        case ".frag":
+            stage = .FRAGMENT
+    }
+    filename := strings.concatenate({file, ".spv"})
+    fmt.println(filename)
+    code, ok := os.read_entire_file_from_filename(filename); assert(ok)
+    defer delete(code)
     return sdl.CreateGPUShader(device, {
         code_size = len(code),
         code = raw_data(code),
@@ -672,8 +484,4 @@ load_shader :: proc(device: ^sdl.GPUDevice, code: []u8,
         num_samplers = num_samplers,
         num_storage_buffers = num_storage_buffers
     })
-}
-
-RND_ToggleWireframe :: proc(renderer: ^Renderer) {
-    build_3D_pipeline(renderer)
 }

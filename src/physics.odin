@@ -1,60 +1,12 @@
 package obj_viewer
 
-import "core:math"
 import "core:math/linalg"
 import "core:time"
 import "core:fmt"
-import "core:thread"
-import "core:sync"
-
-PhysicsFlags :: distinct bit_set[PhysicsFlag]
-
-PhysicsFlag :: enum {
-    STATIC,
-    DYNAMIC,
-    COLLIDER,
-    AIRBORNE,
-    PLAYER,
-    SHADOW_CASTER
-}
 
 AABB :: struct {
     min: vec3,
     max: vec3
-}
-
-workerData :: struct {
-    waitgroupdata: ^sync.Wait_Group,
-    player: ^Player,
-    entity_bboxes: ^[dynamic]AABB,
-    found_collision: ^bool,
-    start, end: int,
-}
-
-resolve_aabb_collisions :: proc(t: ^thread.Thread) {
-    data := (cast(^workerData)t.data)
-    using data
-    using player
-    for i in start..<end {
-        if aabbs_collide(bbox, entity_bboxes[i]) {
-            found_collision^ = true
-            mtv := resolve_aabb_collision_mtv(bbox, entity_bboxes[i])
-            for axis, j in mtv do if axis != 0 {
-                speed[j] *= 0.9
-                if j == 1 { 
-                    if axis > 0 { // This means we are standing on a block
-                        airborne = false
-                    } else {
-                        speed.y = -0.1
-                    }
-                }
-            }
-            position += mtv
-            bbox.min += mtv
-            bbox.max += mtv
-        }
-    }
-    sync.wait_group_done(data.waitgroupdata)
 }
 
 air_accelerate :: proc(wishveloc: ^vec3, player: ^Player, dt: f32) {
@@ -72,8 +24,7 @@ air_accelerate :: proc(wishveloc: ^vec3, player: ^Player, dt: f32) {
 }
 
 vector_normalize :: proc(v: ^vec3) -> f32 {
-    length := v.x*v.x + v.y*v.y + v.z*v.z
-    length = math.sqrt(length)
+    length := linalg.length(v^)
     if length != 0 {
         ilength := 1/length
         v^ *= ilength
@@ -81,7 +32,7 @@ vector_normalize :: proc(v: ^vec3) -> f32 {
     return length
 }
 
-update_player :: proc(state: ^AppState, wishveloc: ^vec3, dt: f32) {
+update_player :: proc(state: ^AppState, wishveloc: ^vec3, dt: f32) #no_bounds_check {
     g: f32 = 25
     using state, player
     airborne_at_start := airborne
@@ -100,10 +51,10 @@ update_player :: proc(state: ^AppState, wishveloc: ^vec3, dt: f32) {
     bbox.max += delta_pos
     found_collision: bool
 
-    for i in 0..<len(aabbs) {
-        if aabbs_collide(bbox, state.aabbs[i]) {
+    for entity in entities {
+        if aabbs_collide(bbox, entity.aabb) {
             found_collision = true
-            mtv := resolve_aabb_collision_mtv(bbox, state.aabbs[i])
+            mtv := resolve_aabb_collision_mtv(bbox, entity.aabb)
             for axis, j in mtv do if axis != 0 {
                 speed[j] *= 0.9
                 if j == 1 { 
@@ -120,8 +71,6 @@ update_player :: proc(state: ^AppState, wishveloc: ^vec3, dt: f32) {
         }
     }
 
-    // sync.wait_group_wait(&wg)
-
     if !found_collision do airborne = true
     if !airborne_at_start && !airborne {
         speed *= 0.8
@@ -131,8 +80,6 @@ update_player :: proc(state: ^AppState, wishveloc: ^vec3, dt: f32) {
         reset_player_pos(state)
     }
 }
-
-
 
 create_furstum_planes :: proc(vp: matrix[4,4]f32) -> [6]vec4 {
     vp := linalg.transpose(vp)
@@ -146,13 +93,15 @@ create_furstum_planes :: proc(vp: matrix[4,4]f32) -> [6]vec4 {
     }
 }
 
-aabb_intersects_frustum :: proc(frustum_planes: [6]vec4, aabb: AABB) -> bool {
+aabb_intersects_frustum :: proc(frustum_planes: [6]vec4, aabb: AABB) -> bool #no_bounds_check {
     using aabb
+    p_vertex: vec3
     for p in frustum_planes {
-        p_vertex: vec3
-        if p.x >= 0 do p_vertex.x = max.x; else do p_vertex.x = min.x
-        if p.y >= 0 do p_vertex.y = max.y; else do p_vertex.y = min.y
-        if p.z >= 0 do p_vertex.z = max.z; else do p_vertex.z = min.z
+        p_vertex = {
+            f32(transmute(byte)bool(p.x >= 0))*(max.x)+f32(transmute(byte)bool(p.x<0))*min.x,
+            f32(transmute(byte)bool(p.y >= 0))*(max.y)+f32(transmute(byte)bool(p.y<0))*min.y,
+            f32(transmute(byte)bool(p.z >= 0))*(max.z)+f32(transmute(byte)bool(p.z<0))*min.z,
+        }
 
         if linalg.dot(p.xyz, p_vertex) + p.w < 0 {
             return false

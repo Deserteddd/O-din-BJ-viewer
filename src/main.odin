@@ -21,6 +21,8 @@ default_context: runtime.Context
 FRAMES := 0
 last_ticks := sdl.GetTicks();
 
+
+
 main :: proc() {
     state: AppState
     init(&state)
@@ -30,26 +32,20 @@ main :: proc() {
 }
 
 AppState :: struct {
-    mode:               AppMode,
     player:             Player,
     renderer:           Renderer,
     debug_info:         DebugInfo,
     ui_context:         ^im.Context,
     models:             [dynamic]Model,
-    entities:           [dynamic]Entity,
-    aabbs:              [dynamic]AABB,
-    checkpoint:         [2]vec3, // Position, Rotation
+    entities:           #soa[dynamic]Entity,
+    checkpoint:         [2]vec3,                // Position, Rotation
+    ui_visible:         bool
 }
 
 DebugInfo :: struct {
     frame_time:     time.Duration,
     rendered:       u32,
     player_speed:   f32,
-}
-
-AppMode :: enum u8 {
-    GAME,
-    MENU
 }
 
 init :: proc(state: ^AppState) {
@@ -69,13 +65,7 @@ init :: proc(state: ^AppState) {
     add_model(ground, state)
     slab := load_object("assets/ref_cube"); defer delete_obj(slab)
     add_model(slab, state)
-
-    create_entity(state, {.COLLIDER, .STATIC}, 0)
-    for i in 0..<SLAB_COUNT {
-        create_entity(state, {.COLLIDER, .STATIC, .SHADOW_CASTER}, 1)
-    }
-    randomize_tile_positions(state)
-
+    create_entity(state, 0)
     init_imgui(state)
 }
 
@@ -83,15 +73,13 @@ release :: proc(state: ^AppState) {
     using state
     for &model in models {
         sdl.ReleaseGPUBuffer(renderer.gpu, model.vbo)
-        sdl.ReleaseGPUBuffer(renderer.gpu, model.bbox_vbo)
         sdl.ReleaseGPUBuffer(renderer.gpu, model.material_buffer)
         for &texture in model.textures {
             sdl.ReleaseGPUTexture(renderer.gpu, texture)
         }
     }
     delete(state.models)
-    delete(state.entities)
-    delete(state.aabbs)
+    delete_soa(state.entities)
     RND_Destroy(&state.renderer)
 }
 
@@ -126,7 +114,7 @@ run :: proc(state: ^AppState) {
                     break main_loop
                 case .KEY_DOWN: #partial switch ev.key.scancode {
                     case .ESCAPE:
-                        switch_mode(state)
+                        toggle_ui(state)
                     case .Q:
                         if !state.player.airborne do state.checkpoint = {state.player.position, state.player.rotation}
                     case .E:
@@ -139,39 +127,38 @@ run :: proc(state: ^AppState) {
                             return
                         }
                 }
+                case .MOUSE_BUTTON_DOWN: if ev.button.button == 1 {
+                    new := create_entity(state, 1)
+                    set_entity_position(state, new, state.player.bbox.min)
+                }
             }
         }
         update(state)
         RND_FrameBegin(&state.renderer)
         RND_DrawEntities(state)
         wireframe := .WIREFRAME in state.renderer.props
-        state.debug_info.frame_time = time.since(now)
         RND_DrawUI(state)
-        if wireframe != .WIREFRAME in state.renderer.props do RND_ToggleWireframe(&state.renderer)
+        if wireframe != .WIREFRAME in state.renderer.props do build_3D_pipeline(&state.renderer)
+        state.debug_info.frame_time = time.since(now)
         ok := RND_FrameSubmit(&state.renderer); assert(ok)
     }
 }
 
-switch_mode :: proc(state: ^AppState) {
-    if state.mode == .GAME do state.mode = .MENU
-    else do state.mode = .GAME
-    switch state.mode {
-        case .GAME: {
-            ok := sdl.HideCursor(); assert(ok)
-            ok = sdl.SetWindowRelativeMouseMode(state.renderer.window, true); assert(ok)
-        }
-        case .MENU: {
-            ok := sdl.ShowCursor(); assert(ok)
-            ok = sdl.SetWindowRelativeMouseMode(state.renderer.window, false); assert(ok)
-            sdl.WarpMouseInWindow(state.renderer.window, 700, 90)
-        }
+toggle_ui :: proc(state: ^AppState) {
+    using state
+    ui_visible = !ui_visible
+    if ui_visible {
+        ok := sdl.ShowCursor(); assert(ok)
+        ok = sdl.SetWindowRelativeMouseMode(state.renderer.window, false); assert(ok)
+        sdl.WarpMouseInWindow(state.renderer.window, 700, 90)
+    } else {
+        ok := sdl.HideCursor(); assert(ok)
+        ok = sdl.SetWindowRelativeMouseMode(state.renderer.window, true); assert(ok)
     }
 }
 
 randomize_tile_positions :: proc(state: ^AppState) {
-    assert(len(state.aabbs) == len(state.entities))
-    // reset_player_pos(state, true)
-    // state.checkpoint = 0
+    // assert(len(state.aabbs) == len(state.entities))
     static_collider_index := 0
     for &entity, i in state.entities {
         if i < 1 do continue
@@ -180,7 +167,7 @@ randomize_tile_positions :: proc(state: ^AppState) {
             random_range(0, WORLD_SIZE.y),
             random_range(-WORLD_SIZE.z, WORLD_SIZE.z)
         }
-        state.aabbs[i] = AABB {
+        entity.aabb = AABB {
             min = entity.model.bbox.min + entity.position,
             max = entity.model.bbox.max + entity.position
         }
@@ -208,10 +195,10 @@ update :: proc(state: ^AppState) {
     new_ticks := sdl.GetTicks();
     dt := f32(new_ticks - last_ticks) / 1000
     last_ticks = new_ticks
-    if state.mode == .GAME {
+    if !ui_visible {
+        update_camera(&state.player)
         wish_speed := player_wish_speed(state.player)
         update_player(state, &wish_speed, dt)
-        update_camera(&state.player)
     }
     debug_info.player_speed = linalg.length(player.speed)
 }
@@ -233,7 +220,6 @@ player_wish_speed :: proc(player: Player) -> vec3 {
     if key_state[DOWN] do pitch_d = 1
 
     fb := b-f; lr := r-l
-    if key_state[LSHIFT] {fb *= 2; lr *= 2}
 
     yaw_cos := math.cos(math.to_radians(player.rotation.y))
     yaw_sin := math.sin(math.to_radians(player.rotation.y))

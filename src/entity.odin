@@ -5,22 +5,19 @@ import "core:mem"
 import "core:math/linalg"
 import sdl "vendor:sdl3"
 
-/*
-Constant entity id's:
-    0: Player
-*/
 Entity :: struct {
+    id: int,
     model: ^Model,
     position: vec3,
-    speed: vec3,
-    flags: PhysicsFlags,
+    aabb: AABB
 }
+
+EntitySOA :: #soa [dynamic]Entity
 
 Model :: struct {
     textures:        []^sdl.GPUTexture,
     vbo:             ^sdl.GPUBuffer,
     material_buffer: ^sdl.GPUBuffer,
-    bbox_vbo:        ^sdl.GPUBuffer,
     num_vertices:    u32,
     bbox:            AABB
 }
@@ -33,12 +30,22 @@ Player :: struct {
     airborne: bool
 }
 
-create_entity :: proc(state: ^AppState, physics_flags: PhysicsFlags, model: u32) {
+create_entity :: proc(state: ^AppState, model: u32) -> int {
     entity: Entity
-    entity.flags = physics_flags
+    entity.id = len(state.entities)
     entity.model = &state.models[model]
-    append(&state.entities, entity)
-    append(&state.aabbs, entity.model.bbox)
+    entity.aabb = entity.model.bbox
+    append_soa(&state.entities, entity)
+    return entity.id
+}
+
+set_entity_position :: proc(state: ^AppState, id: int, pos: vec3) {
+    entity := &state.entities[id]
+    entity.position = pos
+    state.entities[id].aabb = AABB {
+        min = entity.model.bbox.min + entity.position,
+        max = entity.model.bbox.max + entity.position
+    }
 }
 
 add_model :: proc(data: ObjectData, state: ^AppState) {
@@ -85,7 +92,6 @@ add_model :: proc(data: ObjectData, state: ^AppState) {
     // Create and upload buffers
     len_bytes := u32(len(data.vertices) * size_of(Vertex))
     num_vertices: u32
-    bbox_vertices: [24]vec3
 
     material_matrices := make([dynamic][4]vec4, 0, len(data.materials)); defer delete(material_matrices)
     for material in data.materials do append(&material_matrices, material_matrix(material))
@@ -108,11 +114,8 @@ add_model :: proc(data: ObjectData, state: ^AppState) {
         if (position.z > bbox.max.z) do bbox.max.z = position.z;
     }
 
-    bbox_vertices = get_bbox_vertices(bbox)
     model.num_vertices = u32(len(data.vertices))
-    model.bbox_vbo = create_buffer_with_data(gpu, transfer_buffer, copy_pass, {.VERTEX}, bbox_vertices[:])
     model.bbox = bbox
-    assert(model.bbox_vbo != nil)
 
     for j in 0..<i {
         sdl.UploadToGPUTexture(copy_pass, 
@@ -145,7 +148,7 @@ create_player :: proc() -> Player {
     }
 }
 
-get_bbox_vertices :: proc(bbox: AABB) -> [24]vec3 {
+_get_bbox_vertices :: proc(bbox: AABB) -> [24]vec3 {
     using bbox
     return {
         vec3{min.x, min.y, min.z},

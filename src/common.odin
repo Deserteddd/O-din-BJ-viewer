@@ -7,7 +7,7 @@ vec3 :: [3]f32
 vec4 :: [4]f32
 
 WORLD_SIZE: vec3 = {100, 50, 100}
-SLAB_COUNT: u32 = 20000
+SLAB_COUNT: u32 = 25000
 
 to_vec4 :: proc(v: vec3, f: f32) -> vec4 { return vec4{v.x, v.y, v.z, f} }
 
