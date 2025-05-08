@@ -6,12 +6,18 @@ import "core:slice"
 import "core:path/filepath"
 import os "core:os/os2"
 
+BUILD_SHADERS :: true
+
 main :: proc() {
     context.logger = log.create_console_logger()
     EXE :: "Gaym"
     OUT :: EXE + ".exe" when ODIN_OS == .Windows else EXE
     run_str("odin build src -debug -out:"+OUT)
+    if BUILD_SHADERS do build_shaders()
+    if slice.contains(os.args, "run") do run({OUT})
+}
 
+build_shaders :: proc() {
     files, err := os.read_all_directory_by_path("shaders/src", context.temp_allocator)
     if err != nil {
         log.errorf("Error reading shader sources: {}", err)
@@ -21,7 +27,6 @@ main :: proc() {
         shadercross(file, "spv")
         shadercross(file, "json")
     }
-    if slice.contains(os.args, "run") do run({OUT})
 }
 
 shadercross :: proc(file: os.File_Info, format: string) {

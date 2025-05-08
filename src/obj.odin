@@ -40,7 +40,7 @@ print_obj :: proc(data: ObjectData, verbose := false) {
           fmt.println("-------------------- ObjectData --------------------")
     defer fmt.println("----------------------------------------------------")
 
-    fmt.printfln("Vertex groups: {}", len(data.vertices))
+    fmt.printfln("Vertices: {}", len(data.vertices))
     if verbose {
         fmt.printfln("Materials:")
         for mat, i in data.materials {

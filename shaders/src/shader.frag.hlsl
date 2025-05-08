@@ -5,12 +5,6 @@ struct Material {
     float4 Ke;
 };
 
-struct PointLight {
-    float3 position;
-    float power;
-    float3 color;
-};
-
 struct Input {
     float3 position : TEXCOORD0;
     float3 normal : TEXCOORD1;
@@ -31,10 +25,14 @@ SamplerState smp3 : register(s3, space2);
 StructuredBuffer<Material> materials : register(t4, space2);
 
 cbuffer UBO : register(b0, space3) {
-    PointLight light;
+    float3 lightPosition;
+    float3 lightColor;
+    float lightIntensity;
+    float3 viewPosition;
 };
 
-float4 getColor(Input input) {
+
+float4 diffuseColor(Input input) {
     float is_texture = materials[input.material].Kd.x;
     if (is_texture == -1) {
         float texture_index = materials[input.material].Kd.y;
@@ -51,14 +49,38 @@ float4 getColor(Input input) {
     return float4(materials[input.material].Kd.xyz, 1);
 }
 
-float4 main(Input input) : SV_Target0 {
-    float4 color = getColor(input);
+float3 blinnPhongBRDF(float3 dirToLight, float3 dirToView, float3 surfaceNormal, Input input) {
+    float3 materialDiffuseReflection = diffuseColor(input).rgb;
+    float shininess = materials[input.material].Ka.a;
 
-    float3 to_light = normalize(light.position - input.position);
-    float3 normal = normalize(input.normal);
-    float diffuse = max(0.0, dot(input.normal, to_light));
-    float dist = distance(input.position.xyz, light.position);
-    float3 intensity = light.power * light.color * color.rgb * diffuse * (1/(dist*dist));
-    
-    return float4(intensity, 1);
+    float3 halfWayDir = normalize(dirToLight + dirToView);
+    float specularDot = max(0, dot(halfWayDir, surfaceNormal));
+    float specularFactor = pow(specularDot, shininess);
+
+    float3 specularReflection = materials[input.material].Ks.rgb * specularFactor;
+    return materialDiffuseReflection + specularReflection;
+}
+
+float4 main(Input input) : SV_Target0 {
+    float3 vecToLight = lightPosition - input.position;
+    float distToLight = length(vecToLight);
+    float3 dirToLight = vecToLight / distToLight;
+    float3 dirToView = normalize(viewPosition - input.position);
+    float3 surfaceNormal = normalize(input.normal);
+
+    float incidenceAngleFactor = dot(dirToLight, surfaceNormal);
+    float3 reflectedRadiance;
+    if (incidenceAngleFactor > 0) {
+        float attenuationFactor = 1 / (distToLight * distToLight);
+        float3 incomingRadiance = lightColor * lightIntensity;
+        float3 irradiance = incomingRadiance * incidenceAngleFactor * attenuationFactor;
+        float3 brdf = blinnPhongBRDF(dirToLight, dirToView, surfaceNormal, input);
+        reflectedRadiance = irradiance * brdf;
+    } else {
+        reflectedRadiance = float3(0, 0, 0);
+    }
+
+    float3 emittedRadiance = float3(0, 0, 0);
+    float3 outRadiance = emittedRadiance + reflectedRadiance;
+    return float4(outRadiance, 1);
 }

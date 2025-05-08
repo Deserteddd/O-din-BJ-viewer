@@ -21,8 +21,6 @@ default_context: runtime.Context
 FRAMES := 0
 last_ticks := sdl.GetTicks();
 
-
-
 main :: proc() {
     state: AppState
     init(&state)
@@ -39,7 +37,8 @@ AppState :: struct {
     models:             [dynamic]Model,
     entities:           #soa[dynamic]Entity,
     checkpoint:         [2]vec3,                // Position, Rotation
-    ui_visible:         bool
+    ui_visible:         bool,
+    gltf_scene:         GLTFScene
 }
 
 DebugInfo :: struct {
@@ -49,6 +48,7 @@ DebugInfo :: struct {
 }
 
 init :: proc(state: ^AppState) {
+    using state
     context.logger = log.create_console_logger()
     default_context = context
     sdl.SetLogPriorities(.VERBOSE)
@@ -59,15 +59,14 @@ init :: proc(state: ^AppState) {
         }, nil
     )
     
-    state.renderer = RND_Init({})
-    state.player = create_player()
+    renderer = RND_Init({})
+    player = create_player()
     ground := load_object("assets/ref_tris"); defer delete_obj(ground)
-    add_model(ground, state)
-    slab := load_object("assets/ref_cube"); defer delete_obj(slab)
-    add_model(slab, state)
+    gltf_scene = load_gltf("assets/DamagedHelmet.glb", renderer.gpu)
+    print_gltf_description(gltf_scene)
+    prepare_gltf_scene(&gltf_scene, &renderer)
+    add_obj_model(ground, state)
     create_entity(state, 0)
-    for i in 0..<SLAB_COUNT do create_entity(state, 1)
-    randomize_tile_positions(state)
     init_imgui(state)
 }
 
@@ -80,9 +79,9 @@ release :: proc(state: ^AppState) {
             sdl.ReleaseGPUTexture(renderer.gpu, texture)
         }
     }
-    delete(state.models)
     delete_soa(state.entities)
-    RND_Destroy(&state.renderer)
+    delete(state.models)
+    RND_Destroy(state)
 }
 
 init_imgui :: proc(state: ^AppState) {
@@ -132,18 +131,22 @@ run :: proc(state: ^AppState) {
                             return
                         }
                 }
-                case .MOUSE_BUTTON_DOWN: if ev.button.button == 1 {
+                case .MOUSE_BUTTON_DOWN: if ev.button.button == 1 && !state.ui_visible{
                     new := create_entity(state, 1)
                     set_entity_position(state, new, state.player.bbox.min)
                 }
             }
         }
         update(state)
-        RND_FrameBegin(&state.renderer)
+        RND_FrameBegin(state)
         RND_DrawEntities(state)
+        draw_gltf_scene(state)
         wireframe := .WIREFRAME in state.renderer.props
         RND_DrawUI(state)
-        if wireframe != .WIREFRAME in state.renderer.props do build_3D_pipeline(&state.renderer)
+        if wireframe != .WIREFRAME in state.renderer.props {
+            build_3D_pipeline(&state.renderer)
+            state.gltf_scene.pipeline = build_gltf_pipeline(&state.renderer)
+        }
         state.debug_info.frame_time = time.since(now)
         ok := RND_FrameSubmit(&state.renderer); assert(ok)
     }

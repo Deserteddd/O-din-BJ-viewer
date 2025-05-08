@@ -33,12 +33,16 @@ Renderer :: struct {
 PointLight :: struct #packed {
     position: vec3,
     power:    f32,
-    color:    vec4,
+    color:    vec3,
 }
 
-VertUniforms :: struct {
-    modelview: matrix[4,4]f32,
-    position_offset: vec4,
+FragUBO :: struct #packed {
+    light_pos: vec3,
+    _: f32,
+    light_color: vec3,
+    light_intensity: f32,
+    view_pos: vec3
+
 }
 
 RND_Props :: distinct bit_set[RND_Prop; u8]
@@ -65,7 +69,7 @@ RND_Init :: proc(props: RND_Props) -> Renderer {
     ok = sdl.SetWindowRelativeMouseMode(window, true); assert(ok)
     width, height: i32
     sdl.GetWindowSize(window, &width, &height)
-    gpu := sdl.CreateGPUDevice({.SPIRV}, false, nil); assert(gpu != nil)
+    gpu := sdl.CreateGPUDevice({.SPIRV}, true, nil); assert(gpu != nil)
     ok = sdl.ClaimWindowForGPUDevice(gpu, window); assert(ok)
     ok = sdl.SetGPUSwapchainParameters(gpu, window, .SDR_LINEAR, .IMMEDIATE); assert(ok)
 
@@ -130,8 +134,8 @@ RND_Init :: proc(props: RND_Props) -> Renderer {
     return renderer
 }
 
-RND_Destroy :: proc(renderer: ^Renderer) {
-    using renderer
+RND_Destroy :: proc(state: ^AppState) {
+    using state.renderer
     sdl.ReleaseGPUGraphicsPipeline(gpu, pipeline3D)
     sdl.ReleaseGPUTexture(gpu, depth_texture)
     sdl.ReleaseGPUTexture(gpu, fallback_texture)
@@ -141,7 +145,6 @@ RND_Destroy :: proc(renderer: ^Renderer) {
     }
     sdl.ReleaseWindowFromGPUDevice(gpu, window)
     sdl.DestroyWindow(window)
-    sdl.DestroyGPUDevice(gpu)
 }
 
 RND_ToggleFullscreen :: proc(state: ^AppState) {
@@ -245,13 +248,15 @@ RND_DrawUI :: proc(state: ^AppState) {
     sdl.EndGPURenderPass(im_render_pass)
 }
 
-RND_FrameBegin :: proc(renderer: ^Renderer) {
+RND_FrameBegin :: proc(state: ^AppState) {
+    using state
     assert(renderer.cmd_buff == nil)
     assert(renderer.swapchain_texture == nil)
     cmd_buff := sdl.AcquireGPUCommandBuffer(renderer.gpu); assert(cmd_buff != nil)
     ok := sdl.WaitAndAcquireGPUSwapchainTexture(cmd_buff, renderer.window, &renderer.swapchain_texture, nil, nil)
     if !ok do fmt.println(sdl.GetError())
     renderer.cmd_buff = cmd_buff
+    debug_info.rendered = 0
 }
 
 RND_FrameSubmit :: proc(renderer: ^Renderer) -> bool {
@@ -259,6 +264,18 @@ RND_FrameSubmit :: proc(renderer: ^Renderer) -> bool {
     renderer.cmd_buff = nil
     renderer.swapchain_texture = nil
     return ok
+}
+
+create_frag_ubo :: proc(state: ^AppState) -> FragUBO {
+    using state
+    camera_position := -player.position
+    camera_position.y -= 2
+    return FragUBO {
+        light_pos = renderer.light.position,
+        light_color = renderer.light.color,
+        light_intensity = renderer.light.power,
+        view_pos = camera_position
+    }
 }
 
 RND_DrawEntities :: proc(state: ^AppState) #no_bounds_check {
@@ -270,7 +287,7 @@ RND_DrawEntities :: proc(state: ^AppState) #no_bounds_check {
         texture = renderer.swapchain_texture,
         load_op = .CLEAR,
         store_op = .STORE,
-        clear_color = {0.24, 0.5, 0.5, 1},
+        clear_color = 0,
     }
     depth_target_info := sdl.GPUDepthStencilTargetInfo {
         texture = renderer.depth_texture,
@@ -282,16 +299,17 @@ RND_DrawEntities :: proc(state: ^AppState) #no_bounds_check {
         cycle = true,
         clear_stencil = 1,
     }
-    debug_info.rendered = 0
 
     proj_matrix := create_proj_matrix(renderer)
     view_matrix := create_view_matrix(player.position, player.rotation)
-    frustum_planes := create_furstum_planes(proj_matrix * view_matrix)
+    vp := proj_matrix * view_matrix;
+    frustum_planes := create_furstum_planes(vp)
 
+    frag_ubo := create_frag_ubo(state);
     render_pass := sdl.BeginGPURenderPass(renderer.cmd_buff, &color_target, 1, &depth_target_info); assert(render_pass != nil)
     sdl.BindGPUGraphicsPipeline(render_pass, renderer.pipeline3D)
-    sdl.PushGPUFragmentUniformData(renderer.cmd_buff, 0, &renderer.light, size_of(PointLight))
-    sdl.PushGPUVertexUniformData(renderer.cmd_buff, 1, &proj_matrix, size_of(matrix[4,4]f32))
+    sdl.PushGPUFragmentUniformData(renderer.cmd_buff, 0, &frag_ubo, size_of(FragUBO))
+    sdl.PushGPUVertexUniformData(renderer.cmd_buff, 0, &vp, size_of(matrix[4,4]f32))
     for &model, model_index in models {
         bindings: [1]sdl.GPUBufferBinding = { sdl.GPUBufferBinding { buffer = model.vbo } } 
         sdl.BindGPUVertexBuffers(render_pass, 0, &bindings[0], 1)
@@ -315,24 +333,24 @@ RND_DrawEntities :: proc(state: ^AppState) #no_bounds_check {
                 model_index != 0 { continue }
             if !aabb_intersects_frustum(frustum_planes, entity.aabb) do continue
             debug_info.rendered += 1
-            vert_ubo := create_vertex_UBO(entity, view_matrix)
-            sdl.PushGPUVertexUniformData(renderer.cmd_buff, 0, &vert_ubo, size_of(VertUniforms))
+            model_matrix := linalg.matrix4_translate_f32(entity.position)
+            sdl.PushGPUVertexUniformData(renderer.cmd_buff, 1, &model_matrix, size_of(matrix[4,4]f32))
             sdl.DrawGPUPrimitives(render_pass, model.num_vertices, 1, 0, 0)
         }
     }
     sdl.EndGPURenderPass(render_pass)
 }
 
+
+
 create_view_matrix :: proc(position: vec3, rotation: vec3) -> linalg.Matrix4f32 {
     using linalg
     pitch_matrix := matrix4_rotate_f32(to_radians(rotation.x), {1, 0, 0})
     yaw_matrix := matrix4_rotate_f32(to_radians(rotation.y), {0, 1, 0})
-    roll_matrix := matrix4_rotate_f32(to_radians(rotation.z), {0, 0, 1})
     camera_position := -position
     camera_position.y -= 2
     position_matrix := matrix4_translate_f32(camera_position)
-
-    return pitch_matrix * yaw_matrix * roll_matrix * position_matrix
+    return pitch_matrix * yaw_matrix * position_matrix
 }
 
 create_proj_matrix :: proc(renderer: Renderer) -> matrix[4,4]f32 {
@@ -341,16 +359,6 @@ create_proj_matrix :: proc(renderer: Renderer) -> matrix[4,4]f32 {
     ok := sdl.GetWindowSize(renderer.window, &x, &y)
     aspect := f32(x) / f32(y)
     return matrix4_perspective_f32(linalg.to_radians(f32(90)), aspect, 0.0001, renderer.draw_distance)
-}
-
-create_vertex_UBO :: proc(entity: Entity, view_matrix: matrix[4,4]f32) -> VertUniforms {
-    using linalg
-    model_translation_matrix := matrix4_translate_f32(entity.position)
-    model_matrix: matrix[4, 4]f32 = view_matrix * model_translation_matrix
-    return VertUniforms {
-        modelview = model_matrix,
-        position_offset = to_vec4(entity.position, 1)
-    }
 }
 
 build_3D_pipeline :: proc(renderer: ^Renderer) {
