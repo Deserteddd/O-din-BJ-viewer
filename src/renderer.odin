@@ -20,6 +20,7 @@ Renderer :: struct {
     window:             ^sdl.Window,
     gpu:                ^sdl.GPUDevice,
     pipeline3D:         ^sdl.GPUGraphicsPipeline,
+    gltf_pipeline:      ^sdl.GPUGraphicsPipeline,
     depth_texture:      ^sdl.GPUTexture,
     fallback_texture:   ^sdl.GPUTexture,
     swapchain_texture:  ^sdl.GPUTexture,
@@ -121,6 +122,7 @@ RND_Init :: proc(props: RND_Props) -> Renderer {
     renderer.depth_texture = depth_texture
 
     build_3D_pipeline(&renderer)
+    build_gltf_pipeline(&renderer)
     for i in 0..<4 {
         sampler := sdl.CreateGPUSampler(gpu, {}); assert(sampler != nil)
         renderer.samplers[i] = sampler
@@ -278,6 +280,73 @@ create_frag_ubo :: proc(state: ^AppState) -> FragUBO {
     }
 }
 
+RND_DrawGLTF :: proc(state: ^AppState) {
+    using state
+    assert(renderer.cmd_buff != nil)
+    assert(renderer.swapchain_texture != nil)
+    color_target := sdl.GPUColorTargetInfo {
+        texture = renderer.swapchain_texture,
+        load_op = .LOAD,
+        store_op = .STORE,
+        clear_color = 0,
+    }
+    depth_target_info := sdl.GPUDepthStencilTargetInfo {
+        texture = renderer.depth_texture,
+        clear_depth = 1,
+        load_op = .LOAD,
+        store_op = .STORE,
+        stencil_load_op = .LOAD,
+        stencil_store_op = .STORE,
+        cycle = false,
+        clear_stencil = 1,
+    }
+    proj_matrix := create_proj_matrix(renderer)
+    view_matrix := create_view_matrix(player.position, player.rotation)
+    vp := proj_matrix * view_matrix;
+    render_pass := sdl.BeginGPURenderPass(renderer.cmd_buff, &color_target, 1, &depth_target_info); assert(render_pass != nil)
+    sdl.BindGPUGraphicsPipeline(render_pass, renderer.gltf_pipeline)
+    sdl.PushGPUVertexUniformData(renderer.cmd_buff, 0, &vp, size_of(matrix[4,4]f32))
+    draw_node(render_pass, &renderer, &state.gltf_node)
+    sdl.EndGPURenderPass(render_pass)
+}
+
+draw_node :: proc(render_pass: ^sdl.GPURenderPass, renderer: ^Renderer, node: ^GLTFNode) {
+    using node
+    if mesh != nil {
+        bindings: [2]sdl.GPUBufferBinding = { 
+            sdl.GPUBufferBinding { buffer = mesh.vbo },
+            sdl.GPUBufferBinding { buffer = mesh.ibo }
+        } 
+        sdl.BindGPUVertexBuffers(render_pass, 0, &bindings[0], 1)
+        sdl.BindGPUIndexBuffer(render_pass, bindings[1], ._16BIT)
+        sdl.PushGPUVertexUniformData(renderer.cmd_buff, 1, &node.mat, size_of(matrix[4,4]f32))
+        for primitive in mesh.primitives {
+            if primitive.material.base_color_texture != {} {
+                sdl.BindGPUFragmentSamplers(render_pass, 0, 
+                    &(sdl.GPUTextureSamplerBinding{
+                        texture = primitive.material.base_color_texture.texture,
+                        sampler = primitive.material.base_color_texture.sampler
+                    }), 1
+                )
+            }
+            sdl.PushGPUFragmentUniformData(renderer.cmd_buff, 0, &(GLTF_fragUBO{
+                base_color = primitive.material.base_color_factor,
+                metallic_factor = primitive.material.metallic_factor,
+                roughness_factor = primitive.material.roughness_factor
+            }), size_of(GLTF_fragUBO))
+            num_indices := u32(primitive.end - primitive.start)
+            sdl.DrawGPUIndexedPrimitives(render_pass, num_indices, 1, u32(primitive.start), 0, 0)
+        }
+    }
+    for &child in node.children do draw_node(render_pass, renderer, &child)
+}
+GLTF_fragUBO :: struct {
+    base_color: vec4,
+    metallic_factor: f32,
+    roughness_factor: f32,
+    _pad: vec2
+}
+
 RND_DrawEntities :: proc(state: ^AppState) #no_bounds_check {
     using state
     assert(renderer.cmd_buff != nil)
@@ -358,7 +427,7 @@ create_proj_matrix :: proc(renderer: Renderer) -> matrix[4,4]f32 {
     x, y: i32;
     ok := sdl.GetWindowSize(renderer.window, &x, &y)
     aspect := f32(x) / f32(y)
-    return matrix4_perspective_f32(linalg.to_radians(f32(90)), aspect, 0.0001, renderer.draw_distance)
+    return matrix4_perspective_f32(linalg.to_radians(f32(90)), aspect, 0.001, renderer.draw_distance)
 }
 
 build_3D_pipeline :: proc(renderer: ^Renderer) {

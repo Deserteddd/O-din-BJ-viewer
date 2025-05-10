@@ -2,6 +2,7 @@ package obj_viewer
 
 import gl "vendor:cgltf"
 import sdl "vendor:sdl3"
+import stbi "vendor:stb/image"
 import "core:log"
 import "core:fmt"
 import "core:mem"
@@ -11,35 +12,30 @@ import "core:path/filepath"
 import "core:strings"
 import "core:math/linalg"
 
-GLTFScene :: struct {
-    meshes: []GLTFMesh,
-    materials: []GLTFMaterial,
-    pipeline: ^sdl.GPUGraphicsPipeline,
-    material_buffer: ^sdl.GPUBuffer
-}
-
 GLTFMaterial :: struct {
     name: string,
-    base_color: vec4,
+    base_color_factor: vec4,
+    base_color_texture: GLTFTexture,
     metallic_factor: f32,
     roughness_factor: f32,
 }
 
-GLTFMaterialParams :: struct {
-    base_color: vec4,
-    metallic_factor: f32,
-    roughness_factor: f32,
-    _pad: vec2
+GLTFTexture :: struct {
+    texture: ^sdl.GPUTexture,
+    sampler: ^sdl.GPUSampler
+}
+
+GLTFPrimitive :: struct {
+    start: uint,
+    end: uint,
+    material: GLTFMaterial
 }
 
 GLTFMesh :: struct {
-    vertices: []GLTFVertex,
-    indices: []u16,
-    material_name: string,
+    name: string,
+    primitives: []GLTFPrimitive,
     vbo: ^sdl.GPUBuffer,
-    num_vertices: uint,
     ibo: ^sdl.GPUBuffer,
-    num_indices: uint
 }
 
 GLTFVertex :: struct {
@@ -48,7 +44,14 @@ GLTFVertex :: struct {
     uv: vec2
 }
 
-build_gltf_pipeline :: proc(renderer: ^Renderer) -> ^sdl.GPUGraphicsPipeline {
+GLTFNode :: struct {
+    mesh:        ^GLTFMesh,
+    mat:         matrix[4,4]f32,
+    children:    []GLTFNode,
+}
+
+
+build_gltf_pipeline :: proc(renderer: ^Renderer) {
     using renderer
     vert_shader := load_shader(gpu, "pbr_metallic.vert"); defer sdl.ReleaseGPUShader(gpu, vert_shader)
     frag_shader := load_shader(gpu, "pbr_metallic.frag"); defer sdl.ReleaseGPUShader(gpu, vert_shader)
@@ -113,146 +116,198 @@ build_gltf_pipeline :: proc(renderer: ^Renderer) -> ^sdl.GPUGraphicsPipeline {
             compare_op = .LESS,
         }
     }); assert(pipeline != nil)
-    return pipeline
+    gltf_pipeline = pipeline
 }
 
-prepare_gltf_scene :: proc(scene: ^GLTFScene, renderer: ^Renderer) {
-    using renderer
-    scene.pipeline = build_gltf_pipeline(renderer)
+
+load_gltf :: proc(path: cstring, gpu: ^sdl.GPUDevice) -> ([]GLTFMesh, GLTFNode) {
+    gltf_data := parse_file(path); defer gl.free(gltf_data)
+    assert(len(gltf_data.buffers) == 1)
+    assert(len(gltf_data.scene.nodes) == 1)
+    meshes := load_meshes(gltf_data, gpu)
+    fmt.println(len(meshes))
+    root: GLTFNode
+    build_scene(gltf_data.scene.nodes[0], meshes, &root, linalg.MATRIX4F32_IDENTITY)
+    return meshes, root
+}
+
+print_node_tree :: proc(root: GLTFNode, level := 0) {
+    fmt.println("LEVEL", level)
+    if root.mesh != nil do for m in root.mesh.primitives do fmt.println(m.material.name)
+    for node in root.children {
+        for i in 0..<level do fmt.print("\t")
+        print_node_tree(node, level = level + 1)
+    }
+}
+
+build_scene :: proc(gl_node: ^gl.node, meshes: []GLTFMesh, node: ^GLTFNode, mat: matrix[4,4]f32) {
+    // Mesh
+    if gl_node.mesh != nil {
+        m_name := strings.clone_from_cstring(gl_node.mesh.name, context.temp_allocator)
+        for &m in meshes {
+            if m.name == m_name {
+                node.mesh = &m
+                break
+            }
+        }
+    }
+    // Model matrix
+    if gl_node.has_matrix {
+        fmt.println("If the scene is fucked up, the matrix transmutation likely didn't work")
+        m := gl_node.matrix_
+        node.mat = mat * transmute(matrix[4,4]f32)m
+        fmt.println(node.mat)
+    } else {
+        t_mat: matrix[4,4]f32
+        if gl_node.has_translation do t_mat = linalg.matrix4_translate(gl_node.translation)
+        else do t_mat = linalg.MATRIX4F32_IDENTITY
+
+        rotation: quaternion128
+        if gl_node.has_rotation {
+            r := gl_node.rotation
+            rotation = quaternion(real = r.w, imag = r.x, jmag = r.y, kmag = r.z)
+        } else do rotation = quaternion(real = 1, imag = 0, jmag = 0, kmag = 0)
+        r_mat := linalg.matrix4_from_quaternion(rotation)
+
+
+        s_mat: matrix[4,4]f32
+        if gl_node.has_scale do s_mat = linalg.matrix4_scale(gl_node.scale)
+        else do s_mat = linalg.MATRIX4F32_IDENTITY
+        node.mat = mat * t_mat * r_mat * s_mat
+    }
+    if len(gl_node.children) == 0 do return
+    children := make([]GLTFNode, len(gl_node.children))
+    node.children = children
+    for child, i in gl_node.children {
+        build_scene(child, meshes, &node.children[i], node.mat)
+    }
+}
+
+load_meshes :: proc(data: ^gl.data, gpu: ^sdl.GPUDevice) -> []GLTFMesh {
+    meshes: [dynamic]GLTFMesh
     copy_commands := sdl.AcquireGPUCommandBuffer(gpu); assert(copy_commands != nil)
     copy_pass := sdl.BeginGPUCopyPass(copy_commands); assert(copy_pass != nil)
-    for &mesh in scene.meshes {
-        vert_count: uint = len(mesh.vertices)
-        index_count: uint = len(mesh.indices)
+    for m in data.meshes {
+        fmt.println(m.name)
+        vertices, indices, primitives := load_mesh(m, gpu, copy_pass)
+        for i in primitives{
+            fmt.println(i)
+        }
+        name := strings.clone_from_cstring(m.name)
+        defer {
+            delete(vertices)
+            delete(indices)
+        }
+        mesh: GLTFMesh
+        mesh.name = name
+        mesh.primitives = primitives
+        vert_count: uint = len(vertices)
+        index_count: uint = len(indices)
         len_bytes := vert_count*size_of(GLTFVertex) + index_count*size_of(u16)
         transfer_buffer := sdl.CreateGPUTransferBuffer(gpu, {
             usage = sdl.GPUTransferBufferUsage.UPLOAD,
             size = u32(len_bytes),
         }); assert(transfer_buffer != nil)
-        mesh.vbo = create_buffer_with_data(gpu, transfer_buffer, copy_pass, {.VERTEX}, mesh.vertices)
-        mesh.ibo = create_buffer_with_data(gpu, transfer_buffer, copy_pass, {.INDEX}, mesh.indices)
-        mesh.num_vertices = vert_count
-        mesh.num_indices = index_count
+        vbo := create_buffer_with_data(gpu, transfer_buffer, copy_pass, {.VERTEX}, vertices)
+        assert(vbo != nil)
+        mesh.vbo = vbo
+        ibo := create_buffer_with_data(gpu, transfer_buffer, copy_pass, {.INDEX}, indices)
+        assert(ibo != nil)
+        mesh.ibo = ibo
         sdl.ReleaseGPUTransferBuffer(gpu, transfer_buffer)
+        append(&meshes, mesh)
     }
-    materials: [dynamic]GLTFMaterialParams; defer delete(materials)
-    for material in scene.materials {
-        append(&materials, GLTFMaterialParams{
-            base_color = material.base_color,
-            metallic_factor = material.metallic_factor,
-            roughness_factor = material.roughness_factor,
-        })
-    }
-    transfer_buffer := sdl.CreateGPUTransferBuffer(gpu, {
-        usage = sdl.GPUTransferBufferUsage.UPLOAD,
-        size = u32(len(materials) * size_of(GLTFMaterialParams)),
-    }); assert(transfer_buffer != nil)
-    scene.material_buffer = create_buffer_with_data(gpu, transfer_buffer, copy_pass, {.GRAPHICS_STORAGE_READ}, materials[:])
+
     sdl.EndGPUCopyPass(copy_pass)
     ok := sdl.SubmitGPUCommandBuffer(copy_commands); assert(ok)
+    return meshes[:]
 }
 
-draw_gltf_scene :: proc(state: ^AppState) {
-    using state
-    assert(renderer.cmd_buff != nil)
-    assert(renderer.swapchain_texture != nil)
-    proj_matrix := create_proj_matrix(renderer)
-    view_matrix := create_view_matrix(player.position, player.rotation)
-    vp := proj_matrix * view_matrix;
-    color_target := sdl.GPUColorTargetInfo {
-        texture = renderer.swapchain_texture,
-        load_op = .LOAD,
-        store_op = .STORE,
-        clear_color = 0,
-    }
-    depth_target_info := sdl.GPUDepthStencilTargetInfo {
-        texture = renderer.depth_texture,
-        clear_depth = 1,
-        load_op = .CLEAR,
-        store_op = .STORE,
-        stencil_load_op = .CLEAR,
-        stencil_store_op = .STORE,
-        cycle = true,
-        clear_stencil = 1,
-    }
-    scene := &gltf_scene
-    render_pass := sdl.BeginGPURenderPass(renderer.cmd_buff, &color_target, 1, &depth_target_info); assert(render_pass != nil)
-    sdl.BindGPUGraphicsPipeline(render_pass, scene.pipeline)
-    sdl.BindGPUFragmentStorageBuffers(render_pass, 0, &scene.material_buffer, 1)
-    for mesh in scene.meshes {
-        bindings: [2]sdl.GPUBufferBinding = { 
-            sdl.GPUBufferBinding { buffer = mesh.vbo },
-            sdl.GPUBufferBinding { buffer = mesh.ibo }
-        } 
-        sdl.BindGPUVertexBuffers(render_pass, 0, &bindings[0], 1)
-        sdl.BindGPUIndexBuffer(render_pass, bindings[1], ._16BIT)
-        sdl.PushGPUVertexUniformData(renderer.cmd_buff, 0, &vp, size_of(matrix[4,4]f32))
-
-        model_matrix := linalg.matrix4_scale_f32({5, 5, 5})
-        sdl.PushGPUVertexUniformData(renderer.cmd_buff, 1, &model_matrix, size_of(matrix[4,4]f32))
-        sdl.DrawGPUIndexedPrimitives(render_pass, u32(mesh.num_indices), 1, 0, 0, 0)
-    }
-    sdl.EndGPURenderPass(render_pass)
+load_material :: proc(m: ^gl.material, gpu: ^sdl.GPUDevice, copy_pass: ^sdl.GPUCopyPass) -> GLTFMaterial {
+    assert(bool(m.has_pbr_metallic_roughness))
+    material: GLTFMaterial;
+    using material
+    name = strings.clone_from_cstring(m.name)
+    base_color_factor = m.pbr_metallic_roughness.base_color_factor
+    metallic_factor = m.pbr_metallic_roughness.metallic_factor
+    roughness_factor = m.pbr_metallic_roughness.roughness_factor
+    base_color_tex := m.pbr_metallic_roughness.base_color_texture.texture
+    base_color_texture = load_texture(base_color_tex, gpu, copy_pass)
+    return material
 }
 
-load_gltf :: proc(path: cstring, gpu: ^sdl.GPUDevice) -> GLTFScene {
-    gltf_data := parse_file(path); defer gl.free(gltf_data)
-    assert(len(gltf_data.buffers) == 1)
-    scene: GLTFScene
-    meshes: [dynamic]GLTFMesh
-    for mesh, i in gltf_data.meshes {
-        new_meshes := load_meshes(mesh)
-        for m in new_meshes do append(&meshes, m)
-    }
-    scene.meshes = meshes[:]
+load_texture :: proc(t: ^gl.texture, gpu: ^sdl.GPUDevice, copy_pass: ^sdl.GPUCopyPass) -> GLTFTexture {
+    if t == nil do return {}
+    view := t.image_.buffer_view
+    data_multiptr := cast([^]byte)view.buffer.data
+    ptr := mem.ptr_offset(data_multiptr, view.offset)
+    data: [^]byte = cast([^]byte)ptr
+    size := i32(view.size)
+    width, height: i32
+    pixels := stbi.load_from_memory(data, size, &width, &height, nil, 4)
+    assert(pixels != nil)
+    defer stbi.image_free(pixels)
 
-    materials: [dynamic]GLTFMaterial
-    load_materials(gltf_data.materials, &materials)
-    scene.materials = materials[:]
-    return scene
+    pixels_byte_size := u32(width * height * 4)
+    tex_transfer_buffer := sdl.CreateGPUTransferBuffer(gpu, {
+        usage = sdl.GPUTransferBufferUsage.UPLOAD,
+        size = pixels_byte_size,
+    }); assert(tex_transfer_buffer != nil)
+
+    texture := sdl.CreateGPUTexture(gpu, {
+        type = .D2,
+        format = .R8G8B8A8_UNORM_SRGB,
+        usage = {.SAMPLER},
+        width = u32(width),
+        height = u32(height),
+        layer_count_or_depth = 1,
+        num_levels = 1
+    }); assert(texture != nil)
+    tex_transfer_mem := sdl.MapGPUTransferBuffer(gpu, tex_transfer_buffer, false)
+    assert(tex_transfer_mem != nil)
+    mem.copy(tex_transfer_mem, pixels, int(pixels_byte_size))
+    sdl.UnmapGPUTransferBuffer(gpu, tex_transfer_buffer)
+    sdl.UploadToGPUTexture(copy_pass, 
+        {transfer_buffer = tex_transfer_buffer},
+        {texture = texture, w = u32(width), h = u32(height), d = 1},
+        false
+    )
+    sampler: ^sdl.GPUSampler
+    if t.sampler != nil do sampler = sdl.CreateGPUSampler(gpu, {
+        min_filter = sdl.GPUFilter(t.sampler.min_filter),
+        mag_filter = sdl.GPUFilter(t.sampler.mag_filter)
+    }); else do sampler = sdl.CreateGPUSampler(gpu, {})
+    assert(sampler != nil)
+    return GLTFTexture {
+        texture = texture,
+        sampler = sampler
+    }
 }
-
-load_materials :: proc(materials: []gl.material, buffer: ^[dynamic]GLTFMaterial) {
-    for m in materials {
-        assert(bool(m.has_pbr_metallic_roughness))
-        material: GLTFMaterial;
-        using material
-        name = strings.clone_from_cstring(m.name)
-        base_color = m.pbr_metallic_roughness.base_color_factor
-        metallic_factor = m.pbr_metallic_roughness.metallic_factor
-        roughness_factor = m.pbr_metallic_roughness.roughness_factor
-        append(buffer, material)
-    }
-}
-
-print_gltf_description :: proc(scene: GLTFScene) {
-    fmt.println("Meshes:")
-    for m in scene.meshes {
-        fmt.println("\tMesh with material:", m.material_name)
-        fmt.printfln("\t\t{} indices",len(m.indices))
-        fmt.println("\t\tVertex count:", len(m.vertices))
-    }
-    fmt.println("Materials:")
-    for m in scene.materials {
-        fmt.printfln("\t{}", m.name)
-        fmt.println("\t\tBase color:", m.base_color)
-        fmt.println("\t\tMetallic:  ", m.metallic_factor)
-        fmt.println("\t\tRoughness: ", m.roughness_factor)
-    }
-}
-
 
 @(private = "file")
-load_meshes :: proc(mesh: gl.mesh) -> []GLTFMesh {
-    meshes: [dynamic]GLTFMesh
-
+load_mesh :: proc(mesh: gl.mesh, gpu: ^sdl.GPUDevice, copy_pass: ^sdl.GPUCopyPass) -> ([]GLTFVertex, []u16, []GLTFPrimitive) {
+    primitives: [dynamic]GLTFPrimitive
+    vertices: [dynamic]GLTFVertex
+    indices: [dynamic]u16
+    num_indices: uint
     for primitive, i in mesh.primitives {
         positions: [dynamic]vec3; defer delete(positions)
         normals:   [dynamic]vec3; defer delete(normals)
         uvs:       [dynamic]vec2; defer delete(uvs)
-        indices:   [dynamic]u16
-        load_buffer_from_accessor(primitive.indices, &indices)
-
+        primitive_indices: [dynamic]u16; defer delete(primitive_indices)
+        load_buffer_from_accessor(primitive.indices, &primitive_indices)
+        for i in primitive_indices {
+            append(&indices, i+u16(num_indices))
+        }
+        start := num_indices
+        num_indices += len(primitive_indices)
+        material := load_material(primitive.material, gpu, copy_pass)
+        gltf_primitive := GLTFPrimitive {
+            start = start,
+            end = num_indices,
+            material = material
+        }
+        append(&primitives, gltf_primitive)
         for attribute in primitive.attributes {
             accessor := attribute.data
             #partial switch attribute.type {
@@ -261,27 +316,21 @@ load_meshes :: proc(mesh: gl.mesh) -> []GLTFMesh {
                 case .texcoord: load_buffer_from_accessor(accessor, &uvs)
             }
         }
-
         if uvs == nil do uvs = make([dynamic]vec2, len(positions))
-        vertices := make([]GLTFVertex, len(positions))
-
         for i in 0..<len(positions) {
-            vertices[i] = GLTFVertex {
+            append(&vertices, GLTFVertex {
                 position = positions[i],
                 normal = normals[i],
                 uv = uvs[i]
-            }
+            })
         }
-
-        append(&meshes, GLTFMesh {
-            vertices = vertices, 
-            indices = indices[:],
-            material_name = strings.clone_from_cstring(primitive.material.name)
-        })
     }
-
-    return meshes[:]
-}
+    max_index: u16
+    for i in indices do if i>max_index do max_index = i
+    fmt.println("Max index for", mesh.name, max_index)
+    fmt.println("vertices:", len(vertices))
+    return vertices[:], indices[:], primitives[:]
+}   
 
 @(private = "file")
 load_buffer_from_accessor :: proc(accessor: ^gl.accessor, buffer: ^[dynamic]$T) {

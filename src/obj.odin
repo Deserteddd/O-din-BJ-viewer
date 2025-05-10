@@ -115,7 +115,6 @@ load_object :: proc(dir_path: string) -> ObjectData {
             obj_path := strings.concatenate({path, ".obj"}, context.temp_allocator)
             test_time := time.now()
             file, err := os.read_entire_file_or_err(obj_path); assert(err == nil); defer delete(file)
-            // fmt.println("measured time:", time.since(test_time))
             src := string(file)
             line_arr := strings.split_lines(src); defer delete(line_arr)
             start, i: int
@@ -129,7 +128,6 @@ load_object :: proc(dir_path: string) -> ObjectData {
                         elapsed := time.since(now)
                         load_time += time.duration_milliseconds(elapsed)
                         for v in new_obj do append(&obj.vertices, v)
-
                     }
                     start = i
                 }
@@ -236,7 +234,7 @@ new_texture :: proc(tex_path: string, data: ^TextureData) -> f32 {
     tex_path_cstring := strings.clone_to_cstring(tex_path); 
     path_split       := strings.split(tex_path, "/");
     tex_name         := strings.clone(path_split[len(path_split)-1])
-    fmt.println("TEXTURE PATH:", tex_path)
+    // fmt.println("TEXTURE PATH:", tex_path)
 
     i: int
     for i = 0; i<len(data.textures); i += 1 {

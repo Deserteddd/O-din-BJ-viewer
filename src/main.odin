@@ -26,7 +26,7 @@ main :: proc() {
     init(&state)
     fmt.println("MAIN: init done")
     run(&state)
-    fmt.println("MAIN: Exiting")
+    // fmt.println("MAIN: Exiting")
 }
 
 AppState :: struct {
@@ -38,7 +38,8 @@ AppState :: struct {
     entities:           #soa[dynamic]Entity,
     checkpoint:         [2]vec3,                // Position, Rotation
     ui_visible:         bool,
-    gltf_scene:         GLTFScene
+    gltf_meshes:        []GLTFMesh,
+    gltf_node:          GLTFNode
 }
 
 DebugInfo :: struct {
@@ -61,11 +62,13 @@ init :: proc(state: ^AppState) {
     
     renderer = RND_Init({})
     player = create_player()
+    meshes, root := load_gltf("assets/CesiumMilkTruck.glb", renderer.gpu)
+    gltf_meshes = meshes
+    gltf_node = root
     ground := load_object("assets/ref_tris"); defer delete_obj(ground)
-    gltf_scene = load_gltf("assets/DamagedHelmet.glb", renderer.gpu)
-    print_gltf_description(gltf_scene)
-    prepare_gltf_scene(&gltf_scene, &renderer)
+    slab   := load_object("assets/ref_cube"); defer delete_obj(slab)
     add_obj_model(ground, state)
+    add_obj_model(slab, state)
     create_entity(state, 0)
     init_imgui(state)
 }
@@ -140,12 +143,11 @@ run :: proc(state: ^AppState) {
         update(state)
         RND_FrameBegin(state)
         RND_DrawEntities(state)
-        draw_gltf_scene(state)
+        RND_DrawGLTF(state)
         wireframe := .WIREFRAME in state.renderer.props
         RND_DrawUI(state)
         if wireframe != .WIREFRAME in state.renderer.props {
             build_3D_pipeline(&state.renderer)
-            state.gltf_scene.pipeline = build_gltf_pipeline(&state.renderer)
         }
         state.debug_info.frame_time = time.since(now)
         ok := RND_FrameSubmit(&state.renderer); assert(ok)

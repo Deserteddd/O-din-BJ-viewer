@@ -56,7 +56,6 @@ add_obj_model :: proc(data: ObjectData, state: ^AppState) {
     img_sizes: [4][2]i32
     i: int
     textures: [dynamic]^sdl.GPUTexture; defer if len(textures) == 0 do delete(textures)
-    fmt.println(len(data.texture_data.textures))
     for i<len(data.texture_data.textures) {
         defer i += 1
         img_sizes[i] = data.texture_data.sizes[i]
