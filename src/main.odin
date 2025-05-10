@@ -26,7 +26,7 @@ main :: proc() {
     init(&state)
     fmt.println("MAIN: init done")
     run(&state)
-    // fmt.println("MAIN: Exiting")
+    fmt.println("MAIN: Exiting")
 }
 
 AppState :: struct {
@@ -62,7 +62,8 @@ init :: proc(state: ^AppState) {
     
     renderer = RND_Init({})
     player = create_player()
-    meshes, root := load_gltf("assets/CesiumMilkTruck.glb", renderer.gpu)
+    meshes, root := load_gltf("assets/DamagedHelmet.glb", renderer.gpu)
+    root.mat *= linalg.matrix4_translate_f32({0, 0, -3})*linalg.matrix4_scale_f32({3, 3, 3})
     gltf_meshes = meshes
     gltf_node = root
     ground := load_object("assets/ref_tris"); defer delete_obj(ground)
@@ -205,6 +206,7 @@ update :: proc(state: ^AppState) {
     new_ticks := sdl.GetTicks();
     dt := f32(new_ticks - last_ticks) / 1000
     last_ticks = new_ticks
+    state.gltf_node.mat *= linalg.matrix4_rotate_f32(dt*0.5, {0, 0, 1})
     if !ui_visible {
         update_camera(&state.player)
         wish_speed := player_wish_speed(state.player)

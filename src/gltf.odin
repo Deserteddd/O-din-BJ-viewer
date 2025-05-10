@@ -11,6 +11,7 @@ import "core:os"
 import "core:path/filepath"
 import "core:strings"
 import "core:math/linalg"
+import "core:time"
 
 GLTFMaterial :: struct {
     name: string,
@@ -18,6 +19,7 @@ GLTFMaterial :: struct {
     base_color_texture: GLTFTexture,
     metallic_factor: f32,
     roughness_factor: f32,
+    metallic_roughness_texture: GLTFTexture,
 }
 
 GLTFTexture :: struct {
@@ -119,15 +121,13 @@ build_gltf_pipeline :: proc(renderer: ^Renderer) {
     gltf_pipeline = pipeline
 }
 
-
 load_gltf :: proc(path: cstring, gpu: ^sdl.GPUDevice) -> ([]GLTFMesh, GLTFNode) {
     gltf_data := parse_file(path); defer gl.free(gltf_data)
     assert(len(gltf_data.buffers) == 1)
     assert(len(gltf_data.scene.nodes) == 1)
     meshes := load_meshes(gltf_data, gpu)
-    fmt.println(len(meshes))
     root: GLTFNode
-    build_scene(gltf_data.scene.nodes[0], meshes, &root, linalg.MATRIX4F32_IDENTITY)
+    build_scene(gltf_data.scene.nodes[0], meshes, &root)
     return meshes, root
 }
 
@@ -140,7 +140,7 @@ print_node_tree :: proc(root: GLTFNode, level := 0) {
     }
 }
 
-build_scene :: proc(gl_node: ^gl.node, meshes: []GLTFMesh, node: ^GLTFNode, mat: matrix[4,4]f32) {
+build_scene :: proc(gl_node: ^gl.node, meshes: []GLTFMesh, node: ^GLTFNode) {
     // Mesh
     if gl_node.mesh != nil {
         m_name := strings.clone_from_cstring(gl_node.mesh.name, context.temp_allocator)
@@ -155,7 +155,7 @@ build_scene :: proc(gl_node: ^gl.node, meshes: []GLTFMesh, node: ^GLTFNode, mat:
     if gl_node.has_matrix {
         fmt.println("If the scene is fucked up, the matrix transmutation likely didn't work")
         m := gl_node.matrix_
-        node.mat = mat * transmute(matrix[4,4]f32)m
+        node.mat = transmute(matrix[4,4]f32)m
         fmt.println(node.mat)
     } else {
         t_mat: matrix[4,4]f32
@@ -173,13 +173,13 @@ build_scene :: proc(gl_node: ^gl.node, meshes: []GLTFMesh, node: ^GLTFNode, mat:
         s_mat: matrix[4,4]f32
         if gl_node.has_scale do s_mat = linalg.matrix4_scale(gl_node.scale)
         else do s_mat = linalg.MATRIX4F32_IDENTITY
-        node.mat = mat * t_mat * r_mat * s_mat
+        node.mat = t_mat * r_mat * s_mat
     }
     if len(gl_node.children) == 0 do return
     children := make([]GLTFNode, len(gl_node.children))
     node.children = children
     for child, i in gl_node.children {
-        build_scene(child, meshes, &node.children[i], node.mat)
+        build_scene(child, meshes, &node.children[i])
     }
 }
 
@@ -188,11 +188,7 @@ load_meshes :: proc(data: ^gl.data, gpu: ^sdl.GPUDevice) -> []GLTFMesh {
     copy_commands := sdl.AcquireGPUCommandBuffer(gpu); assert(copy_commands != nil)
     copy_pass := sdl.BeginGPUCopyPass(copy_commands); assert(copy_pass != nil)
     for m in data.meshes {
-        fmt.println(m.name)
         vertices, indices, primitives := load_mesh(m, gpu, copy_pass)
-        for i in primitives{
-            fmt.println(i)
-        }
         name := strings.clone_from_cstring(m.name)
         defer {
             delete(vertices)
@@ -233,19 +229,24 @@ load_material :: proc(m: ^gl.material, gpu: ^sdl.GPUDevice, copy_pass: ^sdl.GPUC
     roughness_factor = m.pbr_metallic_roughness.roughness_factor
     base_color_tex := m.pbr_metallic_roughness.base_color_texture.texture
     base_color_texture = load_texture(base_color_tex, gpu, copy_pass)
+    metallic_roughness_tex := m.pbr_metallic_roughness.metallic_roughness_texture.texture
+    metallic_roughness_texture = load_texture(metallic_roughness_tex, gpu, copy_pass)
+
     return material
 }
 
 load_texture :: proc(t: ^gl.texture, gpu: ^sdl.GPUDevice, copy_pass: ^sdl.GPUCopyPass) -> GLTFTexture {
     if t == nil do return {}
     view := t.image_.buffer_view
+    fmt.println("loading image:", t.image_.name)
     data_multiptr := cast([^]byte)view.buffer.data
     ptr := mem.ptr_offset(data_multiptr, view.offset)
     data: [^]byte = cast([^]byte)ptr
     size := i32(view.size)
     width, height: i32
+    start := time.now()
     pixels := stbi.load_from_memory(data, size, &width, &height, nil, 4)
-    assert(pixels != nil)
+    fmt.println(time.since(start))
     defer stbi.image_free(pixels)
 
     pixels_byte_size := u32(width * height * 4)
@@ -287,27 +288,14 @@ load_texture :: proc(t: ^gl.texture, gpu: ^sdl.GPUDevice, copy_pass: ^sdl.GPUCop
 @(private = "file")
 load_mesh :: proc(mesh: gl.mesh, gpu: ^sdl.GPUDevice, copy_pass: ^sdl.GPUCopyPass) -> ([]GLTFVertex, []u16, []GLTFPrimitive) {
     primitives: [dynamic]GLTFPrimitive
-    vertices: [dynamic]GLTFVertex
     indices: [dynamic]u16
+    positions: [dynamic]vec3; defer delete(positions)
+    normals:   [dynamic]vec3; defer delete(normals)
+    uvs:       [dynamic]vec2; defer delete(uvs)
     num_indices: uint
     for primitive, i in mesh.primitives {
-        positions: [dynamic]vec3; defer delete(positions)
-        normals:   [dynamic]vec3; defer delete(normals)
-        uvs:       [dynamic]vec2; defer delete(uvs)
-        primitive_indices: [dynamic]u16; defer delete(primitive_indices)
-        load_buffer_from_accessor(primitive.indices, &primitive_indices)
-        for i in primitive_indices {
-            append(&indices, i+u16(num_indices))
-        }
-        start := num_indices
-        num_indices += len(primitive_indices)
+        position_count := len(positions)
         material := load_material(primitive.material, gpu, copy_pass)
-        gltf_primitive := GLTFPrimitive {
-            start = start,
-            end = num_indices,
-            material = material
-        }
-        append(&primitives, gltf_primitive)
         for attribute in primitive.attributes {
             accessor := attribute.data
             #partial switch attribute.type {
@@ -316,19 +304,27 @@ load_mesh :: proc(mesh: gl.mesh, gpu: ^sdl.GPUDevice, copy_pass: ^sdl.GPUCopyPas
                 case .texcoord: load_buffer_from_accessor(accessor, &uvs)
             }
         }
-        if uvs == nil do uvs = make([dynamic]vec2, len(positions))
-        for i in 0..<len(positions) {
-            append(&vertices, GLTFVertex {
-                position = positions[i],
-                normal = normals[i],
-                uv = uvs[i]
-            })
+        primitive_indices: [dynamic]u16; defer delete(primitive_indices)
+        start := len(indices)
+        load_buffer_from_accessor(primitive.indices, &primitive_indices)
+        for i in primitive_indices do append(&indices, i + u16(position_count))
+        end := len(indices)
+        gltf_primitive := GLTFPrimitive {
+            start = uint(start),
+            end = uint(end),
+            material = material
         }
+        append(&primitives, gltf_primitive)
     }
-    max_index: u16
-    for i in indices do if i>max_index do max_index = i
-    fmt.println("Max index for", mesh.name, max_index)
-    fmt.println("vertices:", len(vertices))
+    if uvs == nil do uvs = make([dynamic]vec2, len(positions))
+    vertices: [dynamic]GLTFVertex
+    for i in 0..<len(positions) {
+        append(&vertices, GLTFVertex {
+            position = positions[i],
+            normal = normals[i],
+            uv = uvs[i]
+        })
+    }
     return vertices[:], indices[:], primitives[:]
 }   
 

@@ -16,6 +16,8 @@ import im "shared:imgui"
 import im_sdl "shared:imgui/imgui_impl_sdl3"
 import im_sdlgpu "shared:imgui/imgui_impl_sdlgpu3"
 
+PRESENT_MODE: sdl.GPUPresentMode = .VSYNC
+
 Renderer :: struct {
     window:             ^sdl.Window,
     gpu:                ^sdl.GPUDevice,
@@ -72,7 +74,7 @@ RND_Init :: proc(props: RND_Props) -> Renderer {
     sdl.GetWindowSize(window, &width, &height)
     gpu := sdl.CreateGPUDevice({.SPIRV}, true, nil); assert(gpu != nil)
     ok = sdl.ClaimWindowForGPUDevice(gpu, window); assert(ok)
-    ok = sdl.SetGPUSwapchainParameters(gpu, window, .SDR_LINEAR, .IMMEDIATE); assert(ok)
+    ok = sdl.SetGPUSwapchainParameters(gpu, window, .SDR_LINEAR, PRESENT_MODE); assert(ok)
 
     renderer.window = window
     renderer.gpu = gpu
@@ -128,9 +130,9 @@ RND_Init :: proc(props: RND_Props) -> Renderer {
         renderer.samplers[i] = sampler
     }
     renderer.light = PointLight {
-        position = vec3{0, 50, 0},
+        position = vec3{0, 10, 25},
         color = 1,
-        power = 2000
+        power = 1000
     }
     renderer.draw_distance = 250
     return renderer
@@ -176,7 +178,7 @@ RND_ToggleFullscreen :: proc(state: ^AppState) {
         ok = sdl.ClaimWindowForGPUDevice(gpu, window)
     }
 
-    ok = sdl.SetGPUSwapchainParameters(gpu, window, .SDR_LINEAR, .IMMEDIATE); assert(ok)
+    ok = sdl.SetGPUSwapchainParameters(gpu, window, .SDR_LINEAR, PRESENT_MODE); assert(ok)
     depth := sdl.CreateGPUTexture(gpu, {
         type = .D2,
         width = u32(width),
@@ -231,7 +233,7 @@ RND_DrawUI :: proc(state: ^AppState) {
         im.DragInt("FPS", &frame_time_float)
         rendered := i32(debug_info.rendered)
         im.SetNextItemWidth(50)
-        im.DragInt("Slabs", &rendered)
+        im.DragInt("Drawn", &rendered)
         im.SetNextItemWidth(50)
         im.DragFloat("Speed", &debug_info.player_speed)
     }
@@ -303,15 +305,19 @@ RND_DrawGLTF :: proc(state: ^AppState) {
     proj_matrix := create_proj_matrix(renderer)
     view_matrix := create_view_matrix(player.position, player.rotation)
     vp := proj_matrix * view_matrix;
-    render_pass := sdl.BeginGPURenderPass(renderer.cmd_buff, &color_target, 1, &depth_target_info); assert(render_pass != nil)
+    render_pass := sdl.BeginGPURenderPass(renderer.cmd_buff, &color_target, 1, &depth_target_info)
+    assert(render_pass != nil)
+    frag_ubo := create_frag_ubo(state)
     sdl.BindGPUGraphicsPipeline(render_pass, renderer.gltf_pipeline)
     sdl.PushGPUVertexUniformData(renderer.cmd_buff, 0, &vp, size_of(matrix[4,4]f32))
-    draw_node(render_pass, &renderer, &state.gltf_node)
+    sdl.PushGPUFragmentUniformData(renderer.cmd_buff, 0, &frag_ubo, size_of(FragUBO))
+    draw_node(render_pass, state, &state.gltf_node, linalg.MATRIX4F32_IDENTITY)
     sdl.EndGPURenderPass(render_pass)
 }
 
-draw_node :: proc(render_pass: ^sdl.GPURenderPass, renderer: ^Renderer, node: ^GLTFNode) {
-    using node
+draw_node :: proc(render_pass: ^sdl.GPURenderPass, state: ^AppState, node: ^GLTFNode, parent_matrix: matrix[4,4]f32) {
+    using node, state
+    model_matrix := parent_matrix * node.mat
     if mesh != nil {
         bindings: [2]sdl.GPUBufferBinding = { 
             sdl.GPUBufferBinding { buffer = mesh.vbo },
@@ -319,26 +325,34 @@ draw_node :: proc(render_pass: ^sdl.GPURenderPass, renderer: ^Renderer, node: ^G
         } 
         sdl.BindGPUVertexBuffers(render_pass, 0, &bindings[0], 1)
         sdl.BindGPUIndexBuffer(render_pass, bindings[1], ._16BIT)
-        sdl.PushGPUVertexUniformData(renderer.cmd_buff, 1, &node.mat, size_of(matrix[4,4]f32))
+        sdl.PushGPUVertexUniformData(renderer.cmd_buff, 1, &model_matrix, size_of(matrix[4,4]f32))
         for primitive in mesh.primitives {
-            if primitive.material.base_color_texture != {} {
-                sdl.BindGPUFragmentSamplers(render_pass, 0, 
-                    &(sdl.GPUTextureSamplerBinding{
-                        texture = primitive.material.base_color_texture.texture,
-                        sampler = primitive.material.base_color_texture.sampler
-                    }), 1
-                )
+            bindings:[]sdl.GPUTextureSamplerBinding = {
+                sdl.GPUTextureSamplerBinding{
+                    texture = primitive.material.base_color_texture.texture,
+                    sampler = primitive.material.base_color_texture.sampler
+                },
+                sdl.GPUTextureSamplerBinding{
+                    texture = primitive.material.metallic_roughness_texture.texture,
+                    sampler = primitive.material.metallic_roughness_texture.sampler
+                }
             }
-            sdl.PushGPUFragmentUniformData(renderer.cmd_buff, 0, &(GLTF_fragUBO{
+            assert(bindings[0].sampler != nil)
+            assert(bindings[0].texture != nil)
+            assert(bindings[1].sampler != nil)
+            assert(bindings[1].texture != nil)
+            sdl.BindGPUFragmentSamplers(render_pass, 0, raw_data(bindings[:]), 2)
+            sdl.PushGPUFragmentUniformData(renderer.cmd_buff, 1, &(GLTF_fragUBO{
                 base_color = primitive.material.base_color_factor,
                 metallic_factor = primitive.material.metallic_factor,
                 roughness_factor = primitive.material.roughness_factor
             }), size_of(GLTF_fragUBO))
             num_indices := u32(primitive.end - primitive.start)
             sdl.DrawGPUIndexedPrimitives(render_pass, num_indices, 1, u32(primitive.start), 0, 0)
+            debug_info.rendered += 1
         }
     }
-    for &child in node.children do draw_node(render_pass, renderer, &child)
+    for &child in node.children do draw_node(render_pass, state, &child, model_matrix)
 }
 GLTF_fragUBO :: struct {
     base_color: vec4,
