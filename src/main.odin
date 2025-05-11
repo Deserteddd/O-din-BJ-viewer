@@ -29,17 +29,25 @@ main :: proc() {
     fmt.println("MAIN: Exiting")
 }
 
+Model:: struct {
+    type: ModelType,
+    bbox: AABB,
+    data: struct #raw_union {
+        gltf: GLTFNode,
+        obj:  OBJModel,
+    },
+}
+
 AppState :: struct {
     player:             Player,
     renderer:           Renderer,
     debug_info:         DebugInfo,
     ui_context:         ^im.Context,
     models:             [dynamic]Model,
+    gltf_meshes:        [dynamic]GLTFMesh,
     entities:           #soa[dynamic]Entity,
     checkpoint:         [2]vec3,                // Position, Rotation
     ui_visible:         bool,
-    gltf_meshes:        []GLTFMesh,
-    gltf_node:          GLTFNode
 }
 
 DebugInfo :: struct {
@@ -62,30 +70,14 @@ init :: proc(state: ^AppState) {
     
     renderer = RND_Init({})
     player = create_player()
-    meshes, root := load_gltf("assets/DamagedHelmet.glb", renderer.gpu)
-    root.mat *= linalg.matrix4_translate_f32({0, 0, -3})*linalg.matrix4_scale_f32({3, 3, 3})
-    gltf_meshes = meshes
-    gltf_node = root
+    helmet := load_gltf("assets/DamagedHelmet2.glb", renderer.gpu);
     ground := load_object("assets/ref_tris"); defer delete_obj(ground)
     slab   := load_object("assets/ref_cube"); defer delete_obj(slab)
-    add_obj_model(ground, state)
-    add_obj_model(slab, state)
+    add_model(ground, state)
+    add_model(slab, state)
+    add_model(helmet, state)
     create_entity(state, 0)
     init_imgui(state)
-}
-
-release :: proc(state: ^AppState) {
-    using state
-    for &model in models {
-        sdl.ReleaseGPUBuffer(renderer.gpu, model.vbo)
-        sdl.ReleaseGPUBuffer(renderer.gpu, model.material_buffer)
-        for &texture in model.textures {
-            sdl.ReleaseGPUTexture(renderer.gpu, texture)
-        }
-    }
-    delete_soa(state.entities)
-    delete(state.models)
-    RND_Destroy(state)
 }
 
 init_imgui :: proc(state: ^AppState) {
@@ -130,14 +122,17 @@ run :: proc(state: ^AppState) {
                     case .F:
                         RND_ToggleFullscreen(state)
                     case .C:
-                        if .LCTRL in ev.key.mod {
-                            release(state)
-                            return
-                        }
+                        if .LCTRL in ev.key.mod do break main_loop
                 }
-                case .MOUSE_BUTTON_DOWN: if ev.button.button == 1 && !state.ui_visible{
-                    new := create_entity(state, 1)
-                    set_entity_position(state, new, state.player.bbox.min)
+                case .MOUSE_BUTTON_DOWN: if !state.ui_visible {
+                    switch ev.button.button {
+                        case 1:
+                            new := create_entity(state, 1)
+                            set_entity_position(state, new, state.player.position)
+                        case 3:
+                            new := create_entity(state, 2)
+                            set_entity_position(state, new, state.player.position)
+                    }
                 }
             }
         }
@@ -206,7 +201,7 @@ update :: proc(state: ^AppState) {
     new_ticks := sdl.GetTicks();
     dt := f32(new_ticks - last_ticks) / 1000
     last_ticks = new_ticks
-    state.gltf_node.mat *= linalg.matrix4_rotate_f32(dt*0.5, {0, 0, 1})
+    state.models[2].data.gltf.mat *= linalg.matrix4_rotate_f32(dt*0.5, {0, 0, 1})
     if !ui_visible {
         update_camera(&state.player)
         wish_speed := player_wish_speed(state.player)

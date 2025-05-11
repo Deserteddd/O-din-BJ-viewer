@@ -14,13 +14,6 @@ Entity :: struct {
 
 EntitySOA :: #soa [dynamic]Entity
 
-Model :: struct {
-    textures:        []^sdl.GPUTexture,
-    vbo:             ^sdl.GPUBuffer,
-    material_buffer: ^sdl.GPUBuffer,
-    num_vertices:    u32,
-    bbox:            AABB
-}
 
 Player :: struct {
     position: vec3,
@@ -48,10 +41,16 @@ set_entity_position :: proc(state: ^AppState, id: int, pos: vec3) {
     }
 }
 
-add_obj_model :: proc(data: ObjectData, state: ^AppState) {
+add_model :: proc {
+    add_obj_model,
+    add_gltf_model,
+}
+
+add_obj_model :: proc(data: OBJObjectData, state: ^AppState) {
     // Create and upload texture
     using state.renderer
     model: Model
+    model.type = .OBJ
     tex_transfer_buffers: [4]^sdl.GPUTransferBuffer
     img_sizes: [4][2]i32
     i: int
@@ -86,7 +85,7 @@ add_obj_model :: proc(data: ObjectData, state: ^AppState) {
         sdl.UnmapGPUTransferBuffer(gpu, tex_transfer_buffer)
         tex_transfer_buffers[i] = tex_transfer_buffer
     }
-    model.textures = textures[:]
+    model.data.obj.textures = textures[:]
 
     // Create and upload buffers
     len_bytes := u32(len(data.vertices) * size_of(Vertex))
@@ -112,14 +111,13 @@ add_obj_model :: proc(data: ObjectData, state: ^AppState) {
         if (position.y > bbox.max.y) do bbox.max.y = position.y;
         if (position.z > bbox.max.z) do bbox.max.z = position.z;
     }
-
-    model.num_vertices = u32(len(data.vertices))
     model.bbox = bbox
+    model.data.obj.num_vertices = u32(len(data.vertices))
 
     for j in 0..<i {
         sdl.UploadToGPUTexture(copy_pass, 
             {transfer_buffer = tex_transfer_buffers[j]},
-            {texture = model.textures[j], w = u32(img_sizes[j].x), h = u32(img_sizes[j].y), d = 1},
+            {texture = model.data.obj.textures[j], w = u32(img_sizes[j].x), h = u32(img_sizes[j].y), d = 1},
             false
         )
     }
@@ -131,8 +129,17 @@ add_obj_model :: proc(data: ObjectData, state: ^AppState) {
     ok := sdl.SubmitGPUCommandBuffer(copy_commands); assert(ok)
 
     // Assignments
-    model.vbo = vbo
-    model.material_buffer = material_buffer
+    model.data.obj.vbo = vbo
+    model.data.obj.material_buffer = material_buffer
+    append(&state.models, model)
+}
+
+add_gltf_model :: proc(data: GLTFObjectData, state: ^AppState) {
+    using data
+    model: Model
+    for m in meshes do append(&state.gltf_meshes, m)
+    model.type = .GLTF
+    model.data.gltf = root
     append(&state.models, model)
 }
 

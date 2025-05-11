@@ -13,6 +13,11 @@ import "core:strings"
 import "core:math/linalg"
 import "core:time"
 
+GLTFObjectData  :: struct {
+    meshes: []GLTFMesh,
+    root: GLTFNode
+}
+
 GLTFMaterial :: struct {
     name: string,
     base_color_factor: vec4,
@@ -20,6 +25,7 @@ GLTFMaterial :: struct {
     metallic_factor: f32,
     roughness_factor: f32,
     metallic_roughness_texture: GLTFTexture,
+    normal_map: GLTFTexture,
 }
 
 GLTFTexture :: struct {
@@ -38,18 +44,20 @@ GLTFMesh :: struct {
     primitives: []GLTFPrimitive,
     vbo: ^sdl.GPUBuffer,
     ibo: ^sdl.GPUBuffer,
+    aabb: AABB
 }
 
 GLTFVertex :: struct {
     position: vec3,
     normal: vec3,
-    uv: vec2
+    uv: vec2,
+    tangent: vec3
 }
 
 GLTFNode :: struct {
     mesh:        ^GLTFMesh,
-    mat:         matrix[4,4]f32,
     children:    []GLTFNode,
+    mat:         matrix[4,4]f32,
 }
 
 
@@ -85,6 +93,12 @@ build_gltf_pipeline :: proc(renderer: ^Renderer) {
             format = .FLOAT2,
             offset = size_of(vec3) * 2
         },
+        sdl.GPUVertexAttribute {
+            location = 3,
+            buffer_slot = 0,
+            format = .FLOAT3,
+            offset = size_of(vec3) * 2 + size_of(vec2)
+        }
     }
     fill_mode: sdl.GPUFillMode;
     cull_mode: sdl.GPUCullMode; 
@@ -106,7 +120,7 @@ build_gltf_pipeline :: proc(renderer: ^Renderer) {
             vertex_buffer_descriptions = &vb_descriptions[0],
             num_vertex_buffers = 1,
             vertex_attributes = &vb_attributes[0],
-            num_vertex_attributes = 3
+            num_vertex_attributes = 4
         },
         rasterizer_state = {
             fill_mode = fill_mode,
@@ -121,23 +135,14 @@ build_gltf_pipeline :: proc(renderer: ^Renderer) {
     gltf_pipeline = pipeline
 }
 
-load_gltf :: proc(path: cstring, gpu: ^sdl.GPUDevice) -> ([]GLTFMesh, GLTFNode) {
+load_gltf :: proc(path: cstring, gpu: ^sdl.GPUDevice) -> GLTFObjectData {
     gltf_data := parse_file(path); defer gl.free(gltf_data)
     assert(len(gltf_data.buffers) == 1)
     assert(len(gltf_data.scene.nodes) == 1)
     meshes := load_meshes(gltf_data, gpu)
     root: GLTFNode
     build_scene(gltf_data.scene.nodes[0], meshes, &root)
-    return meshes, root
-}
-
-print_node_tree :: proc(root: GLTFNode, level := 0) {
-    fmt.println("LEVEL", level)
-    if root.mesh != nil do for m in root.mesh.primitives do fmt.println(m.material.name)
-    for node in root.children {
-        for i in 0..<level do fmt.print("\t")
-        print_node_tree(node, level = level + 1)
-    }
+    return GLTFObjectData {meshes, root}
 }
 
 build_scene :: proc(gl_node: ^gl.node, meshes: []GLTFMesh, node: ^GLTFNode) {
@@ -188,7 +193,7 @@ load_meshes :: proc(data: ^gl.data, gpu: ^sdl.GPUDevice) -> []GLTFMesh {
     copy_commands := sdl.AcquireGPUCommandBuffer(gpu); assert(copy_commands != nil)
     copy_pass := sdl.BeginGPUCopyPass(copy_commands); assert(copy_pass != nil)
     for m in data.meshes {
-        vertices, indices, primitives := load_mesh(m, gpu, copy_pass)
+        vertices, indices, primitives, aabb := load_mesh(m, gpu, copy_pass)
         name := strings.clone_from_cstring(m.name)
         defer {
             delete(vertices)
@@ -196,6 +201,7 @@ load_meshes :: proc(data: ^gl.data, gpu: ^sdl.GPUDevice) -> []GLTFMesh {
         }
         mesh: GLTFMesh
         mesh.name = name
+        mesh.aabb = aabb
         mesh.primitives = primitives
         vert_count: uint = len(vertices)
         index_count: uint = len(indices)
@@ -231,6 +237,7 @@ load_material :: proc(m: ^gl.material, gpu: ^sdl.GPUDevice, copy_pass: ^sdl.GPUC
     base_color_texture = load_texture(base_color_tex, gpu, copy_pass)
     metallic_roughness_tex := m.pbr_metallic_roughness.metallic_roughness_texture.texture
     metallic_roughness_texture = load_texture(metallic_roughness_tex, gpu, copy_pass)
+    normal_map = load_texture(m.normal_texture.texture, gpu, copy_pass)
 
     return material
 }
@@ -238,15 +245,12 @@ load_material :: proc(m: ^gl.material, gpu: ^sdl.GPUDevice, copy_pass: ^sdl.GPUC
 load_texture :: proc(t: ^gl.texture, gpu: ^sdl.GPUDevice, copy_pass: ^sdl.GPUCopyPass) -> GLTFTexture {
     if t == nil do return {}
     view := t.image_.buffer_view
-    fmt.println("loading image:", t.image_.name)
     data_multiptr := cast([^]byte)view.buffer.data
     ptr := mem.ptr_offset(data_multiptr, view.offset)
     data: [^]byte = cast([^]byte)ptr
     size := i32(view.size)
     width, height: i32
-    start := time.now()
     pixels := stbi.load_from_memory(data, size, &width, &height, nil, 4)
-    fmt.println(time.since(start))
     defer stbi.image_free(pixels)
 
     pixels_byte_size := u32(width * height * 4)
@@ -286,11 +290,12 @@ load_texture :: proc(t: ^gl.texture, gpu: ^sdl.GPUDevice, copy_pass: ^sdl.GPUCop
 }
 
 @(private = "file")
-load_mesh :: proc(mesh: gl.mesh, gpu: ^sdl.GPUDevice, copy_pass: ^sdl.GPUCopyPass) -> ([]GLTFVertex, []u16, []GLTFPrimitive) {
+load_mesh :: proc(mesh: gl.mesh, gpu: ^sdl.GPUDevice, copy_pass: ^sdl.GPUCopyPass) -> ([]GLTFVertex, []u16, []GLTFPrimitive, AABB) {
     primitives: [dynamic]GLTFPrimitive
     indices: [dynamic]u16
     positions: [dynamic]vec3; defer delete(positions)
     normals:   [dynamic]vec3; defer delete(normals)
+    tangents:  [dynamic]vec3; defer delete(tangents)
     uvs:       [dynamic]vec2; defer delete(uvs)
     num_indices: uint
     for primitive, i in mesh.primitives {
@@ -302,6 +307,7 @@ load_mesh :: proc(mesh: gl.mesh, gpu: ^sdl.GPUDevice, copy_pass: ^sdl.GPUCopyPas
                 case .normal:   load_buffer_from_accessor(accessor, &normals)
                 case .position: load_buffer_from_accessor(accessor, &positions)
                 case .texcoord: load_buffer_from_accessor(accessor, &uvs)
+                case .tangent:  load_buffer_from_accessor(accessor, &tangents)
             }
         }
         primitive_indices: [dynamic]u16; defer delete(primitive_indices)
@@ -317,15 +323,32 @@ load_mesh :: proc(mesh: gl.mesh, gpu: ^sdl.GPUDevice, copy_pass: ^sdl.GPUCopyPas
         append(&primitives, gltf_primitive)
     }
     if uvs == nil do uvs = make([dynamic]vec2, len(positions))
+
+    {
+        positions := len(positions)
+        assert(positions == len(normals))
+        assert(positions == len(uvs))
+        assert(positions == len(tangents))
+    }
+    bbox: AABB = {min = max(f32), max = min(f32)}
+    for pos in positions {
+        if (pos.x < bbox.min.x) do bbox.min.x = pos.x;
+        if (pos.y < bbox.min.y) do bbox.min.y = pos.y;
+        if (pos.z < bbox.min.z) do bbox.min.z = pos.z;
+        if (pos.x > bbox.max.x) do bbox.max.x = pos.x;
+        if (pos.y > bbox.max.y) do bbox.max.y = pos.y;
+        if (pos.z > bbox.max.z) do bbox.max.z = pos.z;
+    }
     vertices: [dynamic]GLTFVertex
     for i in 0..<len(positions) {
         append(&vertices, GLTFVertex {
             position = positions[i],
             normal = normals[i],
-            uv = uvs[i]
+            uv = uvs[i],
+            tangent = tangents[i]
         })
     }
-    return vertices[:], indices[:], primitives[:]
+    return vertices[:], indices[:], primitives[:], bbox
 }   
 
 @(private = "file")

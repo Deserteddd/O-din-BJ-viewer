@@ -10,8 +10,9 @@ import "core:thread"
 import "core:sync"
 import "core:mem"
 import stbi "vendor:stb/image"
+import sdl "vendor:sdl3"
 
-ObjectData :: struct {
+OBJObjectData :: struct {
     vertices: [dynamic]Vertex,
     materials: []Material,
     texture_data: TextureData
@@ -36,8 +37,15 @@ TextureData :: struct {
     sizes:     [dynamic][2]i32
 }
 
-print_obj :: proc(data: ObjectData, verbose := false) {
-          fmt.println("-------------------- ObjectData --------------------")
+OBJModel :: struct {
+    textures:        []^sdl.GPUTexture,
+    vbo:             ^sdl.GPUBuffer,
+    material_buffer: ^sdl.GPUBuffer,
+    num_vertices:    u32,
+}
+
+print_obj :: proc(data: OBJObjectData, verbose := false) {
+          fmt.println("-------------------- OBJObjectData --------------------")
     defer fmt.println("----------------------------------------------------")
 
     fmt.printfln("Vertices: {}", len(data.vertices))
@@ -70,7 +78,7 @@ material_matrix :: proc(m: Material) -> [4]vec4 {
     }
 }
 
-delete_obj :: proc(data: ObjectData) {
+delete_obj :: proc(data: OBJObjectData) {
     using data
     using texture_data
     assert(len(names) == len(sizes) && len(sizes) == len(textures))
@@ -84,11 +92,11 @@ delete_obj :: proc(data: ObjectData) {
     delete(sizes)
 }
 
-load_object :: proc(dir_path: string) -> ObjectData {
+load_object :: proc(dir_path: string) -> OBJObjectData {
     load_time: f64
     defer free_all(context.temp_allocator)
     fmt.println("Loading:", dir_path)
-    obj: ObjectData
+    obj: OBJObjectData
     asset_handle, err := os.open(dir_path, 0, 0); assert(err == nil)
     asset_dir: []os.File_Info
     asset_dir, err = os.read_dir(asset_handle, 0); assert(err == nil)
@@ -270,7 +278,7 @@ new_texture :: proc(tex_path: string, data: ^TextureData) -> f32 {
 load_obj :: proc(obj_data: []string, mat_names: []string, 
     positions: ^[dynamic]vec3, uvs: ^[dynamic]vec2, normals: ^[dynamic]vec3,
 ) -> []Vertex {
-    data: ObjectData
+    data: OBJObjectData
     vertex_count: u32
     for line in obj_data {
         assert(len(line)>=2)

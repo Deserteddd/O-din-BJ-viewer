@@ -16,7 +16,7 @@ import im "shared:imgui"
 import im_sdl "shared:imgui/imgui_impl_sdl3"
 import im_sdlgpu "shared:imgui/imgui_impl_sdlgpu3"
 
-PRESENT_MODE: sdl.GPUPresentMode = .VSYNC
+PRESENT_MODE: sdl.GPUPresentMode = .IMMEDIATE
 
 Renderer :: struct {
     window:             ^sdl.Window,
@@ -311,7 +311,11 @@ RND_DrawGLTF :: proc(state: ^AppState) {
     sdl.BindGPUGraphicsPipeline(render_pass, renderer.gltf_pipeline)
     sdl.PushGPUVertexUniformData(renderer.cmd_buff, 0, &vp, size_of(matrix[4,4]f32))
     sdl.PushGPUFragmentUniformData(renderer.cmd_buff, 0, &frag_ubo, size_of(FragUBO))
-    draw_node(render_pass, state, &state.gltf_node, linalg.MATRIX4F32_IDENTITY)
+    for entity in state.entities {
+        if entity.model.type != .GLTF do continue
+        model_matrix := linalg.matrix4_translate_f32(entity.position)
+        draw_node(render_pass, state, &entity.model.data.gltf, model_matrix)
+    }
     sdl.EndGPURenderPass(render_pass)
 }
 
@@ -335,13 +339,17 @@ draw_node :: proc(render_pass: ^sdl.GPURenderPass, state: ^AppState, node: ^GLTF
                 sdl.GPUTextureSamplerBinding{
                     texture = primitive.material.metallic_roughness_texture.texture,
                     sampler = primitive.material.metallic_roughness_texture.sampler
+                },
+                sdl.GPUTextureSamplerBinding{
+                    texture = primitive.material.normal_map.texture,
+                    sampler = primitive.material.normal_map.sampler
                 }
             }
             assert(bindings[0].sampler != nil)
             assert(bindings[0].texture != nil)
             assert(bindings[1].sampler != nil)
             assert(bindings[1].texture != nil)
-            sdl.BindGPUFragmentSamplers(render_pass, 0, raw_data(bindings[:]), 2)
+            sdl.BindGPUFragmentSamplers(render_pass, 0, raw_data(bindings[:]), 3)
             sdl.PushGPUFragmentUniformData(renderer.cmd_buff, 1, &(GLTF_fragUBO{
                 base_color = primitive.material.base_color_factor,
                 metallic_factor = primitive.material.metallic_factor,
@@ -394,10 +402,12 @@ RND_DrawEntities :: proc(state: ^AppState) #no_bounds_check {
     sdl.PushGPUFragmentUniformData(renderer.cmd_buff, 0, &frag_ubo, size_of(FragUBO))
     sdl.PushGPUVertexUniformData(renderer.cmd_buff, 0, &vp, size_of(matrix[4,4]f32))
     for &model, model_index in models {
-        bindings: [1]sdl.GPUBufferBinding = { sdl.GPUBufferBinding { buffer = model.vbo } } 
+        if model.type == .GLTF do continue
+        using model.data.obj
+        bindings: [1]sdl.GPUBufferBinding = { sdl.GPUBufferBinding { buffer = vbo } } 
         sdl.BindGPUVertexBuffers(render_pass, 0, &bindings[0], 1)
-        texture_count := len(model.textures)
-        for tex, i in model.textures {
+        texture_count := len(textures)
+        for tex, i in textures {
             sdl.BindGPUFragmentSamplers(render_pass, u32(i), 
                 &(sdl.GPUTextureSamplerBinding{texture = tex, sampler = renderer.samplers[i]}), u32(texture_count)
             )
@@ -409,16 +419,17 @@ RND_DrawEntities :: proc(state: ^AppState) #no_bounds_check {
             )
         }
 
-        sdl.BindGPUFragmentStorageBuffers(render_pass, 0, &model.material_buffer, 1)
+        sdl.BindGPUFragmentStorageBuffers(render_pass, 0, &material_buffer, 1)
         for &entity, i in entities {
-            if entity.model.vbo != model.vbo do continue
+            if entity.model.type == .GLTF do continue
+            if entity.model != &model do continue
             if linalg.distance(player.position, entity.position) > renderer.draw_distance - 1 &&
                 model_index != 0 { continue }
             if !aabb_intersects_frustum(frustum_planes, entity.aabb) do continue
             debug_info.rendered += 1
             model_matrix := linalg.matrix4_translate_f32(entity.position)
             sdl.PushGPUVertexUniformData(renderer.cmd_buff, 1, &model_matrix, size_of(matrix[4,4]f32))
-            sdl.DrawGPUPrimitives(render_pass, model.num_vertices, 1, 0, 0)
+            sdl.DrawGPUPrimitives(render_pass, num_vertices, 1, 0, 0)
         }
     }
     sdl.EndGPURenderPass(render_pass)
