@@ -9,6 +9,19 @@ AABB :: struct {
     max: vec3
 }
 
+entity_aabb :: proc(entity: Entity) -> AABB {
+    using entity
+    bbox: AABB
+    switch model.type {
+        case .OBJ:  bbox = model.data.obj.bbox
+        case .GLTF: bbox = model.data.obj.bbox
+    }
+    return AABB {
+        min = bbox.min + position,
+        max = bbox.max + position
+    }
+}
+
 air_accelerate :: proc(wishveloc: ^vec3, player: ^Player, dt: f32) {
     addspeed, wishspd, accelspeed, currentspeed: f32
     wishveloc^ *= 10
@@ -51,10 +64,12 @@ update_player :: proc(state: ^AppState, wishveloc: ^vec3, dt: f32) #no_bounds_ch
     bbox.max += delta_pos
     found_collision: bool
 
-    for entity in entities {
-        if aabbs_collide(bbox, entity.aabb) {
+    for entity, i in entities {
+        if entity.model.type == .GLTF do continue
+        aabb := entity_aabb(entity)
+        if aabbs_collide(bbox, aabb) {
             found_collision = true
-            mtv := resolve_aabb_collision_mtv(bbox, entity.aabb)
+            mtv := resolve_aabb_collision_mtv(bbox, aabb)
             for axis, j in mtv do if axis != 0 {
                 speed[j] *= 0.9
                 if j == 1 { 
@@ -69,6 +84,7 @@ update_player :: proc(state: ^AppState, wishveloc: ^vec3, dt: f32) #no_bounds_ch
             bbox.min += mtv
             bbox.max += mtv
         }
+
     }
 
     if !found_collision do airborne = true

@@ -14,8 +14,8 @@ import "core:math/linalg"
 import "core:time"
 
 GLTFObjectData  :: struct {
+    root: GLTFNode,
     meshes: []GLTFMesh,
-    root: GLTFNode
 }
 
 GLTFMaterial :: struct {
@@ -28,9 +28,21 @@ GLTFMaterial :: struct {
     normal_map: GLTFTexture,
 }
 
+Transform :: struct {
+    translation: vec3,
+    rotation: quaternion128,
+    scale:      vec3
+}
+
 GLTFTexture :: struct {
     texture: ^sdl.GPUTexture,
     sampler: ^sdl.GPUSampler
+}
+
+GLTFMesh :: struct {
+    vbo: ^sdl.GPUBuffer,
+    ibo: ^sdl.GPUBuffer,
+    primitives: []GLTFPrimitive
 }
 
 GLTFPrimitive :: struct {
@@ -39,12 +51,14 @@ GLTFPrimitive :: struct {
     material: GLTFMaterial
 }
 
-GLTFMesh :: struct {
-    name: string,
+MeshData :: struct {
+    name:       string,
+    positions:  []vec3,
+    normals:    []vec3,
+    uvs:        []vec2,
+    tangents:   []vec3,
+    indices:    []u16,
     primitives: []GLTFPrimitive,
-    vbo: ^sdl.GPUBuffer,
-    ibo: ^sdl.GPUBuffer,
-    aabb: AABB
 }
 
 GLTFVertex :: struct {
@@ -55,11 +69,12 @@ GLTFVertex :: struct {
 }
 
 GLTFNode :: struct {
-    mesh:        ^GLTFMesh,
-    children:    []GLTFNode,
-    mat:         matrix[4,4]f32,
+    mesh:       ^GLTFMesh,
+    children:   []GLTFNode,
+    aabb:       AABB,
+    transform: Transform,
+    bbox_vbo: ^sdl.GPUBuffer,
 }
-
 
 build_gltf_pipeline :: proc(renderer: ^Renderer) {
     using renderer
@@ -135,94 +150,128 @@ build_gltf_pipeline :: proc(renderer: ^Renderer) {
     gltf_pipeline = pipeline
 }
 
+apply_transform :: proc(base: ^Transform, transform: Transform) {
+}
+
 load_gltf :: proc(path: cstring, gpu: ^sdl.GPUDevice) -> GLTFObjectData {
     gltf_data := parse_file(path); defer gl.free(gltf_data)
     assert(len(gltf_data.buffers) == 1)
     assert(len(gltf_data.scene.nodes) == 1)
-    meshes := load_meshes(gltf_data, gpu)
     root: GLTFNode
-    build_scene(gltf_data.scene.nodes[0], meshes, &root)
-    return GLTFObjectData {meshes, root}
+    meshes: [dynamic]GLTFMesh
+    fmt.println(path)
+    copy_commands := sdl.AcquireGPUCommandBuffer(gpu); assert(copy_commands != nil)
+    copy_pass := sdl.BeginGPUCopyPass(copy_commands); assert(copy_pass != nil)
+
+    build_scene(gltf_data.scene.nodes[0], &root, gpu, copy_pass, &meshes, TRANSFORM_IDENTITY)
+    sdl.EndGPUCopyPass(copy_pass)
+    ok := sdl.SubmitGPUCommandBuffer(copy_commands); assert(ok)
+    return GLTFObjectData {
+        root,
+        meshes[:]
+    }
 }
 
-build_scene :: proc(gl_node: ^gl.node, meshes: []GLTFMesh, node: ^GLTFNode) {
+build_scene :: proc(
+    gl_node: ^gl.node,
+    node: ^GLTFNode, 
+    gpu: ^sdl.GPUDevice, 
+    copy_pass: ^sdl.GPUCopyPass,
+    meshes: ^[dynamic]GLTFMesh,
+    parent_transform: Transform
+) {
+    assert(!gl_node.has_matrix)
+    transform := TRANSFORM_IDENTITY
+    if gl_node.has_translation do transform.translation = gl_node.translation
+    if gl_node.has_rotation {
+        r := gl_node.rotation
+        transform.rotation = quaternion(real = r.w, imag = r.x, jmag = r.y, kmag = r.z)
+    }
+
+    if gl_node.has_scale do transform.scale = gl_node.scale
+    node.transform = transform
+
+    parent_transform := Transform {
+        translation = parent_transform.translation + transform.translation,
+        scale = parent_transform.scale * transform.scale,
+        rotation = parent_transform.rotation * transform.rotation
+    }
+
     // Mesh
-    if gl_node.mesh != nil {
-        m_name := strings.clone_from_cstring(gl_node.mesh.name, context.temp_allocator)
-        for &m in meshes {
-            if m.name == m_name {
-                node.mesh = &m
-                break
-            }
+    mesh_data := load_mesh_data(gl_node.mesh, gpu, copy_pass)
+    if len(mesh_data.primitives) != 0 {
+        mesh := load_mesh(mesh_data, gpu, copy_pass)
+        append(meshes, mesh)
+        node.mesh = &meshes[len(meshes)-1]
+        bbox: AABB = {min = max(f32), max = min(f32)}
+        for &v in mesh_data.positions {
+            v += parent_transform.translation
+            q := parent_transform.rotation
+            p := quaternion(w = 0, x = v.x, y = v.y, z = v.z)
+            q_ := conj(q)
+            p_ := q*p*q_
+            v = {p_.x, p_.y, p_.z}
+            if (v.x < bbox.min.x) do bbox.min.x = v.x;
+            if (v.y < bbox.min.y) do bbox.min.y = v.y;
+            if (v.z < bbox.min.z) do bbox.min.z = v.z;
+            if (v.x > bbox.max.x) do bbox.max.x = v.x;
+            if (v.y > bbox.max.y) do bbox.max.y = v.y;
+            if (v.z > bbox.max.z) do bbox.max.z = v.z;
         }
+
+
+        bbox_vertices := get_bbox_vertices(bbox)
+        transfer_buffer := sdl.CreateGPUTransferBuffer(gpu, {
+            usage = sdl.GPUTransferBufferUsage.UPLOAD,
+            size = u32(24*size_of(vec3)),
+        }); assert(transfer_buffer != nil)
+        node.bbox_vbo = create_buffer_with_data(gpu, transfer_buffer, copy_pass, {.VERTEX}, bbox_vertices[:])
+        sdl.ReleaseGPUTransferBuffer(gpu, transfer_buffer)
+        delete(mesh_data.positions)
+        delete(mesh_data.normals)
+        delete(mesh_data.uvs)
+        delete(mesh_data.tangents)
+        node.aabb = bbox
     }
-    // Model matrix
-    if gl_node.has_matrix {
-        fmt.println("If the scene is fucked up, the matrix transmutation likely didn't work")
-        m := gl_node.matrix_
-        node.mat = transmute(matrix[4,4]f32)m
-        fmt.println(node.mat)
-    } else {
-        t_mat: matrix[4,4]f32
-        if gl_node.has_translation do t_mat = linalg.matrix4_translate(gl_node.translation)
-        else do t_mat = linalg.MATRIX4F32_IDENTITY
 
-        rotation: quaternion128
-        if gl_node.has_rotation {
-            r := gl_node.rotation
-            rotation = quaternion(real = r.w, imag = r.x, jmag = r.y, kmag = r.z)
-        } else do rotation = quaternion(real = 1, imag = 0, jmag = 0, kmag = 0)
-        r_mat := linalg.matrix4_from_quaternion(rotation)
-
-
-        s_mat: matrix[4,4]f32
-        if gl_node.has_scale do s_mat = linalg.matrix4_scale(gl_node.scale)
-        else do s_mat = linalg.MATRIX4F32_IDENTITY
-        node.mat = t_mat * r_mat * s_mat
-    }
     if len(gl_node.children) == 0 do return
     children := make([]GLTFNode, len(gl_node.children))
     node.children = children
-    for child, i in gl_node.children {
-        build_scene(child, meshes, &node.children[i])
+    for gl_child, i in gl_node.children {
+        build_scene(gl_child, &node.children[i], gpu, copy_pass, meshes, transform)
     }
 }
 
-load_meshes :: proc(data: ^gl.data, gpu: ^sdl.GPUDevice) -> []GLTFMesh {
-    meshes: [dynamic]GLTFMesh
-    copy_commands := sdl.AcquireGPUCommandBuffer(gpu); assert(copy_commands != nil)
-    copy_pass := sdl.BeginGPUCopyPass(copy_commands); assert(copy_pass != nil)
-    for m in data.meshes {
-        vertices, indices, primitives, aabb := load_mesh(m, gpu, copy_pass)
-        name := strings.clone_from_cstring(m.name)
-        defer {
-            delete(vertices)
-            delete(indices)
-        }
-        mesh: GLTFMesh
-        mesh.name = name
-        mesh.aabb = aabb
-        mesh.primitives = primitives
-        vert_count: uint = len(vertices)
-        index_count: uint = len(indices)
-        len_bytes := vert_count*size_of(GLTFVertex) + index_count*size_of(u16)
-        transfer_buffer := sdl.CreateGPUTransferBuffer(gpu, {
-            usage = sdl.GPUTransferBufferUsage.UPLOAD,
-            size = u32(len_bytes),
-        }); assert(transfer_buffer != nil)
-        vbo := create_buffer_with_data(gpu, transfer_buffer, copy_pass, {.VERTEX}, vertices)
-        assert(vbo != nil)
-        mesh.vbo = vbo
-        ibo := create_buffer_with_data(gpu, transfer_buffer, copy_pass, {.INDEX}, indices)
-        assert(ibo != nil)
-        mesh.ibo = ibo
-        sdl.ReleaseGPUTransferBuffer(gpu, transfer_buffer)
-        append(&meshes, mesh)
-    }
 
-    sdl.EndGPUCopyPass(copy_pass)
-    ok := sdl.SubmitGPUCommandBuffer(copy_commands); assert(ok)
-    return meshes[:]
+load_mesh :: proc(data: MeshData, gpu: ^sdl.GPUDevice, copy_pass: ^sdl.GPUCopyPass) -> GLTFMesh {
+    mesh: GLTFMesh
+    vert_count: uint = len(data.positions)
+    index_count: uint = len(data.indices)
+    len_bytes := vert_count*size_of(GLTFVertex) + index_count*size_of(u16)
+    transfer_buffer := sdl.CreateGPUTransferBuffer(gpu, {
+        usage = sdl.GPUTransferBufferUsage.UPLOAD,
+        size = u32(len_bytes),
+    }); assert(transfer_buffer != nil)
+
+    vertices := make([]GLTFVertex, len(data.positions))
+    for i in 0..<len(data.positions) {
+        vertices[i] = GLTFVertex {
+            data.positions[i],
+            data.normals[i],
+            data.uvs[i],
+            data.tangents[i]
+        }
+    }
+    vbo := create_buffer_with_data(gpu, transfer_buffer, copy_pass, {.VERTEX}, vertices)
+    assert(vbo != nil)
+    ibo := create_buffer_with_data(gpu, transfer_buffer, copy_pass, {.INDEX}, data.indices)
+    assert(ibo != nil)
+    sdl.ReleaseGPUTransferBuffer(gpu, transfer_buffer)
+
+    mesh.vbo = vbo
+    mesh.ibo = ibo
+    mesh.primitives = data.primitives
+    return mesh
 }
 
 load_material :: proc(m: ^gl.material, gpu: ^sdl.GPUDevice, copy_pass: ^sdl.GPUCopyPass) -> GLTFMaterial {
@@ -290,13 +339,14 @@ load_texture :: proc(t: ^gl.texture, gpu: ^sdl.GPUDevice, copy_pass: ^sdl.GPUCop
 }
 
 @(private = "file")
-load_mesh :: proc(mesh: gl.mesh, gpu: ^sdl.GPUDevice, copy_pass: ^sdl.GPUCopyPass) -> ([]GLTFVertex, []u16, []GLTFPrimitive, AABB) {
+load_mesh_data :: proc(mesh: ^gl.mesh, gpu: ^sdl.GPUDevice, copy_pass: ^sdl.GPUCopyPass) -> MeshData {
+    if mesh == nil do return {}
+    positions:  [dynamic]vec3
+    normals:    [dynamic]vec3
+    tangents:   [dynamic]vec3
+    uvs:        [dynamic]vec2
+    indices:    [dynamic]u16
     primitives: [dynamic]GLTFPrimitive
-    indices: [dynamic]u16
-    positions: [dynamic]vec3; defer delete(positions)
-    normals:   [dynamic]vec3; defer delete(normals)
-    tangents:  [dynamic]vec3; defer delete(tangents)
-    uvs:       [dynamic]vec2; defer delete(uvs)
     num_indices: uint
     for primitive, i in mesh.primitives {
         position_count := len(positions)
@@ -323,6 +373,7 @@ load_mesh :: proc(mesh: gl.mesh, gpu: ^sdl.GPUDevice, copy_pass: ^sdl.GPUCopyPas
         append(&primitives, gltf_primitive)
     }
     if uvs == nil do uvs = make([dynamic]vec2, len(positions))
+    if tangents == nil do tangents = make([dynamic]vec3, len(positions))
 
     {
         positions := len(positions)
@@ -330,25 +381,14 @@ load_mesh :: proc(mesh: gl.mesh, gpu: ^sdl.GPUDevice, copy_pass: ^sdl.GPUCopyPas
         assert(positions == len(uvs))
         assert(positions == len(tangents))
     }
-    bbox: AABB = {min = max(f32), max = min(f32)}
-    for pos in positions {
-        if (pos.x < bbox.min.x) do bbox.min.x = pos.x;
-        if (pos.y < bbox.min.y) do bbox.min.y = pos.y;
-        if (pos.z < bbox.min.z) do bbox.min.z = pos.z;
-        if (pos.x > bbox.max.x) do bbox.max.x = pos.x;
-        if (pos.y > bbox.max.y) do bbox.max.y = pos.y;
-        if (pos.z > bbox.max.z) do bbox.max.z = pos.z;
-    }
-    vertices: [dynamic]GLTFVertex
-    for i in 0..<len(positions) {
-        append(&vertices, GLTFVertex {
-            position = positions[i],
-            normal = normals[i],
-            uv = uvs[i],
-            tangent = tangents[i]
-        })
-    }
-    return vertices[:], indices[:], primitives[:], bbox
+    data: MeshData
+    data.positions = positions[:]
+    data.normals = normals[:]
+    data.uvs = uvs[:]
+    data.tangents = tangents[:]
+    data.indices = indices[:]
+    data.primitives = primitives[:]
+    return data
 }   
 
 @(private = "file")

@@ -109,8 +109,7 @@ float4 main(Input input) : SV_Target0 {
 
     float3 ambient = float3(0.03, 0.03, 0.03) * albedo; // * ao
     float3 color = ambient + Lo;
-    // color = color / (color + float3(1, 1, 1));
+    color = color / (color + float3(1, 1, 1));
 
     return float4(color, 1);
 }
-

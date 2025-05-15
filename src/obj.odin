@@ -42,6 +42,7 @@ OBJModel :: struct {
     vbo:             ^sdl.GPUBuffer,
     material_buffer: ^sdl.GPUBuffer,
     num_vertices:    u32,
+    bbox: AABB
 }
 
 print_obj :: proc(data: OBJObjectData, verbose := false) {

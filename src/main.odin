@@ -31,7 +31,6 @@ main :: proc() {
 
 Model:: struct {
     type: ModelType,
-    bbox: AABB,
     data: struct #raw_union {
         gltf: GLTFNode,
         obj:  OBJModel,
@@ -70,13 +69,18 @@ init :: proc(state: ^AppState) {
     
     renderer = RND_Init({})
     player = create_player()
-    helmet := load_gltf("assets/DamagedHelmet2.glb", renderer.gpu);
+    lantern := load_gltf("assets/Lantern.glb", renderer.gpu);
+    helmet := load_gltf("assets/DamagedHelmet.glb", renderer.gpu);
     ground := load_object("assets/ref_tris"); defer delete_obj(ground)
     slab   := load_object("assets/ref_cube"); defer delete_obj(slab)
     add_model(ground, state)
     add_model(slab, state)
     add_model(helmet, state)
+    add_model(lantern, state)
     create_entity(state, 0)
+    // for i in 0..<ENTITY_COUNT do create_entity(state, 2)
+    randomize_tile_positions(state)
+    create_entity(state, 3)
     init_imgui(state)
 }
 
@@ -136,6 +140,8 @@ run :: proc(state: ^AppState) {
                 }
             }
         }
+
+
         update(state)
         RND_FrameBegin(state)
         RND_DrawEntities(state)
@@ -144,6 +150,7 @@ run :: proc(state: ^AppState) {
         RND_DrawUI(state)
         if wireframe != .WIREFRAME in state.renderer.props {
             build_3D_pipeline(&state.renderer)
+            build_gltf_pipeline(&state.renderer)
         }
         state.debug_info.frame_time = time.since(now)
         ok := RND_FrameSubmit(&state.renderer); assert(ok)
@@ -164,7 +171,6 @@ toggle_ui :: proc(state: ^AppState) {
 }
 
 randomize_tile_positions :: proc(state: ^AppState) {
-    // assert(len(state.aabbs) == len(state.entities))
     static_collider_index := 0
     for &entity, i in state.entities {
         if i < 1 do continue
@@ -172,10 +178,6 @@ randomize_tile_positions :: proc(state: ^AppState) {
             random_range(-WORLD_SIZE.x, WORLD_SIZE.x),
             random_range(0, WORLD_SIZE.y),
             random_range(-WORLD_SIZE.z, WORLD_SIZE.z)
-        }
-        entity.aabb = AABB {
-            min = entity.model.bbox.min + entity.position,
-            max = entity.model.bbox.max + entity.position
         }
     }
 }
@@ -201,7 +203,10 @@ update :: proc(state: ^AppState) {
     new_ticks := sdl.GetTicks();
     dt := f32(new_ticks - last_ticks) / 1000
     last_ticks = new_ticks
-    state.models[2].data.gltf.mat *= linalg.matrix4_rotate_f32(dt*0.5, {0, 0, 1})
+    // rotation := &state.models[3].data.gltf.transform.rotation
+    // x, y, z := linalg.euler_angles_from_quaternion_f32(rotation^, .XYX)
+    // z += dt
+    // rotation^ = linalg.quaternion_from_euler_angles_f32(x, y, z, .XYZ)
     if !ui_visible {
         update_camera(&state.player)
         wish_speed := player_wish_speed(state.player)

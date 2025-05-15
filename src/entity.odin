@@ -9,7 +9,6 @@ Entity :: struct {
     id: int,
     model: ^Model,
     position: vec3,
-    aabb: AABB
 }
 
 EntitySOA :: #soa [dynamic]Entity
@@ -20,25 +19,19 @@ Player :: struct {
     speed: vec3,
     rotation: vec3,
     bbox: AABB,
-    airborne: bool
+    airborne: bool,
 }
 
 create_entity :: proc(state: ^AppState, model: u32) -> int {
     entity: Entity
     entity.id = len(state.entities)
     entity.model = &state.models[model]
-    entity.aabb = entity.model.bbox
     append_soa(&state.entities, entity)
     return entity.id
 }
 
 set_entity_position :: proc(state: ^AppState, id: int, pos: vec3) {
-    entity := &state.entities[id]
-    entity.position = pos
-    state.entities[id].aabb = AABB {
-        min = entity.model.bbox.min + entity.position,
-        max = entity.model.bbox.max + entity.position
-    }
+    state.entities[id].position = pos
 }
 
 add_model :: proc {
@@ -111,7 +104,7 @@ add_obj_model :: proc(data: OBJObjectData, state: ^AppState) {
         if (position.y > bbox.max.y) do bbox.max.y = position.y;
         if (position.z > bbox.max.z) do bbox.max.z = position.z;
     }
-    model.bbox = bbox
+    model.data.obj.bbox = bbox
     model.data.obj.num_vertices = u32(len(data.vertices))
 
     for j in 0..<i {
@@ -144,7 +137,7 @@ add_gltf_model :: proc(data: GLTFObjectData, state: ^AppState) {
 }
 
 create_player :: proc() -> Player {
-    position: vec3 = {0, 0, 0}
+    position: vec3 = {0, 0, 15}
     return Player {
         position = position,
         bbox = AABB {
