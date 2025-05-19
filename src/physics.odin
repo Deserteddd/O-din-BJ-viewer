@@ -17,8 +17,8 @@ entity_aabb :: proc(entity: Entity) -> AABB {
         case .GLTF: bbox = model.data.obj.bbox
     }
     return AABB {
-        min = bbox.min + position,
-        max = bbox.max + position
+        min = bbox.min + transform.translation,
+        max = bbox.max + transform.translation
     }
 }
 

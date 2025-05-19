@@ -31,7 +31,7 @@ Renderer :: struct {
     samplers:           [4]^sdl.GPUSampler,
     props:              RND_Props,
     light:              PointLight,
-    draw_distance:      f32
+    draw_distance:      f32,
 }
 
 PointLight :: struct #packed {
@@ -80,7 +80,7 @@ RND_Init :: proc(props: RND_Props) -> Renderer {
     ok = sdl.SetWindowRelativeMouseMode(window, true); assert(ok)
     width, height: i32
     sdl.GetWindowSize(window, &width, &height)
-    gpu := sdl.CreateGPUDevice({.SPIRV}, true, nil); assert(gpu != nil)
+    gpu := sdl.CreateGPUDevice({.SPIRV}, DEBUG, nil); assert(gpu != nil)
     ok = sdl.ClaimWindowForGPUDevice(gpu, window); assert(ok)
     ok = sdl.SetGPUSwapchainParameters(gpu, window, .SDR_LINEAR, PRESENT_MODE); assert(ok)
 
@@ -260,7 +260,7 @@ RND_DrawUI :: proc(state: ^AppState) {
     sdl.EndGPURenderPass(im_render_pass)
 }
 
-RND_FrameBegin :: proc(state: ^AppState) {
+RND_FrameBegin :: proc(state: ^AppState) -> matrix[4,4]f32 {
     using state
     assert(renderer.cmd_buff == nil)
     assert(renderer.swapchain_texture == nil)
@@ -269,6 +269,9 @@ RND_FrameBegin :: proc(state: ^AppState) {
     if !ok do fmt.println(sdl.GetError())
     renderer.cmd_buff = cmd_buff
     debug_info.rendered = 0
+    proj_matrix := create_proj_matrix(renderer)
+    view_matrix := create_view_matrix(player.position, player.rotation)
+    return proj_matrix * view_matrix;
 }
 
 RND_FrameSubmit :: proc(renderer: ^Renderer) -> bool {
@@ -293,14 +296,16 @@ create_frag_ubo :: proc(state: ^AppState) -> FragUBO {
 
 create_model_matrix :: proc(transform: Transform, position_offset: vec3 = 0) -> matrix[4,4]f32 {
     model_transform := transform
+    if model_transform.scale == 0 do model_transform.scale = 1
     model_transform.translation += position_offset
     return linalg.matrix4_translate_f32(model_transform.translation) *
     linalg.matrix4_from_quaternion_f32(model_transform.rotation) *
     linalg.matrix4_scale(model_transform.scale)
 }
 
-RND_DrawGLTF :: proc(state: ^AppState) {
+RND_DrawGLTF :: proc(state: ^AppState, vp: matrix[4,4]f32) {
     using state
+    vp := vp
     assert(renderer.cmd_buff != nil)
     assert(renderer.swapchain_texture != nil)
     color_target := sdl.GPUColorTargetInfo {
@@ -319,9 +324,7 @@ RND_DrawGLTF :: proc(state: ^AppState) {
         cycle = false,
         clear_stencil = 1,
     }
-    proj_matrix := create_proj_matrix(renderer)
-    view_matrix := create_view_matrix(player.position, player.rotation)
-    vp := proj_matrix * view_matrix;
+
     furstum_planes := create_furstum_planes(vp)
     render_pass := sdl.BeginGPURenderPass(renderer.cmd_buff, &color_target, 1, &depth_target_info)
     assert(render_pass != nil)
@@ -335,8 +338,8 @@ RND_DrawGLTF :: proc(state: ^AppState) {
             render_pass, 
             state, 
             entity.model.data.gltf, 
-            linalg.matrix4_translate(entity.position), 
-            entity.position, 
+            linalg.matrix4_translate(entity.transform.translation), 
+            entity.transform.translation, 
             furstum_planes
         )
     }
@@ -351,7 +354,7 @@ RND_DrawGLTF :: proc(state: ^AppState) {
             render_pass, 
             state, 
             entity.model.data.gltf, 
-            linalg.matrix4_translate(entity.position), 
+            linalg.matrix4_translate(entity.transform.translation), 
         )
     }
     sdl.EndGPURenderPass(bbox_pass)
@@ -407,29 +410,49 @@ draw_node :: proc(
         sdl.BindGPUIndexBuffer(render_pass, bindings[1], ._16BIT)
         sdl.PushGPUVertexUniformData(renderer.cmd_buff, 1, &model_matrix, size_of(matrix[4,4]f32))
         for primitive in mesh.primitives {
-            bindings:[]sdl.GPUTextureSamplerBinding = {
-                sdl.GPUTextureSamplerBinding{
+            frag_ubo: GLTF_fragUBO
+            frag_ubo.base_color = primitive.material.base_color_factor
+            frag_ubo.metallic_factor = primitive.material.metallic_factor
+            frag_ubo.roughness_factor = primitive.material.roughness_factor
+            tex_bindings: [3]sdl.GPUTextureSamplerBinding
+            if primitive.material.base_color_texture.texture != nil {
+                tex_bindings[0] = sdl.GPUTextureSamplerBinding {
                     texture = primitive.material.base_color_texture.texture,
                     sampler = primitive.material.base_color_texture.sampler
-                },
-                sdl.GPUTextureSamplerBinding{
-                    texture = primitive.material.metallic_roughness_texture.texture,
-                    sampler = primitive.material.metallic_roughness_texture.sampler
-                },
-                sdl.GPUTextureSamplerBinding{
-                    texture = primitive.material.normal_map.texture,
-                    sampler = primitive.material.normal_map.sampler
+                }
+                frag_ubo.has_albedo_tex = true
+            } else {
+                tex_bindings[0] = sdl.GPUTextureSamplerBinding {
+                    texture = renderer.fallback_texture,
+                    sampler = renderer.samplers[0]
                 }
             }
-            assert(bindings[0].sampler != nil); assert(bindings[0].texture != nil)
-            assert(bindings[1].sampler != nil); assert(bindings[1].texture != nil)
-            assert(bindings[2].sampler != nil); assert(bindings[2].texture != nil)
-            sdl.BindGPUFragmentSamplers(render_pass, 0, raw_data(bindings[:]), 3)
-            sdl.PushGPUFragmentUniformData(renderer.cmd_buff, 1, &(GLTF_fragUBO{
-                base_color = primitive.material.base_color_factor,
-                metallic_factor = primitive.material.metallic_factor,
-                roughness_factor = primitive.material.roughness_factor
-            }), size_of(GLTF_fragUBO))
+            if primitive.material.metallic_roughness_texture.texture != nil {
+                tex_bindings[1] = (sdl.GPUTextureSamplerBinding {
+                    texture = primitive.material.metallic_roughness_texture.texture,
+                    sampler = primitive.material.metallic_roughness_texture.sampler
+                })
+                frag_ubo.has_metallic_roughness_tex = true
+            } else {
+                tex_bindings[1] = sdl.GPUTextureSamplerBinding {
+                    texture = renderer.fallback_texture,
+                    sampler = renderer.samplers[1]
+                }
+            }
+            if primitive.material.normal_map.texture != nil {
+                tex_bindings[2] = (sdl.GPUTextureSamplerBinding {
+                    texture = primitive.material.normal_map.texture,
+                    sampler = primitive.material.normal_map.sampler
+                })
+                frag_ubo.has_normal_map = true
+            } else {
+                tex_bindings[2] = sdl.GPUTextureSamplerBinding {
+                    texture = renderer.fallback_texture,
+                    sampler = renderer.samplers[2]
+                }
+            }
+            sdl.BindGPUFragmentSamplers(render_pass, 0, raw_data(tex_bindings[:]), 3)
+            sdl.PushGPUFragmentUniformData(renderer.cmd_buff, 1, &frag_ubo, size_of(GLTF_fragUBO))
             num_indices := u32(primitive.end - primitive.start)
             sdl.DrawGPUIndexedPrimitives(render_pass, num_indices, 1, u32(primitive.start), 0, 0)
             debug_info.rendered += 1
@@ -442,13 +465,18 @@ draw_node :: proc(
 }
 GLTF_fragUBO :: struct {
     base_color: vec4,
-    metallic_factor: f32,
+    has_albedo_tex: bool,
+    has_metallic_roughness_tex: bool,
+    has_normal_map: bool,
+    _pad: bool,
     roughness_factor: f32,
-    _pad: vec2
+    metallic_factor: f32,
+    _pad2: f32
 }
 
-RND_DrawEntities :: proc(state: ^AppState) #no_bounds_check {
+RND_DrawEntities :: proc(state: ^AppState, vp: matrix[4,4]f32) {
     using state
+    vp := vp
     assert(renderer.cmd_buff != nil)
     assert(renderer.swapchain_texture != nil)
 
@@ -469,9 +497,6 @@ RND_DrawEntities :: proc(state: ^AppState) #no_bounds_check {
         clear_stencil = 1,
     }
 
-    proj_matrix := create_proj_matrix(renderer)
-    view_matrix := create_view_matrix(player.position, player.rotation)
-    vp := proj_matrix * view_matrix;
     frustum_planes := create_furstum_planes(vp)
 
     frag_ubo := create_frag_ubo(state);
@@ -501,11 +526,11 @@ RND_DrawEntities :: proc(state: ^AppState) #no_bounds_check {
         for &entity, i in entities {
             if entity.model.type == .GLTF do continue
             if entity.model != &model do continue
-            if linalg.distance(player.position, entity.position) > renderer.draw_distance - 1 &&
+            if linalg.distance(player.position, entity.transform.translation) > renderer.draw_distance - 1 &&
                 model_index != 0 { continue }
             if !aabb_intersects_frustum(frustum_planes, entity_aabb(entity)) do continue
             debug_info.rendered += 1
-            model_matrix := linalg.matrix4_translate_f32(entity.position)
+            model_matrix := linalg.matrix4_translate_f32(entity.transform.translation)
             sdl.PushGPUVertexUniformData(renderer.cmd_buff, 1, &model_matrix, size_of(matrix[4,4]f32))
             sdl.DrawGPUPrimitives(render_pass, num_vertices, 1, 0, 0)
         }

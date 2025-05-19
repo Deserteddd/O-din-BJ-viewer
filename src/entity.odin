@@ -8,7 +8,7 @@ import sdl "vendor:sdl3"
 Entity :: struct {
     id: int,
     model: ^Model,
-    position: vec3,
+    transform: Transform,
 }
 
 EntitySOA :: #soa [dynamic]Entity
@@ -31,7 +31,7 @@ create_entity :: proc(state: ^AppState, model: u32) -> int {
 }
 
 set_entity_position :: proc(state: ^AppState, id: int, pos: vec3) {
-    state.entities[id].position = pos
+    state.entities[id].transform.translation = pos
 }
 
 add_model :: proc {

@@ -13,6 +13,8 @@ import "core:strings"
 import "core:math/linalg"
 import "core:time"
 
+dbg := false
+
 GLTFObjectData  :: struct {
     root: GLTFNode,
     meshes: []GLTFMesh,
@@ -20,6 +22,7 @@ GLTFObjectData  :: struct {
 
 GLTFMaterial :: struct {
     name: string,
+    texture_count: u32,
     base_color_factor: vec4,
     base_color_texture: GLTFTexture,
     metallic_factor: f32,
@@ -150,10 +153,27 @@ build_gltf_pipeline :: proc(renderer: ^Renderer) {
     gltf_pipeline = pipeline
 }
 
-apply_transform :: proc(base: ^Transform, transform: Transform) {
+print_gltf :: proc(data: GLTFObjectData) {
+    line := "---------------------------------------------------------------------------------"
+    fmt.println(line); defer fmt.println(line)
+    print_node(data.root)
 }
 
-load_gltf :: proc(path: cstring, gpu: ^sdl.GPUDevice) -> GLTFObjectData {
+print_node :: proc(node: GLTFNode, indent := 0) {
+    for i in 0..<indent do fmt.print("\t")
+    if node.mesh == nil do fmt.println("Empty node:", node.transform)
+    else {
+        fmt.println("Mesh node:", node.transform)
+        for p in node.mesh.primitives {
+            for _ in 0..<indent+1 do fmt.print("\t")
+            fmt.println("Primitive:", p.start, p.end, p.material.name)
+        }
+    }
+    for c in node.children do print_node(c, indent+1)
+}
+
+load_gltf :: proc(path: cstring, gpu: ^sdl.GPUDevice, debug := false) -> GLTFObjectData {
+    dbg = debug
     gltf_data := parse_file(path); defer gl.free(gltf_data)
     assert(len(gltf_data.buffers) == 1)
     assert(len(gltf_data.scene.nodes) == 1)
@@ -163,7 +183,7 @@ load_gltf :: proc(path: cstring, gpu: ^sdl.GPUDevice) -> GLTFObjectData {
     copy_commands := sdl.AcquireGPUCommandBuffer(gpu); assert(copy_commands != nil)
     copy_pass := sdl.BeginGPUCopyPass(copy_commands); assert(copy_pass != nil)
 
-    build_scene(gltf_data.scene.nodes[0], &root, gpu, copy_pass, &meshes, TRANSFORM_IDENTITY)
+    build_scene(gltf_data.scene.nodes[0], &root, gpu, copy_pass, &meshes)
     sdl.EndGPUCopyPass(copy_pass)
     ok := sdl.SubmitGPUCommandBuffer(copy_commands); assert(ok)
     return GLTFObjectData {
@@ -178,25 +198,31 @@ build_scene :: proc(
     gpu: ^sdl.GPUDevice, 
     copy_pass: ^sdl.GPUCopyPass,
     meshes: ^[dynamic]GLTFMesh,
-    parent_transform: Transform
+    parent_transform := TRANSFORM_IDENTITY,
 ) {
-    assert(!gl_node.has_matrix)
     transform := TRANSFORM_IDENTITY
-    if gl_node.has_translation do transform.translation = gl_node.translation
-    if gl_node.has_rotation {
-        r := gl_node.rotation
-        transform.rotation = quaternion(real = r.w, imag = r.x, jmag = r.y, kmag = r.z)
-    }
+    if gl_node.has_matrix {
+        t, s, r := decompose_trs(gl_node.matrix_)
+        transform.translation = t
+        transform.scale = s
+        transform.rotation = r
+    } else {
+        if gl_node.has_translation do transform.translation = gl_node.translation
+        if gl_node.has_rotation {
+            r := gl_node.rotation
+            transform.rotation = quaternion(real = r.w, imag = r.x, jmag = r.y, kmag = r.z)
+        }
 
-    if gl_node.has_scale do transform.scale = gl_node.scale
-    node.transform = transform
+        if gl_node.has_scale do transform.scale = gl_node.scale
+        node.transform = transform
+    }
 
     parent_transform := Transform {
         translation = parent_transform.translation + transform.translation,
         scale = parent_transform.scale * transform.scale,
         rotation = parent_transform.rotation * transform.rotation
     }
-
+    fmt.println(parent_transform)
     // Mesh
     mesh_data := load_mesh_data(gl_node.mesh, gpu, copy_pass)
     if len(mesh_data.primitives) != 0 {
@@ -242,7 +268,6 @@ build_scene :: proc(
     }
 }
 
-
 load_mesh :: proc(data: MeshData, gpu: ^sdl.GPUDevice, copy_pass: ^sdl.GPUCopyPass) -> GLTFMesh {
     mesh: GLTFMesh
     vert_count: uint = len(data.positions)
@@ -284,9 +309,12 @@ load_material :: proc(m: ^gl.material, gpu: ^sdl.GPUDevice, copy_pass: ^sdl.GPUC
     roughness_factor = m.pbr_metallic_roughness.roughness_factor
     base_color_tex := m.pbr_metallic_roughness.base_color_texture.texture
     base_color_texture = load_texture(base_color_tex, gpu, copy_pass)
+    if base_color_texture != {} do texture_count += 1
     metallic_roughness_tex := m.pbr_metallic_roughness.metallic_roughness_texture.texture
     metallic_roughness_texture = load_texture(metallic_roughness_tex, gpu, copy_pass)
+    if metallic_roughness_texture != {} do texture_count += 1
     normal_map = load_texture(m.normal_texture.texture, gpu, copy_pass)
+    if normal_map != {} do texture_count += 1
 
     return material
 }

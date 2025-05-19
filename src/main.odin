@@ -69,18 +69,19 @@ init :: proc(state: ^AppState) {
     
     renderer = RND_Init({})
     player = create_player()
-    lantern := load_gltf("assets/Lantern.glb", renderer.gpu);
-    helmet := load_gltf("assets/DamagedHelmet.glb", renderer.gpu);
+    lantern := load_gltf("assets/Box.glb", renderer.gpu, true);
+    print_gltf(lantern)
+    // helmet := load_gltf("assets/DamagedHelmet.glb", renderer.gpu);
     ground := load_object("assets/ref_tris"); defer delete_obj(ground)
     slab   := load_object("assets/ref_cube"); defer delete_obj(slab)
     add_model(ground, state)
     add_model(slab, state)
-    add_model(helmet, state)
+    // add_model(helmet, state)
     add_model(lantern, state)
     create_entity(state, 0)
     // for i in 0..<ENTITY_COUNT do create_entity(state, 2)
     randomize_tile_positions(state)
-    create_entity(state, 3)
+    create_entity(state, 2)
     init_imgui(state)
 }
 
@@ -143,9 +144,9 @@ run :: proc(state: ^AppState) {
 
 
         update(state)
-        RND_FrameBegin(state)
-        RND_DrawEntities(state)
-        RND_DrawGLTF(state)
+        vp := RND_FrameBegin(state)
+        RND_DrawEntities(state, vp)
+        RND_DrawGLTF(state, vp)
         wireframe := .WIREFRAME in state.renderer.props
         RND_DrawUI(state)
         if wireframe != .WIREFRAME in state.renderer.props {
@@ -174,7 +175,7 @@ randomize_tile_positions :: proc(state: ^AppState) {
     static_collider_index := 0
     for &entity, i in state.entities {
         if i < 1 do continue
-        entity.position = {
+        entity.transform.translation = {
             random_range(-WORLD_SIZE.x, WORLD_SIZE.x),
             random_range(0, WORLD_SIZE.y),
             random_range(-WORLD_SIZE.z, WORLD_SIZE.z)

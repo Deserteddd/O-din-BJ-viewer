@@ -6,7 +6,7 @@ import "core:slice"
 import "core:path/filepath"
 import os "core:os/os2"
 
-BUILD_SHADERS :: true
+BUILD_SHADERS :: false
 
 main :: proc() {
     context.logger = log.create_console_logger()

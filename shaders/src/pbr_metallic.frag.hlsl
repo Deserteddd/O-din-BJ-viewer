@@ -8,12 +8,6 @@ struct Input {
     float3 tangent : TEXCOORD3;
 };
 
-struct Material {
-    float4 albedo;
-    float metallic;
-    float roughness;
-};
-
 Texture2D<float4> albedoMap : register(t0, space2);
 Texture2D<float4> metalRoughMap : register(t1, space2);
 Texture2D<float4> normalMap : register(t2, space2);
@@ -31,6 +25,10 @@ cbuffer LIGHT : register(b0, space3) {
 
 cbuffer MATERIAL : register(b1, space3) {
     float4 base_color;
+    bool hasAlbedoTex;
+    bool hasMetallicRoughTex;
+    bool hasNormalMap;
+    bool pad;
     float metallic_factor;
     float roughness_factor;
 };
@@ -65,18 +63,19 @@ float GeometrySmith(float3 N, float3 V, float3 L, float roughness) {
     return ggx1 * ggx2;
 }
 
-void dcr(Input input) {
-    float r = metalRoughMap.Sample(metalRoughSmp, input.uv).r;
-    float a = albedoMap.Sample(albedoSmp, input.uv).g;
-    float n = normalMap.Sample(normalSmp, input.uv).b;
-    if (r < -1000 || a < -1000 || n < -1000) discard;
-}
-
 float4 main(Input input) : SV_Target0 {
-    // dcr(input);
-    float3 albedo = albedoMap.Sample(albedoSmp, input.uv).rgb;
-    float3 normal = normalMap.Sample(normalSmp, input.uv).rgb;
-    float3 metallic_roughness = metalRoughMap.Sample(metalRoughSmp, input.uv).rgb;
+    float3 albedo;
+    if (hasAlbedoTex) albedo = albedoMap.Sample(albedoSmp, input.uv).rgb;
+    else albedo = base_color.rgb;
+
+    float3 normal;
+    if (hasNormalMap) normal = normalMap.Sample(normalSmp, input.uv).rgb;
+    else normal = input.normal;
+
+    float3 metallic_roughness;
+    if (hasMetallicRoughTex) metallic_roughness = metalRoughMap.Sample(metalRoughSmp, input.uv).rgb;
+    else metallic_roughness = float3(1, 1, 1);
+
     float metallic = metallic_roughness.b * metallic_factor;
     float roughness = metallic_roughness.g * roughness_factor;
 
@@ -110,6 +109,5 @@ float4 main(Input input) : SV_Target0 {
     float3 ambient = float3(0.03, 0.03, 0.03) * albedo; // * ao
     float3 color = ambient + Lo;
     color = color / (color + float3(1, 1, 1));
-
     return float4(color, 1);
 }
