@@ -45,7 +45,7 @@ GLTFTexture :: struct {
 GLTFMesh :: struct {
     vbo: ^sdl.GPUBuffer,
     ibo: ^sdl.GPUBuffer,
-    primitives: []GLTFPrimitive
+    data: MeshData
 }
 
 GLTFPrimitive :: struct {
@@ -72,9 +72,9 @@ GLTFVertex :: struct {
 }
 
 GLTFNode :: struct {
+    aabb:       AABB,
     mesh:       ^GLTFMesh,
     children:   []GLTFNode,
-    aabb:       AABB,
     transform: Transform,
     bbox_vbo: ^sdl.GPUBuffer,
 }
@@ -164,7 +164,7 @@ print_node :: proc(node: GLTFNode, indent := 0) {
     if node.mesh == nil do fmt.println("Empty node:", node.transform)
     else {
         fmt.println("Mesh node:", node.transform)
-        for p in node.mesh.primitives {
+        for p in node.mesh.data.primitives {
             for _ in 0..<indent+1 do fmt.print("\t")
             fmt.println("Primitive:", p.start, p.end, p.material.name)
         }
@@ -253,10 +253,6 @@ build_scene :: proc(
         }); assert(transfer_buffer != nil)
         node.bbox_vbo = create_buffer_with_data(gpu, transfer_buffer, copy_pass, {.VERTEX}, bbox_vertices[:])
         sdl.ReleaseGPUTransferBuffer(gpu, transfer_buffer)
-        delete(mesh_data.positions)
-        delete(mesh_data.normals)
-        delete(mesh_data.uvs)
-        delete(mesh_data.tangents)
         node.aabb = bbox
     }
 
@@ -295,7 +291,7 @@ load_mesh :: proc(data: MeshData, gpu: ^sdl.GPUDevice, copy_pass: ^sdl.GPUCopyPa
 
     mesh.vbo = vbo
     mesh.ibo = ibo
-    mesh.primitives = data.primitives
+    mesh.data = data
     return mesh
 }
 

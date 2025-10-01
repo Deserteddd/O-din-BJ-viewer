@@ -8,14 +8,14 @@ vec3 :: [3]f32
 vec4 :: [4]f32
 
 WORLD_SIZE: vec3 = {100, 40, 100}
-ENTITY_COUNT: u32 = 1000
-DEBUG :: true
+DEBUG_GPU :: false
 
 TRANSFORM_IDENTITY :: Transform {
     translation = 0,
     scale = 1,
     rotation = linalg.QUATERNIONF32_IDENTITY
 }
+
 ModelType :: enum {
     OBJ,
     GLTF

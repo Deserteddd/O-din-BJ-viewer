@@ -3,7 +3,7 @@ package obj_viewer
 import "core:mem"
 import "core:math"
 import "core:math/linalg"
-import "core:fmt"
+import "core:log"
 import "core:strings"
 import "core:c"
 import "core:time"
@@ -32,6 +32,7 @@ Renderer :: struct {
     props:              RND_Props,
     light:              PointLight,
     draw_distance:      f32,
+    fovy:               f32,
 }
 
 PointLight :: struct #packed {
@@ -80,7 +81,7 @@ RND_Init :: proc(props: RND_Props) -> Renderer {
     ok = sdl.SetWindowRelativeMouseMode(window, true); assert(ok)
     width, height: i32
     sdl.GetWindowSize(window, &width, &height)
-    gpu := sdl.CreateGPUDevice({.SPIRV}, DEBUG, nil); assert(gpu != nil)
+    gpu := sdl.CreateGPUDevice({.SPIRV}, DEBUG_GPU, nil); assert(gpu != nil)
     ok = sdl.ClaimWindowForGPUDevice(gpu, window); assert(ok)
     ok = sdl.SetGPUSwapchainParameters(gpu, window, .SDR_LINEAR, PRESENT_MODE); assert(ok)
 
@@ -140,9 +141,10 @@ RND_Init :: proc(props: RND_Props) -> Renderer {
     renderer.light = PointLight {
         position = vec3{0, 10, 25},
         color = 1,
-        power = 1000
+        power = 50
     }
     renderer.draw_distance = 250
+    renderer.fovy = 90
     return renderer
 }
 
@@ -166,7 +168,7 @@ RND_ToggleFullscreen :: proc(state: ^AppState) {
     ok: bool
     window_bounds: sdl.Rect
     if !sdl.GetDisplayBounds(1, &window_bounds) {
-        fmt.println(sdl.GetError())
+        log.log(.Error, sdl.GetError())
     }
     sdl.ReleaseWindowFromGPUDevice(gpu, window)
     sdl.DestroyWindow(window)
@@ -177,7 +179,7 @@ RND_ToggleFullscreen :: proc(state: ^AppState) {
         new_window := sdl.CreateWindow("Demo window", width, height, {.FULLSCREEN}); assert(new_window != nil)
         window = new_window
         ok = sdl.ClaimWindowForGPUDevice(gpu, window)
-        if !ok do fmt.println(sdl.GetError())
+        if !ok do log.log(.Error, sdl.GetError())
     } else {
         width = 1280
         height = 720
@@ -198,7 +200,7 @@ RND_ToggleFullscreen :: proc(state: ^AppState) {
     })
     sdl.ReleaseGPUTexture(gpu, depth_texture)
     depth_texture = depth
-    if state.ui_visible {
+    if state.props.ui_visible {
         ok = sdl.ShowCursor(); assert(ok)
         ok = sdl.SetWindowRelativeMouseMode(window, false); assert(ok)
     } else {
@@ -214,10 +216,14 @@ RND_DrawUI :: proc(state: ^AppState) {
     im_sdlgpu.NewFrame()
     im_sdl.NewFrame()
     im.NewFrame()
-    if ui_visible {
+    if props.ui_visible {
         if im.Begin("Properties") {
+            im.DragFloat("FOV", &state.renderer.fovy, 0.01, 89.5, 90)
             im.LabelText("", "Light")
-            im.DragFloat3("position", &renderer.light.position, 0.5, -200, 200)
+            if !props.attatch_light_to_player {
+                im.DragFloat3("position", &renderer.light.position, 0.5, -200, 200)
+            }
+            im.Checkbox("Snap to player", &props.attatch_light_to_player)
             im.DragFloat("intensity", &renderer.light.power, 10, 0, 10000)
             im.ColorPicker3("color", transmute(^vec3)&renderer.light.color, {.InputRGB})
             im.LabelText("", "General")
@@ -260,17 +266,21 @@ RND_DrawUI :: proc(state: ^AppState) {
     sdl.EndGPURenderPass(im_render_pass)
 }
 
-RND_FrameBegin :: proc(state: ^AppState) -> matrix[4,4]f32 {
+RND_FrameBegin :: proc(state: ^AppState) {
     using state
     assert(renderer.cmd_buff == nil)
     assert(renderer.swapchain_texture == nil)
     cmd_buff := sdl.AcquireGPUCommandBuffer(renderer.gpu); assert(cmd_buff != nil)
-    ok := sdl.WaitAndAcquireGPUSwapchainTexture(cmd_buff, renderer.window, &renderer.swapchain_texture, nil, nil)
-    if !ok do fmt.println(sdl.GetError())
     renderer.cmd_buff = cmd_buff
     debug_info.rendered = 0
+    ok := sdl.WaitAndAcquireGPUSwapchainTexture(cmd_buff, renderer.window, &renderer.swapchain_texture, nil, nil)
+    assert(ok)
+}
+
+get_viewproj_matrix :: proc(state: AppState) -> matrix[4,4]f32 {
+    using state
     proj_matrix := create_proj_matrix(renderer)
-    view_matrix := create_view_matrix(player.position, player.rotation)
+    view_matrix := create_view_matrix(player)
     return proj_matrix * view_matrix;
 }
 
@@ -283,13 +293,11 @@ RND_FrameSubmit :: proc(renderer: ^Renderer) -> bool {
 
 create_frag_ubo :: proc(state: ^AppState) -> FragUBO {
     using state
-    camera_position := -player.position
-    camera_position.y -= 2
     return FragUBO {
         light_pos = renderer.light.position,
         light_color = renderer.light.color,
         light_intensity = renderer.light.power,
-        view_pos = camera_position
+        view_pos = get_camera_position(player)
     }
 }
 
@@ -332,9 +340,9 @@ RND_DrawGLTF :: proc(state: ^AppState, vp: matrix[4,4]f32) {
     sdl.BindGPUGraphicsPipeline(render_pass, renderer.gltf_pipeline)
     sdl.PushGPUVertexUniformData(renderer.cmd_buff, 0, &vp, size_of(matrix[4,4]f32))
     sdl.PushGPUFragmentUniformData(renderer.cmd_buff, 0, &frag_ubo, size_of(FragUBO))
-    for entity, i in state.entities {
+    for entity, i in entities {
         if entity.model.type != .GLTF do continue
-        draw_node(
+        draw_gltf_node(
             render_pass, 
             state, 
             entity.model.data.gltf, 
@@ -344,13 +352,15 @@ RND_DrawGLTF :: proc(state: ^AppState, vp: matrix[4,4]f32) {
         )
     }
     sdl.EndGPURenderPass(render_pass)
-    if !DEBUG do return
+
+    // Renders 
+    if !DEBUG_GPU do return
     bbox_pass := sdl.BeginGPURenderPass(renderer.cmd_buff, &color_target, 1, nil)
     sdl.BindGPUGraphicsPipeline(render_pass, renderer.bbox_pipeline)
     sdl.PushGPUVertexUniformData(renderer.cmd_buff, 0, &vp, size_of(matrix[4,4]f32))
     for entity, i in state.entities {
         if entity.model.type != .GLTF do continue
-        draw_aabb(
+        draw_gltf_aabb(
             render_pass, 
             state, 
             entity.model.data.gltf, 
@@ -360,7 +370,7 @@ RND_DrawGLTF :: proc(state: ^AppState, vp: matrix[4,4]f32) {
     sdl.EndGPURenderPass(bbox_pass)
 }
 
-draw_aabb :: proc(
+draw_gltf_aabb :: proc(
     render_pass: ^sdl.GPURenderPass,
     state: ^AppState, 
     node: GLTFNode,
@@ -379,11 +389,11 @@ draw_aabb :: proc(
     }
 
     for &child in node.children {
-        draw_aabb(render_pass, state, child, model_matrix)
+        draw_gltf_aabb(render_pass, state, child, model_matrix)
     }
 }
 
-draw_node :: proc(
+draw_gltf_node :: proc(
     render_pass: ^sdl.GPURenderPass,
     state: ^AppState, 
     node: GLTFNode,
@@ -409,7 +419,8 @@ draw_node :: proc(
         sdl.BindGPUVertexBuffers(render_pass, 0, &bindings[0], 1)
         sdl.BindGPUIndexBuffer(render_pass, bindings[1], ._16BIT)
         sdl.PushGPUVertexUniformData(renderer.cmd_buff, 1, &model_matrix, size_of(matrix[4,4]f32))
-        for primitive in mesh.primitives {
+        using mesh
+        for primitive in data.primitives {
             frag_ubo: GLTF_fragUBO
             frag_ubo.base_color = primitive.material.base_color_factor
             frag_ubo.metallic_factor = primitive.material.metallic_factor
@@ -460,7 +471,7 @@ draw_node :: proc(
     }
 
     for &child in node.children {
-        draw_node(render_pass, state, child, model_matrix, entity_pos, frustum_planes)
+        draw_gltf_node(render_pass, state, child, model_matrix, entity_pos, frustum_planes)
     }
 }
 GLTF_fragUBO :: struct {
@@ -538,25 +549,43 @@ RND_DrawEntities :: proc(state: ^AppState, vp: matrix[4,4]f32) {
     sdl.EndGPURenderPass(render_pass)
 }
 
+get_camera_position :: proc(player: Player) -> (camera_position: vec3) {
+    camera_position = -player.position
+    camera_position.y -= 2
+    return
+}
 
-
-create_view_matrix :: proc(position: vec3, rotation: vec3) -> linalg.Matrix4f32 {
-    using linalg
+create_view_matrix :: proc(player: Player) -> linalg.Matrix4f32 {
+    using linalg, player
     pitch_matrix := matrix4_rotate_f32(to_radians(rotation.x), {1, 0, 0})
     yaw_matrix := matrix4_rotate_f32(to_radians(rotation.y), {0, 1, 0})
-    camera_position := -position
-    camera_position.y -= 2
-    position_matrix := matrix4_translate_f32(camera_position)
+    position_matrix := matrix4_translate_f32(get_camera_position(player))
     return pitch_matrix * yaw_matrix * position_matrix
 }
 
+
+
 create_proj_matrix :: proc(renderer: Renderer) -> matrix[4,4]f32 {
     using linalg
-    x, y: i32;
-    ok := sdl.GetWindowSize(renderer.window, &x, &y)
-    aspect := f32(x) / f32(y)
-    return matrix4_perspective_f32(linalg.to_radians(f32(90)), aspect, 0.01, renderer.draw_distance)
+    win_size := get_window_size(renderer)
+    aspect := win_size.x / win_size.y
+    return matrix4_perspective_f32(
+        renderer.fovy, 
+        aspect, 
+        0.01, 
+        renderer.draw_distance
+    )
 }
+
+get_window_size :: proc(renderer: Renderer) -> vec2 {
+    x, y: i32
+    ok := sdl.GetWindowSize(renderer.window, &x, &y)
+    if ok do return {f32(x), f32(y)}
+    sdl.ClearError()
+    log.logf(.Error, "SDL Error: {}", sdl.GetError())
+    panic("")
+}
+
 build_bbox_pipeline :: proc(renderer: ^Renderer) {
     sdl.ReleaseGPUGraphicsPipeline(renderer.gpu, renderer.pipeline3D)
     vert_shader := load_shader(renderer.gpu, "bbox.vert"); defer sdl.ReleaseGPUShader(renderer.gpu, vert_shader)

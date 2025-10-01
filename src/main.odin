@@ -22,6 +22,7 @@ FRAMES := 0
 last_ticks := sdl.GetTicks();
 
 main :: proc() {
+    fmt.println("MAIN: initing")
     state: AppState
     init(&state)
     fmt.println("MAIN: init done")
@@ -46,7 +47,12 @@ AppState :: struct {
     gltf_meshes:        [dynamic]GLTFMesh,
     entities:           #soa[dynamic]Entity,
     checkpoint:         [2]vec3,                // Position, Rotation
-    ui_visible:         bool,
+    props:              Props
+}
+
+Props :: struct {
+    ui_visible,
+    attatch_light_to_player: bool
 }
 
 DebugInfo :: struct {
@@ -69,19 +75,14 @@ init :: proc(state: ^AppState) {
     
     renderer = RND_Init({})
     player = create_player()
-    lantern := load_gltf("assets/Box.glb", renderer.gpu, true);
-    print_gltf(lantern)
-    // helmet := load_gltf("assets/DamagedHelmet.glb", renderer.gpu);
     ground := load_object("assets/ref_tris"); defer delete_obj(ground)
     slab   := load_object("assets/ref_cube"); defer delete_obj(slab)
     add_model(ground, state)
     add_model(slab, state)
-    // add_model(helmet, state)
-    add_model(lantern, state)
-    create_entity(state, 0)
-    // for i in 0..<ENTITY_COUNT do create_entity(state, 2)
+    create_entity(state, 0, "ground")
+    for i in 1..<(1<<11) do create_entity(state, 1, "slab")
     randomize_tile_positions(state)
-    create_entity(state, 2)
+    state.props.attatch_light_to_player = true
     init_imgui(state)
 }
 
@@ -108,8 +109,11 @@ init_imgui :: proc(state: ^AppState) {
 }
 
 run :: proc(state: ^AppState) {
+    assert(state.gltf_meshes == nil)
+    lmb_down: bool
     main_loop: for {
         now := time.now()
+        vp := get_viewproj_matrix(state^)
         defer FRAMES += 1
         ev: sdl.Event
         for sdl.PollEvent(&ev) {
@@ -121,30 +125,42 @@ run :: proc(state: ^AppState) {
                     case .ESCAPE:
                         toggle_ui(state)
                     case .Q:
-                        if !state.player.airborne do state.checkpoint = {state.player.position, state.player.rotation}
+                        if !state.player.airborne do state.checkpoint = get_player_translation(state.player)
                     case .E:
                         reset_player_pos(state)
                     case .F:
                         RND_ToggleFullscreen(state)
                     case .C:
                         if .LCTRL in ev.key.mod do break main_loop
+                    case .N: state.player.noclip = !state.player.noclip
                 }
-                case .MOUSE_BUTTON_DOWN: if !state.ui_visible {
+                case .MOUSE_BUTTON_DOWN: if !state.props.ui_visible {
                     switch ev.button.button {
                         case 1:
-                            new := create_entity(state, 1)
-                            set_entity_position(state, new, state.player.position)
+                            origin, dir := ray_from_screen(vp)
+                            closest_hit: f32 = math.F32_MAX
+                            closest_index := -1
+                            for entity, i in state.entities {
+                                intersection := ray_intersect_aabb(origin, dir, entity_aabb(entity))
+                                if intersection != -1 && intersection < closest_hit {
+                                    closest_hit = intersection
+                                    closest_index = i
+                                }
+                            }
+                            if closest_index != -1 && state.entities[closest_index].name == "slab" {
+                                unordered_remove_soa(&state.entities, closest_index)
+                            }
                         case 3:
-                            new := create_entity(state, 2)
+                            new := create_entity(state, 1, "slab")
                             set_entity_position(state, new, state.player.position)
                     }
                 }
+                case .MOUSE_BUTTON_UP: lmb_down = ev.button.button == 1
             }
         }
 
-
         update(state)
-        vp := RND_FrameBegin(state)
+        RND_FrameBegin(state)
         RND_DrawEntities(state, vp)
         RND_DrawGLTF(state, vp)
         wireframe := .WIREFRAME in state.renderer.props
@@ -159,7 +175,7 @@ run :: proc(state: ^AppState) {
 }
 
 toggle_ui :: proc(state: ^AppState) {
-    using state
+    using state, state.props
     ui_visible = !ui_visible
     if ui_visible {
         ok := sdl.ShowCursor(); assert(ok)
@@ -195,7 +211,7 @@ reset_player_pos :: proc(state: ^AppState, at_origin := false) {
     player.speed = 0
     player.bbox = AABB {
         min = player.position + {-0.2, 0, -0.2},
-        max = player.position + {0.2, 2.1, 0.2}
+        max = player.position + {0.2, 2.01, 0.2}
     }
 }
 
@@ -204,51 +220,11 @@ update :: proc(state: ^AppState) {
     new_ticks := sdl.GetTicks();
     dt := f32(new_ticks - last_ticks) / 1000
     last_ticks = new_ticks
-    // rotation := &state.models[3].data.gltf.transform.rotation
-    // x, y, z := linalg.euler_angles_from_quaternion_f32(rotation^, .XYX)
-    // z += dt
-    // rotation^ = linalg.quaternion_from_euler_angles_f32(x, y, z, .XYZ)
-    if !ui_visible {
-        update_camera(&state.player)
-        wish_speed := player_wish_speed(state.player)
-        update_player(state, &wish_speed, dt)
+    if !props.ui_visible {
+        update_player(state, dt)
     }
     debug_info.player_speed = linalg.length(player.speed)
-}
-
-player_wish_speed :: proc(player: Player) -> vec3 {
-    using sdl.Scancode
-    key_state := sdl.GetKeyboardState(nil)
-    wish_speed: vec3
-    f, b, l, r, u: f32
-    yaw_r, yaw_l, pitch_u, pitch_d : f32
-    if key_state[W] do f = 1
-    if key_state[S] do b = 1
-    if key_state[A] do l = 1
-    if key_state[D] do r = 1
-    if key_state[SPACE] do u = 1
-    if key_state[RIGHT] do yaw_r = 1
-    if key_state[LEFT] do yaw_l = 1
-    if key_state[UP] do pitch_u = 1
-    if key_state[DOWN] do pitch_d = 1
-
-    fb := b-f; lr := r-l
-
-    yaw_cos := math.cos(math.to_radians(player.rotation.y))
-    yaw_sin := math.sin(math.to_radians(player.rotation.y))
-
-    if !player.airborne do wish_speed.y = u
-    wish_speed.x += (lr * yaw_cos - fb * yaw_sin)
-    wish_speed.z += (lr * yaw_sin + fb * yaw_cos)
-    return wish_speed
-}
-
-update_camera :: proc(player: ^Player) {
-    x, y: f32
-    using player
-    _ = sdl.GetRelativeMouseState(&x, &y)
-    rotation.y += x * 0.03
-    rotation.x += y * 0.03
-    if rotation.x >  90 do rotation.x =  90
-    if rotation.x < -90 do rotation.x = -90
+    if props.attatch_light_to_player {
+        renderer.light.position = player.bbox.max 
+    }
 }

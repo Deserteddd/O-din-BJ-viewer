@@ -1,30 +1,20 @@
 package obj_viewer
 
-import "core:fmt"
 import "core:mem"
 import "core:math/linalg"
 import sdl "vendor:sdl3"
 
 Entity :: struct {
     id: int,
+    name: string,
     model: ^Model,
     transform: Transform,
 }
 
-EntitySOA :: #soa [dynamic]Entity
-
-
-Player :: struct {
-    position: vec3,
-    speed: vec3,
-    rotation: vec3,
-    bbox: AABB,
-    airborne: bool,
-}
-
-create_entity :: proc(state: ^AppState, model: u32) -> int {
+create_entity :: proc(state: ^AppState, model: u32, name: string) -> int {
     entity: Entity
     entity.id = len(state.entities)
+    entity.name = name
     entity.model = &state.models[model]
     append_soa(&state.entities, entity)
     return entity.id
@@ -95,7 +85,7 @@ add_obj_model :: proc(data: OBJObjectData, state: ^AppState) {
     vbo              := create_buffer_with_data(gpu, transfer_buffer, copy_pass, {.VERTEX}, data.vertices[:])
     material_buffer  := create_buffer_with_data(gpu, transfer_buffer, copy_pass, {.GRAPHICS_STORAGE_READ}, material_matrices[:])
     bbox: AABB = {min = max(f32), max = min(f32)}
-    for vert, v in data.vertices {
+    for vert, v in data.vertices { // This seems very slow. Try making it branchless
         using vert
         if (position.x < bbox.min.x) do bbox.min.x = position.x;
         if (position.y < bbox.min.y) do bbox.min.y = position.y;
@@ -136,16 +126,6 @@ add_gltf_model :: proc(data: GLTFObjectData, state: ^AppState) {
     append(&state.models, model)
 }
 
-create_player :: proc() -> Player {
-    position: vec3 = {0, 0, 15}
-    return Player {
-        position = position,
-        bbox = AABB {
-            min = position + {-0.2, 0, -0.2},
-            max = position + {0.2, 2.1, 0.2}
-        },
-    }
-}
 
 _get_bbox_vertices :: proc(bbox: AABB) -> [24]vec3 {
     using bbox

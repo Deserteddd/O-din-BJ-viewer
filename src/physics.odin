@@ -2,7 +2,7 @@ package obj_viewer
 
 import "core:math/linalg"
 import "core:time"
-import "core:fmt"
+import "core:math"
 
 AABB :: struct {
     min: vec3,
@@ -22,20 +22,6 @@ entity_aabb :: proc(entity: Entity) -> AABB {
     }
 }
 
-air_accelerate :: proc(wishveloc: ^vec3, player: ^Player, dt: f32) {
-    addspeed, wishspd, accelspeed, currentspeed: f32
-    wishveloc^ *= 10
-    wishspd = vector_normalize(wishveloc);
-    grounded_wishspd := wishspd
-    if wishspd > 2 do wishspd = 2
-    currentspeed = linalg.dot(player.speed, wishveloc^)
-    addspeed = wishspd - currentspeed
-    if addspeed <= 0 do return
-
-    accelspeed = grounded_wishspd * 5 * dt
-    player.speed += accelspeed * wishveloc^
-}
-
 vector_normalize :: proc(v: ^vec3) -> f32 {
     length := linalg.length(v^)
     if length != 0 {
@@ -43,58 +29,6 @@ vector_normalize :: proc(v: ^vec3) -> f32 {
         v^ *= ilength
     }
     return length
-}
-
-update_player :: proc(state: ^AppState, wishveloc: ^vec3, dt: f32) #no_bounds_check {
-    g: f32 = 25
-    using state, player
-    airborne_at_start := airborne
-    if wishveloc.y > 0 && !airborne {
-        speed.y = 9
-        airborne = true
-    } else if !airborne {
-        speed += wishveloc^
-    } else {
-        air_accelerate(wishveloc, &player, dt)
-        speed.y -= g * dt
-    }
-    delta_pos := speed * dt
-    position += delta_pos
-    bbox.min += delta_pos
-    bbox.max += delta_pos
-    found_collision: bool
-
-    for entity, i in entities {
-        if entity.model.type == .GLTF do continue
-        aabb := entity_aabb(entity)
-        if aabbs_collide(bbox, aabb) {
-            found_collision = true
-            mtv := resolve_aabb_collision_mtv(bbox, aabb)
-            for axis, j in mtv do if axis != 0 {
-                speed[j] *= 0.9
-                if j == 1 { 
-                    if axis > 0 { // This means we are standing on a block
-                        airborne = false
-                    } else {
-                        speed.y = -0.1
-                    }
-                }
-            }
-            position += mtv
-            bbox.min += mtv
-            bbox.max += mtv
-        }
-
-    }
-
-    if !found_collision do airborne = true
-    if !airborne_at_start && !airborne {
-        speed *= 0.8
-    }
-    if linalg.length(speed.xz) > 20 do speed.xz *= 0.9
-    if position.y < -5 {
-        reset_player_pos(state)
-    }
 }
 
 create_furstum_planes :: proc(vp: matrix[4,4]f32) -> [6]vec4 {
@@ -158,4 +92,54 @@ resolve_aabb_collision_mtv :: proc(moving: AABB, solid: AABB) -> vec3 {
 	}
 
 	return mtv
+}
+
+ray_from_screen :: proc(
+    vp: matrix[4,4]f32,
+    // screen_pos: vec2,
+    // viewport_size: vec2
+) -> (origin: vec3, direction: vec3) {
+    // normalize to NDC (-1..1)
+    // ndc_x := (2.0 * screen_pos.x) / viewport_size.x - 1.0
+    // ndc_y := 1.0 - (2.0 * screen_pos.y) / viewport_size.y // flip y if needed
+    ndc_x, ndc_y: f32 = 0, 0
+    near_point := vec4{ndc_x, ndc_y, -1.0, 1.0}
+    far_point  := vec4{ndc_x, ndc_y,  1.0, 1.0}
+
+    inv_viewproj := linalg.inverse(vp)
+
+    near_world := inv_viewproj * near_point
+    far_world  := inv_viewproj * far_point
+
+    // Perspective divide
+    near_world /= near_world.w
+    far_world  /= far_world.w
+    origin    = near_world.xyz
+    direction = linalg.normalize(far_world.xyz - near_world.xyz)
+    return
+}
+
+ray_intersect_aabb :: proc(origin: vec3, dir: vec3, box: AABB) -> f32 {
+    using math
+
+    inv_dir := 1.0 / dir
+    t1 := (box.min.x - origin.x) * inv_dir.x
+    t2 := (box.max.x - origin.x) * inv_dir.x
+    tmin := min(t1, t2)
+    tmax := max(t1, t2)
+
+    ty1 := (box.min.y - origin.y) * inv_dir.y
+    ty2 := (box.max.y - origin.y) * inv_dir.y
+    tmin = max(tmin, min(ty1, ty2))
+    tmax = min(tmax, max(ty1, ty2))
+
+    tz1 := (box.min.z - origin.z) * inv_dir.z
+    tz2 := (box.max.z - origin.z) * inv_dir.z
+    tmin = max(tmin, min(tz1, tz2))
+    tmax = min(tmax, max(tz1, tz2))
+
+    if tmax >= max(tmin, 0.0) {
+        return tmin // hit distance
+    }
+    return -1.0 // no hit
 }

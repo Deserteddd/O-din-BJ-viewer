@@ -1,4 +1,4 @@
-#define PI 3.14159265
+// #define PI 3.14159265
 
 struct Input {
     float4 clipPosition : SV_Position;
@@ -7,7 +7,7 @@ struct Input {
     float2 uv : TEXCOORD2;
     float3 tangent : TEXCOORD3;
 };
-
+/*
 Texture2D<float4> albedoMap : register(t0, space2);
 Texture2D<float4> metalRoughMap : register(t1, space2);
 Texture2D<float4> normalMap : register(t2, space2);
@@ -15,7 +15,7 @@ Texture2D<float4> normalMap : register(t2, space2);
 SamplerState albedoSmp : register(s0, space2);
 SamplerState metalRoughSmp : register(s1, space2);
 SamplerState normalSmp : register(s2, space2);
-
+*/
 cbuffer LIGHT : register(b0, space3) {
     float3 lightPosition;
     float3 lightColor;
@@ -23,16 +23,16 @@ cbuffer LIGHT : register(b0, space3) {
     float3 viewPosition;
 };
 
-cbuffer MATERIAL : register(b1, space3) {
-    float4 base_color;
-    bool hasAlbedoTex;
-    bool hasMetallicRoughTex;
-    bool hasNormalMap;
-    bool pad;
-    float metallic_factor;
-    float roughness_factor;
-};
-
+// cbuffer MATERIAL : register(b1, space3) {
+//     float4 base_color;
+//     bool hasAlbedoTex;
+//     bool hasMetallicRoughTex;
+//     bool hasNormalMap;
+//     bool pad;
+//     float metallic_factor;
+//     float roughness_factor;
+// };
+/*
 float3 fresnelSchlick(float cosTheta, float3 F0) {
     return F0 + (1.0 - F0) * pow(1.0 - cosTheta, 5.0);
 }
@@ -110,4 +110,10 @@ float4 main(Input input) : SV_Target0 {
     float3 color = ambient + Lo;
     color = color / (color + float3(1, 1, 1));
     return float4(color, 1);
+}
+*/
+
+
+float4 main(Input input) : SV_Target0 {
+    return float4(1, 1, 1, 1);
 }
