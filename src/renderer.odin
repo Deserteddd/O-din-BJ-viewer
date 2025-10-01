@@ -16,19 +16,18 @@ import im "shared:imgui"
 import im_sdl "shared:imgui/imgui_impl_sdl3"
 import im_sdlgpu "shared:imgui/imgui_impl_sdlgpu3"
 
-PRESENT_MODE: sdl.GPUPresentMode = .IMMEDIATE
-
 Renderer :: struct {
     window:             ^sdl.Window,
     gpu:                ^sdl.GPUDevice,
     pipeline3D:         ^sdl.GPUGraphicsPipeline,
     gltf_pipeline:      ^sdl.GPUGraphicsPipeline,
-    bbox_pipeline: ^sdl.GPUGraphicsPipeline,
+    bbox_pipeline:      ^sdl.GPUGraphicsPipeline,
     depth_texture:      ^sdl.GPUTexture,
     fallback_texture:   ^sdl.GPUTexture,
     swapchain_texture:  ^sdl.GPUTexture,
     cmd_buff:           ^sdl.GPUCommandBuffer,
     samplers:           [4]^sdl.GPUSampler,
+    view_projection:    matrix[4,4]f32,
     props:              RND_Props,
     light:              PointLight,
     draw_distance:      f32,
@@ -277,11 +276,11 @@ RND_FrameBegin :: proc(state: ^AppState) {
     assert(ok)
 }
 
-get_viewproj_matrix :: proc(state: AppState) -> matrix[4,4]f32 {
+update_vp :: proc(state: ^AppState) {
     using state
     proj_matrix := create_proj_matrix(renderer)
     view_matrix := create_view_matrix(player)
-    return proj_matrix * view_matrix;
+    state.renderer.view_projection = proj_matrix * view_matrix;
 }
 
 RND_FrameSubmit :: proc(renderer: ^Renderer) -> bool {
@@ -311,9 +310,9 @@ create_model_matrix :: proc(transform: Transform, position_offset: vec3 = 0) -> 
     linalg.matrix4_scale(model_transform.scale)
 }
 
-RND_DrawGLTF :: proc(state: ^AppState, vp: matrix[4,4]f32) {
+RND_DrawGLTF :: proc(state: ^AppState) {
     using state
-    vp := vp
+    vp := renderer.view_projection
     assert(renderer.cmd_buff != nil)
     assert(renderer.swapchain_texture != nil)
     color_target := sdl.GPUColorTargetInfo {
@@ -353,7 +352,7 @@ RND_DrawGLTF :: proc(state: ^AppState, vp: matrix[4,4]f32) {
     }
     sdl.EndGPURenderPass(render_pass)
 
-    // Renders 
+    // Renders AABBs as 
     if !DEBUG_GPU do return
     bbox_pass := sdl.BeginGPURenderPass(renderer.cmd_buff, &color_target, 1, nil)
     sdl.BindGPUGraphicsPipeline(render_pass, renderer.bbox_pipeline)
@@ -485,9 +484,9 @@ GLTF_fragUBO :: struct {
     _pad2: f32
 }
 
-RND_DrawEntities :: proc(state: ^AppState, vp: matrix[4,4]f32) {
+RND_DrawEntities :: proc(state: ^AppState) {
     using state
-    vp := vp
+    vp := renderer.view_projection
     assert(renderer.cmd_buff != nil)
     assert(renderer.swapchain_texture != nil)
 

@@ -32,9 +32,9 @@ get_player_translation :: proc(p: Player) -> [2]vec3 {
 }
 
 update_player :: proc(state: ^AppState, dt: f32) #no_bounds_check {
-    g: f32 = 25
     using state, player
-    update_player_camera(&player)
+    defer props.lmb_pressed = false
+    g: f32 = 25
     wishveloc := player_wish_speed(player)
     airborne_at_start := airborne
     if noclip {
@@ -60,6 +60,11 @@ update_player :: proc(state: ^AppState, dt: f32) #no_bounds_check {
     bbox.min += delta_pos
     bbox.max += delta_pos
     found_collision: bool
+    
+    ray_origin, ray_dir := ray_from_screen(renderer.view_projection)
+    closest_hit: f32 = math.F32_MAX
+    closest_index := -1
+
     for entity, i in entities {
         if entity.model.type == .GLTF do continue
         aabb := entity_aabb(entity)
@@ -80,21 +85,33 @@ update_player :: proc(state: ^AppState, dt: f32) #no_bounds_check {
             bbox.min += mtv
             bbox.max += mtv
         }
+        intersection := ray_intersect_aabb(ray_origin, ray_dir, aabb)
+        if intersection != -1 && intersection < closest_hit {
+            closest_hit = intersection
+            closest_index = i
+        }
 
     }
-
     if !found_collision do airborne = true
+
     if !airborne_at_start && !airborne {
         speed *= 0.8
     }
+
     if linalg.length(speed.xz) > 20 do speed.xz *= 0.9
+
+    if closest_index != -1 && state.entities[closest_index].name == "slab" && state.props.lmb_pressed == true {
+        unordered_remove_soa(&state.entities, closest_index)
+    }
+
     if position.y < -5 {
         reset_player_pos(state)
         
     }
+
 }
 
-update_player_camera :: proc(player: ^Player) {
+update_camera :: proc(player: ^Player) {
     x, y: f32
     using player
     _ = sdl.GetRelativeMouseState(&x, &y)

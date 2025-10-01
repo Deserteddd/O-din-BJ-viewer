@@ -2,13 +2,15 @@ package obj_viewer
 import "core:math"
 import "core:math/linalg"
 import "core:math/rand"
+import sdl "vendor:sdl3"
 
 vec2 :: [2]f32
 vec3 :: [3]f32
 vec4 :: [4]f32
 
 WORLD_SIZE: vec3 = {100, 40, 100}
-DEBUG_GPU :: false
+DEBUG_GPU :: true
+PRESENT_MODE: sdl.GPUPresentMode = .VSYNC
 
 TRANSFORM_IDENTITY :: Transform {
     translation = 0,

@@ -47,12 +47,14 @@ AppState :: struct {
     gltf_meshes:        [dynamic]GLTFMesh,
     entities:           #soa[dynamic]Entity,
     checkpoint:         [2]vec3,                // Position, Rotation
-    props:              Props
+    props:              Props,
 }
 
+// Replace with bit set
 Props :: struct {
     ui_visible,
-    attatch_light_to_player: bool
+    attatch_light_to_player,
+    lmb_pressed: bool
 }
 
 DebugInfo :: struct {
@@ -110,10 +112,8 @@ init_imgui :: proc(state: ^AppState) {
 
 run :: proc(state: ^AppState) {
     assert(state.gltf_meshes == nil)
-    lmb_down: bool
     main_loop: for {
         now := time.now()
-        vp := get_viewproj_matrix(state^)
         defer FRAMES += 1
         ev: sdl.Event
         for sdl.PollEvent(&ev) {
@@ -137,34 +137,23 @@ run :: proc(state: ^AppState) {
                 case .MOUSE_BUTTON_DOWN: if !state.props.ui_visible {
                     switch ev.button.button {
                         case 1:
-                            origin, dir := ray_from_screen(vp)
-                            closest_hit: f32 = math.F32_MAX
-                            closest_index := -1
-                            for entity, i in state.entities {
-                                intersection := ray_intersect_aabb(origin, dir, entity_aabb(entity))
-                                if intersection != -1 && intersection < closest_hit {
-                                    closest_hit = intersection
-                                    closest_index = i
-                                }
-                            }
-                            if closest_index != -1 && state.entities[closest_index].name == "slab" {
-                                unordered_remove_soa(&state.entities, closest_index)
-                            }
+                            state.props.lmb_pressed = true
                         case 3:
                             new := create_entity(state, 1, "slab")
                             set_entity_position(state, new, state.player.position)
                     }
                 }
-                case .MOUSE_BUTTON_UP: lmb_down = ev.button.button == 1
             }
         }
 
+        update_camera(&state.player)
+        update_vp(state)
         update(state)
         RND_FrameBegin(state)
-        RND_DrawEntities(state, vp)
-        RND_DrawGLTF(state, vp)
-        wireframe := .WIREFRAME in state.renderer.props
+        RND_DrawEntities(state)
+        RND_DrawGLTF(state)
         RND_DrawUI(state)
+        wireframe := .WIREFRAME in state.renderer.props
         if wireframe != .WIREFRAME in state.renderer.props {
             build_3D_pipeline(&state.renderer)
             build_gltf_pipeline(&state.renderer)

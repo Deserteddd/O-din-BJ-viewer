@@ -12,13 +12,14 @@ main :: proc() {
     context.logger = log.create_console_logger()
     EXE :: "Gaym"
     OUT :: EXE + ".exe" when ODIN_OS == .Windows else EXE
-    run_str(ODIN_PATH+"\\odin build src -debug -out:"+OUT)
+    run_str(ODIN_PATH+"\\odin build src -out:"+OUT)
     if BUILD_SHADERS do build_shaders()
     log.info("Args:", os.args)
     if slice.contains(os.args, "run") do run({OUT})
 }
 
 build_shaders :: proc() {
+    log.info("Building shaders")
     files, err := os.read_all_directory_by_path("shaders/src", context.temp_allocator)
     if err != nil {
         log.errorf("Error reading shader sources: {}", err)
@@ -41,7 +42,6 @@ run_str :: proc(cmd: string) {
 }
 
 run :: proc(cmd: []string) {
-    log.infof("Running {}", cmd)
     code, err := exec(cmd)
     if err != nil {
         log.errorf("Error executing process {}", err)
