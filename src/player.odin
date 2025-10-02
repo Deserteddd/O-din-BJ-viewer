@@ -18,8 +18,8 @@ create_player :: proc() -> Player {
     return Player {
         position = position,
         bbox = AABB {
-            min = position + {-0.2, 0, -0.2},
-            max = position + {0.2, 2.1, 0.2}
+            min = position + {-0.3, 0, -0.3},
+            max = position + {0.3, 2.0, 0.3}
         },
     }
 }

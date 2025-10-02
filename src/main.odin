@@ -199,8 +199,8 @@ reset_player_pos :: proc(state: ^AppState, at_origin := false) {
     }
     player.speed = 0
     player.bbox = AABB {
-        min = player.position + {-0.2, 0, -0.2},
-        max = player.position + {0.2, 2.01, 0.2}
+        min = player.position + {-0.3, 0, -0.3},
+        max = player.position + {0.3, 2, 0.3}
     }
 }
 
@@ -214,6 +214,10 @@ update :: proc(state: ^AppState) {
     }
     debug_info.player_speed = linalg.length(player.speed)
     if props.attatch_light_to_player {
-        renderer.light.position = player.bbox.max 
+        renderer.light.position = {
+            player.position.x,
+            player.bbox.max.y,
+            player.position.z
+        }
     }
 }

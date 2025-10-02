@@ -31,7 +31,6 @@ Renderer :: struct {
     props:              RND_Props,
     light:              PointLight,
     draw_distance:      f32,
-    fovy:               f32,
 }
 
 PointLight :: struct #packed {
@@ -143,7 +142,6 @@ RND_Init :: proc(props: RND_Props) -> Renderer {
         power = 50
     }
     renderer.draw_distance = 250
-    renderer.fovy = 90
     return renderer
 }
 
@@ -217,7 +215,6 @@ RND_DrawUI :: proc(state: ^AppState) {
     im.NewFrame()
     if props.ui_visible {
         if im.Begin("Properties") {
-            im.DragFloat("FOV", &state.renderer.fovy, 0.01, 89.5, 90)
             im.LabelText("", "Light")
             if !props.attatch_light_to_player {
                 im.DragFloat3("position", &renderer.light.position, 0.5, -200, 200)
@@ -569,7 +566,7 @@ create_proj_matrix :: proc(renderer: Renderer) -> matrix[4,4]f32 {
     win_size := get_window_size(renderer)
     aspect := win_size.x / win_size.y
     return matrix4_perspective_f32(
-        renderer.fovy, 
+        89.75, 
         aspect, 
         0.01, 
         renderer.draw_distance
