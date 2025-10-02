@@ -30,10 +30,9 @@ add_model :: proc {
 }
 
 add_obj_model :: proc(data: OBJObjectData, state: ^AppState) {
-    // Create and upload texture
     using state.renderer
     model: Model
-    model.type = .OBJ
+    model.format = .OBJ
     tex_transfer_buffers: [4]^sdl.GPUTransferBuffer
     img_sizes: [4][2]i32
     i: int
@@ -121,7 +120,7 @@ add_gltf_model :: proc(data: GLTFObjectData, state: ^AppState) {
     using data
     model: Model
     for m in meshes do append(&state.gltf_meshes, m)
-    model.type = .GLTF
+    model.format = .GLTF
     model.data.gltf = root
     append(&state.models, model)
 }

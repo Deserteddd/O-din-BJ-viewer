@@ -12,9 +12,9 @@ AABB :: struct {
 entity_aabb :: proc(entity: Entity) -> AABB {
     using entity
     bbox: AABB
-    switch model.type {
+    switch model.format {
         case .OBJ:  bbox = model.data.obj.bbox
-        case .GLTF: bbox = model.data.obj.bbox
+        case .GLTF: bbox = model.data.gltf.aabb
     }
     return AABB {
         min = bbox.min + transform.translation,

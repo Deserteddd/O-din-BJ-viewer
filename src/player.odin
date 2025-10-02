@@ -66,7 +66,6 @@ update_player :: proc(state: ^AppState, dt: f32) #no_bounds_check {
     closest_index := -1
 
     for entity, i in entities {
-        if entity.model.type == .GLTF do continue
         aabb := entity_aabb(entity)
         if aabbs_collide(bbox, aabb) {
             found_collision = true

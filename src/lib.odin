@@ -8,9 +8,6 @@ vec2 :: [2]f32
 vec3 :: [3]f32
 vec4 :: [4]f32
 
-WORLD_SIZE: vec3 = {100, 40, 100}
-DEBUG_GPU :: true
-PRESENT_MODE: sdl.GPUPresentMode = .VSYNC
 
 TRANSFORM_IDENTITY :: Transform {
     translation = 0,
@@ -18,7 +15,7 @@ TRANSFORM_IDENTITY :: Transform {
     rotation = linalg.QUATERNIONF32_IDENTITY
 }
 
-ModelType :: enum {
+ModelFormat :: enum {
     OBJ,
     GLTF
 }

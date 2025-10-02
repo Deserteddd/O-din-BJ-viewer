@@ -17,6 +17,12 @@ import im "shared:imgui"
 import im_sdl "shared:imgui/imgui_impl_sdl3"
 import im_sdlgpu "shared:imgui/imgui_impl_sdlgpu3"
 
+// Constants
+WORLD_SIZE: vec3 = {100, 40, 100}
+DEBUG_GPU :: true
+PRESENT_MODE: sdl.GPUPresentMode = .VSYNC
+
+// Globals
 default_context: runtime.Context
 FRAMES := 0
 last_ticks := sdl.GetTicks();
@@ -31,7 +37,7 @@ main :: proc() {
 }
 
 Model:: struct {
-    type: ModelType,
+    format: ModelFormat,
     data: struct #raw_union {
         gltf: GLTFNode,
         obj:  OBJModel,
@@ -150,12 +156,12 @@ run :: proc(state: ^AppState) {
         update_vp(state)
         update(state)
         RND_FrameBegin(state)
-        RND_DrawEntities(state)
+        render_obj(state)
         RND_DrawGLTF(state)
-        RND_DrawUI(state)
         wireframe := .WIREFRAME in state.renderer.props
+        RND_DrawUI(state)
         if wireframe != .WIREFRAME in state.renderer.props {
-            build_3D_pipeline(&state.renderer)
+            build_obj_pipeline(&state.renderer)
             build_gltf_pipeline(&state.renderer)
         }
         state.debug_info.frame_time = time.since(now)

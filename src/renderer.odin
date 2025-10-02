@@ -19,9 +19,10 @@ import im_sdlgpu "shared:imgui/imgui_impl_sdlgpu3"
 Renderer :: struct {
     window:             ^sdl.Window,
     gpu:                ^sdl.GPUDevice,
-    pipeline3D:         ^sdl.GPUGraphicsPipeline,
+    obj_pipeline:       ^sdl.GPUGraphicsPipeline,
     gltf_pipeline:      ^sdl.GPUGraphicsPipeline,
     bbox_pipeline:      ^sdl.GPUGraphicsPipeline,
+    ui_pipeline:        ^sdl.GPUGraphicsPipeline,
     depth_texture:      ^sdl.GPUTexture,
     fallback_texture:   ^sdl.GPUTexture,
     swapchain_texture:  ^sdl.GPUTexture,
@@ -129,9 +130,10 @@ RND_Init :: proc(props: RND_Props) -> Renderer {
         usage = {.SAMPLER, .DEPTH_STENCIL_TARGET}
     })
     renderer.depth_texture = depth_texture
-    build_bbox_pipeline(&renderer)
-    build_3D_pipeline(&renderer)
+    build_obj_pipeline(&renderer)
     build_gltf_pipeline(&renderer)
+    build_bbox_pipeline(&renderer)
+    build_ui_pipeline(&renderer)
     for i in 0..<4 {
         sampler := sdl.CreateGPUSampler(gpu, {}); assert(sampler != nil)
         renderer.samplers[i] = sampler
@@ -145,9 +147,12 @@ RND_Init :: proc(props: RND_Props) -> Renderer {
     return renderer
 }
 
-RND_Destroy :: proc(state: ^AppState) {
-    using state.renderer
-    sdl.ReleaseGPUGraphicsPipeline(gpu, pipeline3D)
+RND_Destroy :: proc(renderer: ^Renderer) {
+    using renderer
+    sdl.ReleaseGPUGraphicsPipeline(gpu, obj_pipeline)
+    sdl.ReleaseGPUGraphicsPipeline(gpu, gltf_pipeline)
+    sdl.ReleaseGPUGraphicsPipeline(gpu, bbox_pipeline)
+    sdl.ReleaseGPUGraphicsPipeline(gpu, ui_pipeline)
     sdl.ReleaseGPUTexture(gpu, depth_texture)
     sdl.ReleaseGPUTexture(gpu, fallback_texture)
     sdl.ReleaseGPUTexture(gpu, swapchain_texture)
@@ -223,8 +228,8 @@ RND_DrawUI :: proc(state: ^AppState) {
             im.DragFloat("intensity", &renderer.light.power, 10, 0, 10000)
             im.ColorPicker3("color", transmute(^vec3)&renderer.light.color, {.InputRGB})
             im.LabelText("", "General")
-            im.DragFloat3("Player position", &state.player.position, 0.25, 0, 60)
-            im.DragFloat("Draw distance", &state.renderer.draw_distance, 0.5, 10, 250)
+            im.DragFloat3("Player position", &player.position, 0.25, 0, 60)
+            im.DragFloat("Draw distance", &renderer.draw_distance, 0.5, 10, 250)
             if im.Button("Random tiles") do randomize_tile_positions(state)
             wireframe := .WIREFRAME in renderer.props
             im.Checkbox("Wireframe", &wireframe)
@@ -256,9 +261,11 @@ RND_DrawUI :: proc(state: ^AppState) {
         load_op = .LOAD,
         store_op = .STORE
     }
-    im_render_pass := sdl.BeginGPURenderPass(renderer.cmd_buff, &im_color_target, 1, nil)
-    assert(im_render_pass != nil)
+    im_render_pass := sdl.BeginGPURenderPass(renderer.cmd_buff, &im_color_target, 1, nil); assert(im_render_pass != nil)
     im_sdlgpu.RenderDrawData(im_draw_data, renderer.cmd_buff, im_render_pass)
+
+    sdl.BindGPUGraphicsPipeline(im_render_pass, renderer.ui_pipeline)
+
     sdl.EndGPURenderPass(im_render_pass)
 }
 
@@ -337,7 +344,7 @@ RND_DrawGLTF :: proc(state: ^AppState) {
     sdl.PushGPUVertexUniformData(renderer.cmd_buff, 0, &vp, size_of(matrix[4,4]f32))
     sdl.PushGPUFragmentUniformData(renderer.cmd_buff, 0, &frag_ubo, size_of(FragUBO))
     for entity, i in entities {
-        if entity.model.type != .GLTF do continue
+        if entity.model.format != .GLTF do continue
         draw_gltf_node(
             render_pass, 
             state, 
@@ -355,7 +362,7 @@ RND_DrawGLTF :: proc(state: ^AppState) {
     sdl.BindGPUGraphicsPipeline(render_pass, renderer.bbox_pipeline)
     sdl.PushGPUVertexUniformData(renderer.cmd_buff, 0, &vp, size_of(matrix[4,4]f32))
     for entity, i in state.entities {
-        if entity.model.type != .GLTF do continue
+        if entity.model.format != .GLTF do continue
         draw_gltf_aabb(
             render_pass, 
             state, 
@@ -481,7 +488,7 @@ GLTF_fragUBO :: struct {
     _pad2: f32
 }
 
-RND_DrawEntities :: proc(state: ^AppState) {
+render_obj :: proc(state: ^AppState) {
     using state
     vp := renderer.view_projection
     assert(renderer.cmd_buff != nil)
@@ -508,11 +515,11 @@ RND_DrawEntities :: proc(state: ^AppState) {
 
     frag_ubo := create_frag_ubo(state);
     render_pass := sdl.BeginGPURenderPass(renderer.cmd_buff, &color_target, 1, &depth_target_info); assert(render_pass != nil)
-    sdl.BindGPUGraphicsPipeline(render_pass, renderer.pipeline3D)
+    sdl.BindGPUGraphicsPipeline(render_pass, renderer.obj_pipeline)
     sdl.PushGPUFragmentUniformData(renderer.cmd_buff, 0, &frag_ubo, size_of(FragUBO))
     sdl.PushGPUVertexUniformData(renderer.cmd_buff, 0, &vp, size_of(matrix[4,4]f32))
     for &model, model_index in models {
-        if model.type == .GLTF do continue
+        if model.format == .GLTF do continue
         using model.data.obj
         bindings: [1]sdl.GPUBufferBinding = { sdl.GPUBufferBinding { buffer = vbo } } 
         sdl.BindGPUVertexBuffers(render_pass, 0, &bindings[0], 1)
@@ -531,7 +538,7 @@ RND_DrawEntities :: proc(state: ^AppState) {
 
         sdl.BindGPUFragmentStorageBuffers(render_pass, 0, &material_buffer, 1)
         for &entity, i in entities {
-            if entity.model.type == .GLTF do continue
+            if entity.model.format == .GLTF do continue
             if entity.model != &model do continue
             if linalg.distance(player.position, entity.transform.translation) > renderer.draw_distance - 1 &&
                 model_index != 0 { continue }
@@ -582,8 +589,58 @@ get_window_size :: proc(renderer: Renderer) -> vec2 {
     panic("")
 }
 
+build_ui_pipeline :: proc(renderer: ^Renderer) {
+    using renderer
+    sdl.ReleaseGPUGraphicsPipeline(gpu, ui_pipeline)
+    vert_shader := load_shader(renderer.gpu, "ui.vert"); defer sdl.ReleaseGPUShader(renderer.gpu, vert_shader)
+    frag_shader := load_shader(renderer.gpu, "ui.frag"); defer sdl.ReleaseGPUShader(renderer.gpu, vert_shader)
+
+    vb_descriptions: [1]sdl.GPUVertexBufferDescription
+    vb_descriptions = {
+        sdl.GPUVertexBufferDescription {
+            slot = u32(0),
+            pitch = size_of([2]vec2),
+            input_rate = .VERTEX,
+            instance_step_rate = 0
+        },
+    }  
+    vb_attributes: []sdl.GPUVertexAttribute = {
+        sdl.GPUVertexAttribute { // Screen size
+            location = 0,
+            buffer_slot = 0,
+            format = .FLOAT2,
+            offset = 0
+        },
+    }
+    format := sdl.GetGPUSwapchainTextureFormat(renderer.gpu, renderer.window)
+    renderer.ui_pipeline = sdl.CreateGPUGraphicsPipeline(gpu, {
+        vertex_shader = vert_shader,
+        fragment_shader = frag_shader,
+        primitive_type = .TRIANGLELIST,
+        target_info = {
+            num_color_targets = 1,
+            color_target_descriptions = &(sdl.GPUColorTargetDescription {
+                format = format
+            }),
+        },
+        vertex_input_state = {
+            vertex_buffer_descriptions = &vb_descriptions[0],
+            num_vertex_buffers = 1,
+            vertex_attributes = &vb_attributes[0],
+            num_vertex_attributes = 1
+        },
+        rasterizer_state = {
+            fill_mode = .FILL,
+            cull_mode = .NONE,
+        },
+    })
+}
+
+
+
+
 build_bbox_pipeline :: proc(renderer: ^Renderer) {
-    sdl.ReleaseGPUGraphicsPipeline(renderer.gpu, renderer.pipeline3D)
+    sdl.ReleaseGPUGraphicsPipeline(renderer.gpu, renderer.bbox_pipeline)
     vert_shader := load_shader(renderer.gpu, "bbox.vert"); defer sdl.ReleaseGPUShader(renderer.gpu, vert_shader)
     frag_shader := load_shader(renderer.gpu, "bbox.frag"); defer sdl.ReleaseGPUShader(renderer.gpu, frag_shader)
 
@@ -632,9 +689,9 @@ build_bbox_pipeline :: proc(renderer: ^Renderer) {
 }
 
 
-build_3D_pipeline :: proc(renderer: ^Renderer) {
+build_obj_pipeline :: proc(renderer: ^Renderer) {
     using renderer
-    sdl.ReleaseGPUGraphicsPipeline(gpu, pipeline3D)
+    sdl.ReleaseGPUGraphicsPipeline(gpu, obj_pipeline)
     vert_shader := load_shader(gpu, "shader.vert"); defer sdl.ReleaseGPUShader(renderer.gpu, vert_shader)
     frag_shader := load_shader(gpu, "shader.frag"); defer sdl.ReleaseGPUShader(renderer.gpu, frag_shader)
 
@@ -679,7 +736,7 @@ build_3D_pipeline :: proc(renderer: ^Renderer) {
     if .WIREFRAME in renderer.props {fill_mode = .LINE; cull_mode = .NONE} else {fill_mode = .FILL; cull_mode = .BACK}
 
     format := sdl.GetGPUSwapchainTextureFormat(gpu, window)
-    renderer.pipeline3D = sdl.CreateGPUGraphicsPipeline(gpu, {
+    renderer.obj_pipeline = sdl.CreateGPUGraphicsPipeline(gpu, {
         vertex_shader = vert_shader,
         fragment_shader = frag_shader,
         primitive_type = .TRIANGLELIST,
