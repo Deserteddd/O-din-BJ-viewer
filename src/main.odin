@@ -85,13 +85,16 @@ init :: proc(state: ^AppState) {
     player = create_player()
     ground := load_object("assets/ref_tris"); defer delete_obj(ground)
     slab   := load_object("assets/ref_cube"); defer delete_obj(slab)
-    add_model(ground, state)
-    add_model(slab, state)
+    ground_model := add_obj_model(ground, &state.renderer)
+    append(&state.models, ground_model)
+    slab_model := add_obj_model(slab, &state.renderer)
+    append(&state.models, slab_model)
     create_entity(state, 0, "ground")
     for i in 1..<(1<<11) do create_entity(state, 1, "slab")
     randomize_tile_positions(state)
     state.props.attatch_light_to_player = true
     init_imgui(state)
+    renderer.ui = init_ui(&state.renderer)
 }
 
 init_imgui :: proc(state: ^AppState) {
@@ -157,7 +160,7 @@ run :: proc(state: ^AppState) {
         update(state)
         RND_FrameBegin(state)
         render_obj(state)
-        RND_DrawGLTF(state)
+        draw_ui_elements(state)
         wireframe := .WIREFRAME in state.renderer.props
         RND_DrawUI(state)
         if wireframe != .WIREFRAME in state.renderer.props {

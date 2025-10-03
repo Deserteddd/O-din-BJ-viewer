@@ -3,11 +3,11 @@ struct Input {
 };
 
 struct Output {
-    float2 position : texcoord0;
+    float4 position : SV_Position;
 };
 
 Output main(Input input) {
     Output output;
-    output.position = input.position;
+    output.position = float4(input.position, 0, 1);
     return output;
 }

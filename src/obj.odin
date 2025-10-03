@@ -13,7 +13,7 @@ import stbi "vendor:stb/image"
 import sdl "vendor:sdl3"
 
 OBJObjectData :: struct {
-    vertices: [dynamic]Vertex,
+    vertices: [dynamic]OBJVertex,
     materials: []Material,
     texture_data: TextureData
 }
@@ -24,7 +24,7 @@ Material :: struct {
     illum: uint,
 }
 
-Vertex :: struct {
+OBJVertex :: struct {
     position: vec3,
     normal: vec3,
     uv: vec2,
@@ -101,7 +101,7 @@ load_object :: proc(dir_path: string) -> OBJObjectData {
     asset_handle, err := os.open(dir_path, 0, 0); assert(err == nil)
     asset_dir: []os.File_Info
     asset_dir, err = os.read_dir(asset_handle, 0); assert(err == nil)
-    vertex_groups: [dynamic]Vertex
+    vertex_groups: [dynamic]OBJVertex
     materials: []Material
     material_names: []string
     texture_data: TextureData
@@ -278,14 +278,14 @@ new_texture :: proc(tex_path: string, data: ^TextureData) -> f32 {
 @(private = "file")
 load_obj :: proc(obj_data: []string, mat_names: []string, 
     positions: ^[dynamic]vec3, uvs: ^[dynamic]vec2, normals: ^[dynamic]vec3,
-) -> []Vertex {
+) -> []OBJVertex {
     data: OBJObjectData
     vertex_count: u32
     for line in obj_data {
         assert(len(line)>=2)
         if line[0] == 'f' do vertex_count += 3
     }
-    vertices := make([]Vertex, vertex_count);
+    vertices := make([]OBJVertex, vertex_count);
     current_material: u32 = 0
     vertex_index: uint
     for line in obj_data {
@@ -299,19 +299,19 @@ load_obj :: proc(obj_data: []string, mat_names: []string,
             case "f ":
                 defer vertex_index += 3
                 face := parse_face_data(line)
-                vertices[vertex_index] = Vertex {
+                vertices[vertex_index] = OBJVertex {
                     position = positions[face[0]],
                     uv       = {uvs[face[1]].x, 1-uvs[face[1]].y},
                     normal   = normals[face[2]],
                     material = current_material
                 }
-                vertices[vertex_index+1] = Vertex {
+                vertices[vertex_index+1] = OBJVertex {
                     position = positions[face[3]],
                     uv       = {uvs[face[4]].x, 1-uvs[face[4]].y},
                     normal   = normals[face[5]],
                     material = current_material
                 }
-                vertices[vertex_index+2] = Vertex {
+                vertices[vertex_index+2] = OBJVertex {
                     position = positions[face[6]],
                     uv       = {uvs[face[7]].x, 1-uvs[face[7]].y},
                     normal   = normals[face[8]],

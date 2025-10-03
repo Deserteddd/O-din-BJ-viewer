@@ -12,9 +12,6 @@ import "core:path/filepath"
 import "core:encoding/json"
 import sdl "vendor:sdl3"
 import stbi "vendor:stb/image"
-import im "shared:imgui"
-import im_sdl "shared:imgui/imgui_impl_sdl3"
-import im_sdlgpu "shared:imgui/imgui_impl_sdlgpu3"
 
 Renderer :: struct {
     window:             ^sdl.Window,
@@ -32,6 +29,7 @@ Renderer :: struct {
     props:              RND_Props,
     light:              PointLight,
     draw_distance:      f32,
+    ui:                 UI,
 }
 
 PointLight :: struct #packed {
@@ -54,14 +52,6 @@ RND_Props :: distinct bit_set[RND_Prop; u8]
 RND_Prop :: enum u8 {
     FULLSCREEN = 0,
     WIREFRAME = 1,
-}
-
-ShadowUBO :: struct {
-
-    light_viewproj: matrix[4,4]f32,
-
-    position_offset: vec4
-
 }
 
 RND_Init :: proc(props: RND_Props) -> Renderer {
@@ -213,61 +203,7 @@ RND_ToggleFullscreen :: proc(state: ^AppState) {
     init_imgui(state)
 }
 
-RND_DrawUI :: proc(state: ^AppState) {
-    using state
-    im_sdlgpu.NewFrame()
-    im_sdl.NewFrame()
-    im.NewFrame()
-    if props.ui_visible {
-        if im.Begin("Properties") {
-            im.LabelText("", "Light")
-            if !props.attatch_light_to_player {
-                im.DragFloat3("position", &renderer.light.position, 0.5, -200, 200)
-            }
-            im.Checkbox("Snap to player", &props.attatch_light_to_player)
-            im.DragFloat("intensity", &renderer.light.power, 10, 0, 10000)
-            im.ColorPicker3("color", transmute(^vec3)&renderer.light.color, {.InputRGB})
-            im.LabelText("", "General")
-            im.DragFloat3("Player position", &player.position, 0.25, 0, 60)
-            im.DragFloat("Draw distance", &renderer.draw_distance, 0.5, 10, 250)
-            if im.Button("Random tiles") do randomize_tile_positions(state)
-            wireframe := .WIREFRAME in renderer.props
-            im.Checkbox("Wireframe", &wireframe)
-            if wireframe do renderer.props += {.WIREFRAME}
-            else do renderer.props -= {.WIREFRAME}
-        }
-        im.End()
-    }
-    if im.Begin("info", nil, {.NoTitleBar, .NoMouseInputs}) {
-        w, h: i32
-        sdl.GetWindowSize(state.renderer.window, &w, &h)
-        im.SetWindowPos(vec2{f32(w-120), 0})
-        im.SetWindowSize(vec2{120, 0})
-        frame_time_float := i32(math.round(1/f32(time.duration_seconds(debug_info.frame_time))))
-        im.SetNextItemWidth(50)
-        im.DragInt("FPS", &frame_time_float)
-        rendered := i32(debug_info.rendered)
-        im.SetNextItemWidth(50)
-        im.DragInt("Drawn", &rendered)
-        im.SetNextItemWidth(50)
-        im.DragFloat("Speed", &debug_info.player_speed)
-    }
-    im.End()
-    im.Render()
-    im_draw_data := im.GetDrawData()
-    im_sdlgpu.PrepareDrawData(im_draw_data, renderer.cmd_buff)
-    im_color_target := sdl.GPUColorTargetInfo {
-        texture = renderer.swapchain_texture,
-        load_op = .LOAD,
-        store_op = .STORE
-    }
-    im_render_pass := sdl.BeginGPURenderPass(renderer.cmd_buff, &im_color_target, 1, nil); assert(im_render_pass != nil)
-    im_sdlgpu.RenderDrawData(im_draw_data, renderer.cmd_buff, im_render_pass)
 
-    sdl.BindGPUGraphicsPipeline(im_render_pass, renderer.ui_pipeline)
-
-    sdl.EndGPURenderPass(im_render_pass)
-}
 
 RND_FrameBegin :: proc(state: ^AppState) {
     using state
@@ -589,56 +525,6 @@ get_window_size :: proc(renderer: Renderer) -> vec2 {
     panic("")
 }
 
-build_ui_pipeline :: proc(renderer: ^Renderer) {
-    using renderer
-    sdl.ReleaseGPUGraphicsPipeline(gpu, ui_pipeline)
-    vert_shader := load_shader(renderer.gpu, "ui.vert"); defer sdl.ReleaseGPUShader(renderer.gpu, vert_shader)
-    frag_shader := load_shader(renderer.gpu, "ui.frag"); defer sdl.ReleaseGPUShader(renderer.gpu, vert_shader)
-
-    vb_descriptions: [1]sdl.GPUVertexBufferDescription
-    vb_descriptions = {
-        sdl.GPUVertexBufferDescription {
-            slot = u32(0),
-            pitch = size_of([2]vec2),
-            input_rate = .VERTEX,
-            instance_step_rate = 0
-        },
-    }  
-    vb_attributes: []sdl.GPUVertexAttribute = {
-        sdl.GPUVertexAttribute { // Screen size
-            location = 0,
-            buffer_slot = 0,
-            format = .FLOAT2,
-            offset = 0
-        },
-    }
-    format := sdl.GetGPUSwapchainTextureFormat(renderer.gpu, renderer.window)
-    renderer.ui_pipeline = sdl.CreateGPUGraphicsPipeline(gpu, {
-        vertex_shader = vert_shader,
-        fragment_shader = frag_shader,
-        primitive_type = .TRIANGLELIST,
-        target_info = {
-            num_color_targets = 1,
-            color_target_descriptions = &(sdl.GPUColorTargetDescription {
-                format = format
-            }),
-        },
-        vertex_input_state = {
-            vertex_buffer_descriptions = &vb_descriptions[0],
-            num_vertex_buffers = 1,
-            vertex_attributes = &vb_attributes[0],
-            num_vertex_attributes = 1
-        },
-        rasterizer_state = {
-            fill_mode = .FILL,
-            cull_mode = .NONE,
-        },
-    })
-}
-
-
-
-
 build_bbox_pipeline :: proc(renderer: ^Renderer) {
     sdl.ReleaseGPUGraphicsPipeline(renderer.gpu, renderer.bbox_pipeline)
     vert_shader := load_shader(renderer.gpu, "bbox.vert"); defer sdl.ReleaseGPUShader(renderer.gpu, vert_shader)
@@ -699,7 +585,7 @@ build_obj_pipeline :: proc(renderer: ^Renderer) {
     vb_descriptions = {
         sdl.GPUVertexBufferDescription {
             slot = u32(0),
-            pitch = size_of(Vertex),
+            pitch = size_of(OBJVertex),
             input_rate = .VERTEX,
             instance_step_rate = 0
         },

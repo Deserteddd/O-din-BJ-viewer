@@ -24,13 +24,8 @@ set_entity_position :: proc(state: ^AppState, id: int, pos: vec3) {
     state.entities[id].transform.translation = pos
 }
 
-add_model :: proc {
-    add_obj_model,
-    add_gltf_model,
-}
-
-add_obj_model :: proc(data: OBJObjectData, state: ^AppState) {
-    using state.renderer
+add_obj_model :: proc(data: OBJObjectData, renderer: ^Renderer) -> Model {
+    using renderer
     model: Model
     model.format = .OBJ
     tex_transfer_buffers: [4]^sdl.GPUTransferBuffer
@@ -70,7 +65,7 @@ add_obj_model :: proc(data: OBJObjectData, state: ^AppState) {
     model.data.obj.textures = textures[:]
 
     // Create and upload buffers
-    len_bytes := u32(len(data.vertices) * size_of(Vertex))
+    len_bytes := u32(len(data.vertices) * size_of(OBJVertex))
     num_vertices: u32
 
     material_matrices := make([dynamic][4]vec4, 0, len(data.materials)); defer delete(material_matrices)
@@ -113,7 +108,7 @@ add_obj_model :: proc(data: OBJObjectData, state: ^AppState) {
     // Assignments
     model.data.obj.vbo = vbo
     model.data.obj.material_buffer = material_buffer
-    append(&state.models, model)
+    return model
 }
 
 add_gltf_model :: proc(data: GLTFObjectData, state: ^AppState) {
