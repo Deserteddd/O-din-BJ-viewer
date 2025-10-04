@@ -9,25 +9,31 @@ import im "shared:imgui"
 import im_sdl "shared:imgui/imgui_impl_sdl3"
 import im_sdlgpu "shared:imgui/imgui_impl_sdlgpu3"
 
-UIVertex :: struct {
+Vertex2D :: struct {
     position: vec2,
 }
 
-UI :: struct {
-    triangle: Triangle,
+Renderer2D :: struct {
+    crosshair: Crosshair,
 }
 
-Triangle :: struct {
-    verts:      [3]UIVertex,
-    indices:    [3]u16,
+Crosshair :: struct {
     vbo: ^sdl.GPUBuffer,
+    ibo: ^sdl.GPUBuffer,
+    num_vertices: u32,
+    num_indices: u32
 }
 
-init_ui :: proc(renderer: ^Renderer) -> UI {
+UBO_2D :: struct {
+    screensize: [2]u32
+}
+
+init_renderer_2d:: proc(renderer: ^Renderer) {
     using renderer
-    verts, indices := create_triangle()
-    len_bytes := u32(len(verts) * size_of(OBJVertex))
-    num_vertices := len(verts)
+    
+    verts, indices := crosshair()
+
+    len_bytes := u32(len(verts) * size_of(Vertex2D))
 
     transfer_buffer := sdl.CreateGPUTransferBuffer(gpu, {
         usage = sdl.GPUTransferBufferUsage.UPLOAD,
@@ -36,27 +42,43 @@ init_ui :: proc(renderer: ^Renderer) -> UI {
 
     copy_commands := sdl.AcquireGPUCommandBuffer(gpu); assert(copy_commands != nil)
     copy_pass := sdl.BeginGPUCopyPass(copy_commands); assert(copy_pass != nil)
-
     vbo := create_buffer_with_data(gpu, transfer_buffer, copy_pass, {.VERTEX}, verts[:])
+    ibo := create_buffer_with_data(gpu, transfer_buffer, copy_pass, {.INDEX}, indices[:])
 
     sdl.ReleaseGPUTransferBuffer(gpu, transfer_buffer)
     sdl.EndGPUCopyPass(copy_pass)
     ok := sdl.SubmitGPUCommandBuffer(copy_commands); assert(ok)
-    return UI {
-        triangle = {
-            verts = verts,
-            indices = indices,
-            vbo = vbo,
-        }
+    renderer.r2d = {
+        crosshair = {vbo, ibo, u32(len(verts)), u32(len(indices))}
     }
 }
 
-create_triangle :: proc() -> (verts: [3]UIVertex, indices: [3]u16) {
+crosshair :: proc() -> (verts: [16]Vertex2D, indices: [24]u16) {
     verts = {
-        UIVertex {{-0.5, -0.5}},
-        UIVertex {{-0.5, 0.5}},
-        UIVertex {{0.5, 0.5}},
-    }
+        // top bar
+        Vertex2D{{ -0.0010417,  0.0222222 }},
+        Vertex2D{{  0.0010417,  0.0222222 }},
+        Vertex2D{{  0.0010417,  0.0074074 }},
+        Vertex2D{{ -0.0010417,  0.0074074 }},
+        Vertex2D{{ -0.0010417, -0.0074074 }},
+        Vertex2D{{  0.0010417, -0.0074074 }},
+        Vertex2D{{  0.0010417, -0.0222222 }},
+        Vertex2D{{ -0.0010417, -0.0222222 }},
+        Vertex2D{{ -0.0125000,  0.0018519 }},
+        Vertex2D{{ -0.0041667,  0.0018519 }},
+        Vertex2D{{ -0.0041667, -0.0018519 }},
+        Vertex2D{{ -0.0125000, -0.0018519 }},
+        Vertex2D{{  0.0041667,  0.0018519 }},
+        Vertex2D{{  0.0125000,  0.0018519 }},
+        Vertex2D{{  0.0125000, -0.0018519 }},
+        Vertex2D{{  0.0041667, -0.0018519 }},
+    };
+    indices = {
+        0,1,2, 2,3,0,
+        4,5,6, 6,7,4,
+        8,9,10, 10,11,8,
+        12,13,14, 14,15,12
+    };
     return
 }
 
@@ -111,32 +133,38 @@ RND_DrawUI :: proc(state: ^AppState) {
     im_render_pass := sdl.BeginGPURenderPass(renderer.cmd_buff, &im_color_target, 1, nil); assert(im_render_pass != nil)
     im_sdlgpu.RenderDrawData(im_draw_data, renderer.cmd_buff, im_render_pass)
     sdl.EndGPURenderPass(im_render_pass)
+    draw_2d(&state.renderer)
 }
 
-draw_ui_elements :: proc(state: ^AppState) {
-    using state
+draw_2d :: proc(renderer: ^Renderer) {
+    using renderer
     assert(renderer.cmd_buff != nil)
     assert(renderer.swapchain_texture != nil)
     assert(renderer.ui_pipeline != nil)
-    assert(renderer.ui.triangle.vbo != nil)
+    // assert(renderer..crosshair.vbo != nil)
 
     color_target := sdl.GPUColorTargetInfo {
         texture = renderer.swapchain_texture,
         load_op = .LOAD,
         store_op = .STORE,
     }
-    render_pass := sdl.BeginGPURenderPass(renderer.cmd_buff, &color_target, 1, nil); assert(render_pass != nil)
+    render_pass := sdl.BeginGPURenderPass(cmd_buff, &color_target, 1, nil); assert(render_pass != nil)
     
-    sdl.BindGPUGraphicsPipeline(render_pass, renderer.ui_pipeline)
-    bindings: [1]sdl.GPUBufferBinding = {
-        sdl.GPUBufferBinding {buffer = renderer.ui.triangle.vbo},
+    sdl.BindGPUGraphicsPipeline(render_pass, ui_pipeline)
+    bindings: [2]sdl.GPUBufferBinding = {
+        sdl.GPUBufferBinding {buffer = r2d.crosshair.vbo},
+        sdl.GPUBufferBinding {buffer = r2d.crosshair.ibo},
     }
     sdl.BindGPUVertexBuffers(render_pass, 0, &bindings[0], 1)
-    sdl.DrawGPUPrimitives(render_pass, 3, 1, 0, 0)
-    sdl.EndGPURenderPass(render_pass)
+    sdl.BindGPUIndexBuffer(render_pass, bindings[1], ._16BIT)
+    { 
+        using r2d.crosshair
+        sdl.DrawGPUIndexedPrimitives(render_pass, num_indices, 1, 0, 0, 0)
+        sdl.EndGPURenderPass(render_pass)
+    }
 }
 
-build_ui_pipeline :: proc(renderer: ^Renderer) {
+build_pipeline_2d :: proc(renderer: ^Renderer) {
     using renderer
     sdl.ReleaseGPUGraphicsPipeline(gpu, ui_pipeline)
     vert_shader := load_shader(renderer.gpu, "ui.vert"); defer sdl.ReleaseGPUShader(renderer.gpu, vert_shader)

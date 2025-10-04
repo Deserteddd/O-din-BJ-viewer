@@ -94,7 +94,6 @@ init :: proc(state: ^AppState) {
     randomize_tile_positions(state)
     state.props.attatch_light_to_player = true
     init_imgui(state)
-    renderer.ui = init_ui(&state.renderer)
 }
 
 init_imgui :: proc(state: ^AppState) {
@@ -160,7 +159,6 @@ run :: proc(state: ^AppState) {
         update(state)
         RND_FrameBegin(state)
         render_obj(state)
-        draw_ui_elements(state)
         wireframe := .WIREFRAME in state.renderer.props
         RND_DrawUI(state)
         if wireframe != .WIREFRAME in state.renderer.props {
