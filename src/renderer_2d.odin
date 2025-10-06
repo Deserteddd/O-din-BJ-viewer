@@ -100,10 +100,6 @@ RND_DrawUI :: proc(state: ^AppState) {
             im.DragFloat3("Player position", &player.position, 0.25, 0, 60)
             im.DragFloat("Draw distance", &renderer.draw_distance, 0.5, 10, 250)
             if im.Button("Random tiles") do randomize_tile_positions(state)
-            wireframe := .WIREFRAME in renderer.props
-            im.Checkbox("Wireframe", &wireframe)
-            if wireframe do renderer.props += {.WIREFRAME}
-            else do renderer.props -= {.WIREFRAME}
         }
         im.End()
     }
@@ -164,49 +160,49 @@ draw_2d :: proc(renderer: ^Renderer) {
     }
 }
 
-build_pipeline_2d :: proc(renderer: ^Renderer) {
-    using renderer
-    sdl.ReleaseGPUGraphicsPipeline(gpu, ui_pipeline)
-    vert_shader := load_shader(renderer.gpu, "ui.vert"); defer sdl.ReleaseGPUShader(renderer.gpu, vert_shader)
-    frag_shader := load_shader(renderer.gpu, "ui.frag"); defer sdl.ReleaseGPUShader(renderer.gpu, vert_shader)
+// build_pipeline_2d :: proc(renderer: ^Renderer) {
+//     using renderer
+//     sdl.ReleaseGPUGraphicsPipeline(gpu, ui_pipeline)
+//     vert_shader := load_shader(renderer.gpu, "ui.vert"); defer sdl.ReleaseGPUShader(renderer.gpu, vert_shader)
+//     frag_shader := load_shader(renderer.gpu, "ui.frag"); defer sdl.ReleaseGPUShader(renderer.gpu, vert_shader)
 
-    vb_descriptions: [1]sdl.GPUVertexBufferDescription
-    vb_descriptions = {
-        sdl.GPUVertexBufferDescription {
-            slot = u32(0),
-            pitch = size_of(vec2),
-            input_rate = .VERTEX,
-            instance_step_rate = 0
-        },
-    }  
-    vb_attributes: []sdl.GPUVertexAttribute = {
-        sdl.GPUVertexAttribute { // Screen size
-            location = 0,
-            buffer_slot = 0,
-            format = .FLOAT2,
-            offset = 0
-        },
-    }
-    format := sdl.GetGPUSwapchainTextureFormat(renderer.gpu, renderer.window)
-    renderer.ui_pipeline = sdl.CreateGPUGraphicsPipeline(gpu, {
-        vertex_shader = vert_shader,
-        fragment_shader = frag_shader,
-        primitive_type = .TRIANGLELIST,
-        target_info = {
-            num_color_targets = 1,
-            color_target_descriptions = &(sdl.GPUColorTargetDescription {
-                format = format
-            }),
-        },
-        vertex_input_state = {
-            vertex_buffer_descriptions = &vb_descriptions[0],
-            num_vertex_buffers = 1,
-            vertex_attributes = &vb_attributes[0],
-            num_vertex_attributes = 1
-        },
-        rasterizer_state = {
-            fill_mode = .FILL,
-            cull_mode = .NONE,
-        },
-    })
-}
+//     vb_descriptions: [1]sdl.GPUVertexBufferDescription
+//     vb_descriptions = {
+//         sdl.GPUVertexBufferDescription {
+//             slot = u32(0),
+//             pitch = size_of(Vertex2D),
+//             input_rate = .VERTEX,
+//             instance_step_rate = 0
+//         },
+//     }  
+//     vb_attributes: []sdl.GPUVertexAttribute = {
+//         sdl.GPUVertexAttribute { // Screen size
+//             location = 0,
+//             buffer_slot = 0,
+//             format = .FLOAT2,
+//             offset = 0
+//         },
+//     }
+//     format := sdl.GetGPUSwapchainTextureFormat(renderer.gpu, renderer.window)
+//     renderer.ui_pipeline = sdl.CreateGPUGraphicsPipeline(gpu, {
+//         vertex_shader = vert_shader,
+//         fragment_shader = frag_shader,
+//         primitive_type = .TRIANGLELIST,
+//         target_info = {
+//             num_color_targets = 1,
+//             color_target_descriptions = &(sdl.GPUColorTargetDescription {
+//                 format = format
+//             }),
+//         },
+//         vertex_input_state = {
+//             vertex_buffer_descriptions = &vb_descriptions[0],
+//             num_vertex_buffers = 1,
+//             vertex_attributes = &vb_attributes[0],
+//             num_vertex_attributes = 1
+//         },
+//         rasterizer_state = {
+//             fill_mode = .FILL,
+//             cull_mode = .NONE,
+//         },
+//     })
+// }

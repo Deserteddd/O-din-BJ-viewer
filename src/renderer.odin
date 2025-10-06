@@ -51,7 +51,6 @@ RND_Props :: distinct bit_set[RND_Prop; u8]
 
 RND_Prop :: enum u8 {
     FULLSCREEN = 0,
-    WIREFRAME = 1,
 }
 
 RND_Init :: proc(props: RND_Props) -> Renderer {
@@ -120,10 +119,39 @@ RND_Init :: proc(props: RND_Props) -> Renderer {
         usage = {.SAMPLER, .DEPTH_STENCIL_TARGET}
     })
     renderer.depth_texture = depth_texture
-    build_obj_pipeline(&renderer)
-    build_gltf_pipeline(&renderer)
-    build_bbox_pipeline(&renderer)
-    build_pipeline_2d(&renderer)
+    renderer.obj_pipeline = create_render_pipeline(
+        &renderer,
+        "shader.vert",
+        "shader.frag",
+        size_of(OBJVertex),
+        {.FLOAT3, .FLOAT3, .FLOAT2, .UINT},
+        true
+    )
+    renderer.gltf_pipeline = create_render_pipeline(
+        &renderer,
+        "pbr_metallic.vert",
+        "pbr_metallic.frag",
+        size_of(GLTFVertex),
+        {.FLOAT3, .FLOAT3, .FLOAT2, .FLOAT3},
+        true
+    )
+    renderer.bbox_pipeline = create_render_pipeline(
+        &renderer,
+        "bbox.vert",
+        "bbox.frag",
+        size_of(vec3),
+        {.FLOAT3},
+        false,
+        sdl.GPUPrimitiveType.LINELIST
+    )
+    renderer.ui_pipeline = create_render_pipeline(
+        &renderer,
+        "ui.vert",
+        "ui.frag",
+        size_of(Vertex2D),
+        {.FLOAT2},
+        false,
+    )
     for i in 0..<4 {
         sampler := sdl.CreateGPUSampler(gpu, {}); assert(sampler != nil)
         renderer.samplers[i] = sampler
@@ -644,4 +672,83 @@ load_shader_info :: proc(shaderfile: string) -> Shader_Info {
     result: Shader_Info
     err := json.unmarshal(json_data, &result, allocator = context.temp_allocator); assert(err == nil)
     return result
+}
+
+create_render_pipeline :: proc(
+    renderer: ^Renderer,
+    vert_shader: string,
+    frag_shader: string,
+    vb_pitch: int,
+    vb_attribute_formats: []sdl.GPUVertexElementFormat,
+    use_depth_buffer: bool,
+    primitive_type := sdl.GPUPrimitiveType.TRIANGLELIST
+) -> ^sdl.GPUGraphicsPipeline {
+    using renderer
+    vert_shader := load_shader(gpu, vert_shader); defer sdl.ReleaseGPUShader(renderer.gpu, vert_shader)
+    frag_shader := load_shader(gpu, frag_shader); defer sdl.ReleaseGPUShader(renderer.gpu, frag_shader)
+    vb_descriptions: [1]sdl.GPUVertexBufferDescription
+    vb_descriptions = {
+        sdl.GPUVertexBufferDescription {
+            slot = 0,
+            pitch = u32(vb_pitch),
+            input_rate = .VERTEX,
+            instance_step_rate = 0
+        },
+    }
+    vb_attributes := make([]sdl.GPUVertexAttribute, len(vb_attribute_formats), context.temp_allocator)
+    offset: u32
+    for format, i in vb_attribute_formats {
+        vb_attributes[i] = sdl.GPUVertexAttribute {
+            location = u32(i),
+            buffer_slot = 0,
+            format = format,
+            offset = offset
+        }
+        offset += attribute_size(format)
+    }
+    cull_mode: sdl.GPUCullMode
+    if use_depth_buffer do cull_mode = .BACK
+    format := sdl.GetGPUSwapchainTextureFormat(gpu, window)
+    pipeline := sdl.CreateGPUGraphicsPipeline(gpu, {
+        vertex_shader = vert_shader,
+        fragment_shader = frag_shader,
+        primitive_type = primitive_type,
+        target_info = {
+            num_color_targets = 1,
+            color_target_descriptions = &(sdl.GPUColorTargetDescription {
+                format = format
+            }),
+            has_depth_stencil_target = use_depth_buffer,
+            depth_stencil_format = .D32_FLOAT,
+        },
+        vertex_input_state = {
+            vertex_buffer_descriptions = &vb_descriptions[0],
+            num_vertex_buffers = 1,
+            vertex_attributes = &vb_attributes[0],
+            num_vertex_attributes = u32(len(vb_attributes))
+        },
+        rasterizer_state = {
+            fill_mode = .FILL,
+            cull_mode = cull_mode
+        },
+        depth_stencil_state = {
+            enable_depth_test = use_depth_buffer,
+            enable_depth_write = use_depth_buffer,
+            compare_op = .LESS,
+        }
+    }); assert(pipeline != nil)
+    return pipeline
+}
+
+attribute_size :: proc(a: sdl.GPUVertexElementFormat) -> u32 {
+    #partial switch a {
+        case .FLOAT2: return size_of(vec2)
+        case .FLOAT3: return size_of(vec3)
+        case .FLOAT4: return size_of(vec4)
+        case .UINT:   return size_of(u32)
+        case .UINT2:  return size_of(u32)*2
+        case .UINT3:  return size_of(u32)*3
+        case .UINT4:  return size_of(u32)*4
+    }
+    panic("Invalid attribute")
 }

@@ -119,10 +119,12 @@ init_imgui :: proc(state: ^AppState) {
 }
 
 run :: proc(state: ^AppState) {
-    assert(state.gltf_meshes == nil)
+    using state
+    assert(gltf_meshes == nil)
     main_loop: for {
         now := time.now()
         defer FRAMES += 1
+        defer free_all(context.temp_allocator)
         ev: sdl.Event
         for sdl.PollEvent(&ev) {
             im_sdl.ProcessEvent(&ev)
@@ -133,14 +135,14 @@ run :: proc(state: ^AppState) {
                     case .ESCAPE:
                         toggle_ui(state)
                     case .Q:
-                        if !state.player.airborne do state.checkpoint = get_player_translation(state.player)
+                        if !player.airborne do checkpoint = get_player_translation(player)
                     case .E:
                         reset_player_pos(state)
                     case .F:
                         RND_ToggleFullscreen(state)
                     case .C:
                         if .LCTRL in ev.key.mod do break main_loop
-                    case .N: state.player.noclip = !state.player.noclip
+                    case .N: player.noclip = !player.noclip
                 }
                 case .MOUSE_BUTTON_DOWN: if !state.props.ui_visible {
                     switch ev.button.button {
@@ -148,23 +150,19 @@ run :: proc(state: ^AppState) {
                             state.props.lmb_pressed = true
                         case 3:
                             new := create_entity(state, 1, "slab")
-                            set_entity_position(state, new, state.player.position)
+                            set_entity_position(state, new, player.position)
                     }
                 }
             }
         }
 
-        update_camera(&state.player)
+        update_camera(&player)
         update_vp(state)
         update(state)
         RND_FrameBegin(state)
         render_obj(state)
-        wireframe := .WIREFRAME in state.renderer.props
         RND_DrawUI(state)
-        if wireframe != .WIREFRAME in state.renderer.props {
-            build_obj_pipeline(&state.renderer)
-            build_gltf_pipeline(&state.renderer)
-        }
+
         state.debug_info.frame_time = time.since(now)
         ok := RND_FrameSubmit(&state.renderer); assert(ok)
     }
@@ -217,7 +215,9 @@ update :: proc(state: ^AppState) {
     dt := f32(new_ticks - last_ticks) / 1000
     last_ticks = new_ticks
     if !props.ui_visible {
+        t := time.now()
         update_player(state, dt)
+        fmt.println(time.since(t))
     }
     debug_info.player_speed = linalg.length(player.speed)
     if props.attatch_light_to_player {

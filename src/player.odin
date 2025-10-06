@@ -54,6 +54,7 @@ update_player :: proc(state: ^AppState, dt: f32) #no_bounds_check {
     } else {
         air_accelerate(&wishveloc, &player, dt)
         speed.y -= g * dt
+        speed.y = math.max(speed.y, -20)
     }
     delta_pos := speed * dt
     position += delta_pos
@@ -111,12 +112,11 @@ update_player :: proc(state: ^AppState, dt: f32) #no_bounds_check {
 }
 
 update_camera :: proc(player: ^Player) {
-    x, y: f32
     using player
+    x, y: f32
     _ = sdl.GetRelativeMouseState(&x, &y)
     rotation.y += x * 0.03
-    rotation.x += y * 0.03
-    if rotation.x >  90 do rotation.x =  90
+    rotation.x = math.min(rotation.x + y*0.03, 90)
     if rotation.x < -90 do rotation.x = -90
 }
 
@@ -133,7 +133,7 @@ player_wish_speed :: proc(player: Player) -> vec3 {
     yaw_cos := math.cos(math.to_radians(player.rotation.y))
     yaw_sin := math.sin(math.to_radians(player.rotation.y))
 
-    if !player.airborne do wish_speed.y = u
+    wish_speed.y = u * f32(int(!player.airborne))
     if player.noclip do wish_speed.y = u-d
     wish_speed.x += (lr * yaw_cos - fb * yaw_sin)
     wish_speed.z += (lr * yaw_sin + fb * yaw_cos)
@@ -145,7 +145,8 @@ air_accelerate :: proc(wishveloc: ^vec3, player: ^Player, dt: f32) {
     wishveloc^ *= 10
     wishspd = vector_normalize(wishveloc);
     grounded_wishspd := wishspd
-    if wishspd > 2 do wishspd = 2
+    // if wishspd > 2 do wishspd = 2
+    wishspd = math.min(wishspd, 2)
     currentspeed = linalg.dot(player.speed, wishveloc^)
     addspeed = wishspd - currentspeed
     if addspeed <= 0 do return
