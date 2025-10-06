@@ -234,13 +234,11 @@ RND_ToggleFullscreen :: proc(state: ^AppState) {
 
 
 
-RND_FrameBegin :: proc(state: ^AppState) {
-    using state
-    assert(renderer.cmd_buff == nil)
-    assert(renderer.swapchain_texture == nil)
-    cmd_buff := sdl.AcquireGPUCommandBuffer(renderer.gpu); assert(cmd_buff != nil)
-    renderer.cmd_buff = cmd_buff
-    debug_info.rendered = 0
+frame_begin :: proc(renderer: ^Renderer) {
+    using renderer
+    assert(cmd_buff == nil)
+    assert(swapchain_texture == nil)
+    cmd_buff = sdl.AcquireGPUCommandBuffer(renderer.gpu); assert(cmd_buff != nil)
     ok := sdl.WaitAndAcquireGPUSwapchainTexture(cmd_buff, renderer.window, &renderer.swapchain_texture, nil, nil)
     assert(ok)
 }
@@ -252,7 +250,7 @@ update_vp :: proc(state: ^AppState) {
     state.renderer.view_projection = proj_matrix * view_matrix;
 }
 
-RND_FrameSubmit :: proc(renderer: ^Renderer) -> bool {
+frame_submit :: proc(renderer: ^Renderer) -> bool {
     ok := sdl.SubmitGPUCommandBuffer(renderer.cmd_buff)
     renderer.cmd_buff = nil
     renderer.swapchain_texture = nil
@@ -321,7 +319,6 @@ RND_DrawGLTF :: proc(state: ^AppState) {
     }
     sdl.EndGPURenderPass(render_pass)
 
-    // Renders AABBs as 
     if !DEBUG_GPU do return
     bbox_pass := sdl.BeginGPURenderPass(renderer.cmd_buff, &color_target, 1, nil)
     sdl.BindGPUGraphicsPipeline(render_pass, renderer.bbox_pipeline)
@@ -389,7 +386,7 @@ draw_gltf_node :: proc(
         sdl.PushGPUVertexUniformData(renderer.cmd_buff, 1, &model_matrix, size_of(matrix[4,4]f32))
         using mesh
         for primitive in data.primitives {
-            frag_ubo: GLTF_fragUBO
+            frag_ubo: GLTF_FragUBO
             frag_ubo.base_color = primitive.material.base_color_factor
             frag_ubo.metallic_factor = primitive.material.metallic_factor
             frag_ubo.roughness_factor = primitive.material.roughness_factor
@@ -431,10 +428,10 @@ draw_gltf_node :: proc(
                 }
             }
             sdl.BindGPUFragmentSamplers(render_pass, 0, raw_data(tex_bindings[:]), 3)
-            sdl.PushGPUFragmentUniformData(renderer.cmd_buff, 1, &frag_ubo, size_of(GLTF_fragUBO))
+            sdl.PushGPUFragmentUniformData(renderer.cmd_buff, 1, &frag_ubo, size_of(GLTF_FragUBO))
             num_indices := u32(primitive.end - primitive.start)
             sdl.DrawGPUIndexedPrimitives(render_pass, num_indices, 1, u32(primitive.start), 0, 0)
-            debug_info.rendered += 1
+            debug_info.objects_rendered += 1
         }
     }
 
@@ -442,16 +439,7 @@ draw_gltf_node :: proc(
         draw_gltf_node(render_pass, state, child, model_matrix, entity_pos, frustum_planes)
     }
 }
-GLTF_fragUBO :: struct {
-    base_color: vec4,
-    has_albedo_tex: bool,
-    has_metallic_roughness_tex: bool,
-    has_normal_map: bool,
-    _pad: bool,
-    roughness_factor: f32,
-    metallic_factor: f32,
-    _pad2: f32
-}
+
 
 render_obj :: proc(state: ^AppState) {
     using state
@@ -508,7 +496,7 @@ render_obj :: proc(state: ^AppState) {
             if linalg.distance(player.position, entity.transform.translation) > renderer.draw_distance - 1 &&
                 model_index != 0 { continue }
             if !aabb_intersects_frustum(frustum_planes, entity_aabb(entity)) do continue
-            debug_info.rendered += 1
+            debug_info.objects_rendered += 1
             model_matrix := linalg.matrix4_translate_f32(entity.transform.translation)
             sdl.PushGPUVertexUniformData(renderer.cmd_buff, 1, &model_matrix, size_of(matrix[4,4]f32))
             sdl.DrawGPUPrimitives(render_pass, num_vertices, 1, 0, 0)
@@ -550,55 +538,6 @@ get_window_size :: proc(renderer: Renderer) -> vec2 {
     sdl.ClearError()
     log.logf(.Error, "SDL Error: {}", sdl.GetError())
     panic("")
-}
-
-build_bbox_pipeline :: proc(renderer: ^Renderer) {
-    sdl.ReleaseGPUGraphicsPipeline(renderer.gpu, renderer.bbox_pipeline)
-    vert_shader := load_shader(renderer.gpu, "bbox.vert"); defer sdl.ReleaseGPUShader(renderer.gpu, vert_shader)
-    frag_shader := load_shader(renderer.gpu, "bbox.frag"); defer sdl.ReleaseGPUShader(renderer.gpu, frag_shader)
-
-    vb_descriptions: [1]sdl.GPUVertexBufferDescription
-    vb_descriptions = {
-        sdl.GPUVertexBufferDescription {
-            slot = u32(0),
-            pitch = size_of(vec3),
-            input_rate = .VERTEX,
-            instance_step_rate = 0
-        },
-    }  
-
-    vb_attributes: []sdl.GPUVertexAttribute = {
-        sdl.GPUVertexAttribute {
-            location = 0,
-            buffer_slot = 0,
-            format = .FLOAT3,
-            offset = 0
-        }
-    }
-
-    format := sdl.GetGPUSwapchainTextureFormat(renderer.gpu, renderer.window)
-
-    renderer.bbox_pipeline = sdl.CreateGPUGraphicsPipeline(renderer.gpu, {
-        vertex_shader = vert_shader,
-        fragment_shader = frag_shader,
-        primitive_type = .LINELIST,
-        target_info = {
-            num_color_targets = 1,
-            color_target_descriptions = &(sdl.GPUColorTargetDescription {
-                format = format
-            }),
-        },
-        vertex_input_state = {
-            vertex_buffer_descriptions = &vb_descriptions[0],
-            num_vertex_buffers = 1,
-            vertex_attributes = &vb_attributes[0],
-            num_vertex_attributes = 1
-        },
-        rasterizer_state = {
-            fill_mode = .LINE,
-            cull_mode = .NONE,
-        },
-    })
 }
 
 create_buffer_with_data :: proc(

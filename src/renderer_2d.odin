@@ -82,7 +82,7 @@ crosshair :: proc() -> (verts: [16]Vertex2D, indices: [24]u16) {
     return
 }
 
-RND_DrawUI :: proc(state: ^AppState) {
+draw_ui :: proc(state: ^AppState) {
     using state
     im_sdlgpu.NewFrame()
     im_sdl.NewFrame()
@@ -111,7 +111,7 @@ RND_DrawUI :: proc(state: ^AppState) {
         frame_time_float := i32(math.round(1/f32(time.duration_seconds(debug_info.frame_time))))
         im.SetNextItemWidth(50)
         im.DragInt("FPS", &frame_time_float)
-        rendered := i32(debug_info.rendered)
+        rendered := i32(debug_info.objects_rendered)
         im.SetNextItemWidth(50)
         im.DragInt("Drawn", &rendered)
         im.SetNextItemWidth(50)
@@ -159,50 +159,3 @@ draw_2d :: proc(renderer: ^Renderer) {
         sdl.EndGPURenderPass(render_pass)
     }
 }
-
-// build_pipeline_2d :: proc(renderer: ^Renderer) {
-//     using renderer
-//     sdl.ReleaseGPUGraphicsPipeline(gpu, ui_pipeline)
-//     vert_shader := load_shader(renderer.gpu, "ui.vert"); defer sdl.ReleaseGPUShader(renderer.gpu, vert_shader)
-//     frag_shader := load_shader(renderer.gpu, "ui.frag"); defer sdl.ReleaseGPUShader(renderer.gpu, vert_shader)
-
-//     vb_descriptions: [1]sdl.GPUVertexBufferDescription
-//     vb_descriptions = {
-//         sdl.GPUVertexBufferDescription {
-//             slot = u32(0),
-//             pitch = size_of(Vertex2D),
-//             input_rate = .VERTEX,
-//             instance_step_rate = 0
-//         },
-//     }  
-//     vb_attributes: []sdl.GPUVertexAttribute = {
-//         sdl.GPUVertexAttribute { // Screen size
-//             location = 0,
-//             buffer_slot = 0,
-//             format = .FLOAT2,
-//             offset = 0
-//         },
-//     }
-//     format := sdl.GetGPUSwapchainTextureFormat(renderer.gpu, renderer.window)
-//     renderer.ui_pipeline = sdl.CreateGPUGraphicsPipeline(gpu, {
-//         vertex_shader = vert_shader,
-//         fragment_shader = frag_shader,
-//         primitive_type = .TRIANGLELIST,
-//         target_info = {
-//             num_color_targets = 1,
-//             color_target_descriptions = &(sdl.GPUColorTargetDescription {
-//                 format = format
-//             }),
-//         },
-//         vertex_input_state = {
-//             vertex_buffer_descriptions = &vb_descriptions[0],
-//             num_vertex_buffers = 1,
-//             vertex_attributes = &vb_attributes[0],
-//             num_vertex_attributes = 1
-//         },
-//         rasterizer_state = {
-//             fill_mode = .FILL,
-//             cull_mode = .NONE,
-//         },
-//     })
-// }

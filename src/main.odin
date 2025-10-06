@@ -65,7 +65,7 @@ Props :: struct {
 
 DebugInfo :: struct {
     frame_time:     time.Duration,
-    rendered:       u32,
+    objects_rendered:       u32,
     player_speed:   f32,
 }
 
@@ -159,12 +159,12 @@ run :: proc(state: ^AppState) {
         update_camera(&player)
         update_vp(state)
         update(state)
-        RND_FrameBegin(state)
+        frame_begin(&renderer)
         render_obj(state)
-        RND_DrawUI(state)
+        draw_ui(state)
 
         state.debug_info.frame_time = time.since(now)
-        ok := RND_FrameSubmit(&state.renderer); assert(ok)
+        ok := frame_submit(&state.renderer); assert(ok)
     }
 }
 
@@ -211,13 +211,12 @@ reset_player_pos :: proc(state: ^AppState, at_origin := false) {
 
 update :: proc(state: ^AppState) {
     using state
+    debug_info.objects_rendered = 0
     new_ticks := sdl.GetTicks();
     dt := f32(new_ticks - last_ticks) / 1000
     last_ticks = new_ticks
     if !props.ui_visible {
-        t := time.now()
         update_player(state, dt)
-        fmt.println(time.since(t))
     }
     debug_info.player_speed = linalg.length(player.speed)
     if props.attatch_light_to_player {

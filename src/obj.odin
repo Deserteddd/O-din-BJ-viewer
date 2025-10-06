@@ -45,83 +45,6 @@ OBJModel :: struct {
     bbox: AABB
 }
 
-// build_obj_pipeline :: proc(renderer: ^Renderer) {
-//     using renderer
-//     sdl.ReleaseGPUGraphicsPipeline(gpu, obj_pipeline)
-//     vert_shader := load_shader(gpu, "shader.vert"); defer sdl.ReleaseGPUShader(renderer.gpu, vert_shader)
-//     frag_shader := load_shader(gpu, "shader.frag"); defer sdl.ReleaseGPUShader(renderer.gpu, frag_shader)
-
-//     vb_descriptions: [1]sdl.GPUVertexBufferDescription
-//     vb_descriptions = {
-//         sdl.GPUVertexBufferDescription {
-//             slot = u32(0),
-//             pitch = size_of(OBJVertex),
-//             input_rate = .VERTEX,
-//             instance_step_rate = 0
-//         },
-//     }  
-
-//     vb_attributes: []sdl.GPUVertexAttribute = {
-//         sdl.GPUVertexAttribute {
-//             location = 0,
-//             buffer_slot = 0,
-//             format = .FLOAT3,
-//             offset = 0
-//         },
-//         sdl.GPUVertexAttribute {
-//             location = 1,
-//             buffer_slot = 0,
-//             format = .FLOAT3,
-//             offset = size_of(vec3),
-//         },
-//         sdl.GPUVertexAttribute {
-//             location = 2,
-//             buffer_slot = 0,
-//             format = .FLOAT2,
-//             offset = size_of(vec3) * 2
-//         },
-//         sdl.GPUVertexAttribute {
-//             location = 3,
-//             buffer_slot = 0,
-//             format = .UINT,
-//             offset = size_of(vec3) * 2 + size_of(vec2)
-//         }
-//     }
-//     fill_mode: sdl.GPUFillMode;
-//     cull_mode: sdl.GPUCullMode; 
-//     if .WIREFRAME in renderer.props {fill_mode = .LINE; cull_mode = .NONE} else {fill_mode = .FILL; cull_mode = .BACK}
-
-//     format := sdl.GetGPUSwapchainTextureFormat(gpu, window)
-//     renderer.obj_pipeline = sdl.CreateGPUGraphicsPipeline(gpu, {
-//         vertex_shader = vert_shader,
-//         fragment_shader = frag_shader,
-//         primitive_type = .TRIANGLELIST,
-//         target_info = {
-//             num_color_targets = 1,
-//             color_target_descriptions = &(sdl.GPUColorTargetDescription {
-//                 format = format
-//             }),
-//             has_depth_stencil_target = true,
-//             depth_stencil_format = .D32_FLOAT
-//         },
-//         vertex_input_state = {
-//             vertex_buffer_descriptions = &vb_descriptions[0],
-//             num_vertex_buffers = 1,
-//             vertex_attributes = &vb_attributes[0],
-//             num_vertex_attributes = 4
-//         },
-//         rasterizer_state = {
-//             fill_mode = fill_mode,
-//             cull_mode = cull_mode,
-//         },
-//         depth_stencil_state = {
-//             enable_depth_test = true,
-//             enable_depth_write = true,
-//             compare_op = .LESS,
-//         }
-//     })
-// }
-
 print_obj :: proc(data: OBJObjectData, verbose := false) {
           fmt.println("-------------------- OBJObjectData --------------------")
     defer fmt.println("----------------------------------------------------")
@@ -320,8 +243,6 @@ new_texture :: proc(tex_path: string, data: ^TextureData) -> f32 {
     tex_path_cstring := strings.clone_to_cstring(tex_path); 
     path_split       := strings.split(tex_path, "/");
     tex_name         := strings.clone(path_split[len(path_split)-1])
-    // fmt.println("TEXTURE PATH:", tex_path)
-
     i: int
     for i = 0; i<len(data.textures); i += 1 {
         if data.textures[i] == nil do break
@@ -331,14 +252,13 @@ new_texture :: proc(tex_path: string, data: ^TextureData) -> f32 {
     // If texture is loaded, we return the index of it
     for name, j in data.names {
         if name == tex_name {
-            // fmt.printfln("Texture {} already in loader", tex_name)
             delete(tex_name)
             return f32(j)
         }
     }
 
     // At this point we know there is no space for new textures, and it doesn't exist in our texture collection
-    // if i == 4 do return -1
+    if i == 4 do return -1
     
     img_size: [2]i32
     pixels := stbi.load(tex_path_cstring, &img_size.x, &img_size.y, nil, 4)
