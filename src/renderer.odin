@@ -19,7 +19,6 @@ Renderer :: struct {
     obj_pipeline:       ^sdl.GPUGraphicsPipeline,
     gltf_pipeline:      ^sdl.GPUGraphicsPipeline,
     bbox_pipeline:      ^sdl.GPUGraphicsPipeline,
-    ui_pipeline:        ^sdl.GPUGraphicsPipeline,
     depth_texture:      ^sdl.GPUTexture,
     fallback_texture:   ^sdl.GPUTexture,
     swapchain_texture:  ^sdl.GPUTexture,
@@ -123,7 +122,7 @@ RND_Init :: proc(props: RND_Props) -> Renderer {
         &renderer,
         "shader.vert",
         "shader.frag",
-        size_of(OBJVertex),
+        OBJVertex,
         {.FLOAT3, .FLOAT3, .FLOAT2, .UINT},
         true
     )
@@ -131,7 +130,7 @@ RND_Init :: proc(props: RND_Props) -> Renderer {
         &renderer,
         "pbr_metallic.vert",
         "pbr_metallic.frag",
-        size_of(GLTFVertex),
+        GLTFVertex,
         {.FLOAT3, .FLOAT3, .FLOAT2, .FLOAT3},
         true
     )
@@ -139,18 +138,10 @@ RND_Init :: proc(props: RND_Props) -> Renderer {
         &renderer,
         "bbox.vert",
         "bbox.frag",
-        size_of(vec3),
+        vec3,
         {.FLOAT3},
         false,
         sdl.GPUPrimitiveType.LINELIST
-    )
-    renderer.ui_pipeline = create_render_pipeline(
-        &renderer,
-        "ui.vert",
-        "ui.frag",
-        size_of(Vertex2D),
-        {.FLOAT2},
-        false,
     )
     for i in 0..<4 {
         sampler := sdl.CreateGPUSampler(gpu, {}); assert(sampler != nil)
@@ -162,7 +153,7 @@ RND_Init :: proc(props: RND_Props) -> Renderer {
         power = 50
     }
     renderer.draw_distance = 250
-    init_renderer_2d(&renderer)
+    init_r2d(&renderer)
     return renderer
 }
 
@@ -171,7 +162,7 @@ RND_Destroy :: proc(renderer: ^Renderer) {
     sdl.ReleaseGPUGraphicsPipeline(gpu, obj_pipeline)
     sdl.ReleaseGPUGraphicsPipeline(gpu, gltf_pipeline)
     sdl.ReleaseGPUGraphicsPipeline(gpu, bbox_pipeline)
-    sdl.ReleaseGPUGraphicsPipeline(gpu, ui_pipeline)
+    sdl.ReleaseGPUGraphicsPipeline(gpu, r2d.ui_pipeline)
     sdl.ReleaseGPUTexture(gpu, depth_texture)
     sdl.ReleaseGPUTexture(gpu, fallback_texture)
     sdl.ReleaseGPUTexture(gpu, swapchain_texture)
@@ -617,23 +608,26 @@ create_render_pipeline :: proc(
     renderer: ^Renderer,
     vert_shader: string,
     frag_shader: string,
-    vb_pitch: int,
+    $vertex_type: typeid,
     vb_attribute_formats: []sdl.GPUVertexElementFormat,
     use_depth_buffer: bool,
-    primitive_type := sdl.GPUPrimitiveType.TRIANGLELIST
+    primitive_type := sdl.GPUPrimitiveType.TRIANGLELIST,
+    num_vertex_buffers := 1
 ) -> ^sdl.GPUGraphicsPipeline {
     using renderer
     vert_shader := load_shader(gpu, vert_shader); defer sdl.ReleaseGPUShader(renderer.gpu, vert_shader)
     frag_shader := load_shader(gpu, frag_shader); defer sdl.ReleaseGPUShader(renderer.gpu, frag_shader)
-    vb_descriptions: [1]sdl.GPUVertexBufferDescription
-    vb_descriptions = {
-        sdl.GPUVertexBufferDescription {
-            slot = 0,
-            pitch = u32(vb_pitch),
+    // vb_descriptions: [1]sdl.GPUVertexBufferDescription
+    vb_descriptions := make([]sdl.GPUVertexBufferDescription, num_vertex_buffers, context.temp_allocator)
+    for i in 0..<num_vertex_buffers {
+        vb_descriptions[i] = sdl.GPUVertexBufferDescription {
+            slot = u32(i),
+            pitch = u32(size_of(vertex_type)),
             input_rate = .VERTEX,
             instance_step_rate = 0
-        },
+        }
     }
+
     vb_attributes := make([]sdl.GPUVertexAttribute, len(vb_attribute_formats), context.temp_allocator)
     offset: u32
     for format, i in vb_attribute_formats {
@@ -688,6 +682,8 @@ attribute_size :: proc(a: sdl.GPUVertexElementFormat) -> u32 {
         case .UINT2:  return size_of(u32)*2
         case .UINT3:  return size_of(u32)*3
         case .UINT4:  return size_of(u32)*4
+        case: {
+            panic("Invalid attribute")
+        }
     }
-    panic("Invalid attribute")
 }

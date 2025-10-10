@@ -143,6 +143,11 @@ run :: proc(state: ^AppState) {
                     case .C:
                         if .LCTRL in ev.key.mod do break main_loop
                     case .N: player.noclip = !player.noclip
+                    case .O:
+                        if .LCTRL in ev.key.mod {
+                            path := open_file_window()
+                            fmt.println("Opening ", path)
+                        }
                 }
                 case .MOUSE_BUTTON_DOWN: if !state.props.ui_visible {
                     switch ev.button.button {
@@ -161,7 +166,7 @@ run :: proc(state: ^AppState) {
         update(state)
         frame_begin(&renderer)
         render_obj(state)
-        draw_ui(state)
+        draw_2d(state)
 
         state.debug_info.frame_time = time.since(now)
         ok := frame_submit(&state.renderer); assert(ok)
