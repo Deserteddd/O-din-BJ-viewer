@@ -239,6 +239,7 @@ load_mtl :: proc(mtl_path: string) -> ([]Material, []string, TextureData) {
 }
 
 // returns: index to texture/sampler that should be bound to the material field. -1 if the there is no space for a new textures
+@(private="file")
 new_texture :: proc(tex_path: string, data: ^TextureData) -> f32 {
     tex_path_cstring := strings.clone_to_cstring(tex_path); 
     path_split       := strings.split(tex_path, "/");

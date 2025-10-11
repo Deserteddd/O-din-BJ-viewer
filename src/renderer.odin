@@ -476,7 +476,11 @@ render_obj :: proc(state: ^AppState) {
         for i in texture_count..<4 {
             if texture_count == 0 do texture_count = 1
             sdl.BindGPUFragmentSamplers(render_pass, u32(i), 
-                &(sdl.GPUTextureSamplerBinding{texture = renderer.fallback_texture, sampler = renderer.samplers[i]}), u32(texture_count)
+                &(sdl.GPUTextureSamplerBinding{
+                    texture = renderer.fallback_texture, 
+                    sampler = renderer.samplers[i]
+                }), 
+                u32(texture_count)
             )
         }
 
@@ -612,12 +616,13 @@ create_render_pipeline :: proc(
     vb_attribute_formats: []sdl.GPUVertexElementFormat,
     use_depth_buffer: bool,
     primitive_type := sdl.GPUPrimitiveType.TRIANGLELIST,
-    num_vertex_buffers := 1
+    num_vertex_buffers := 1,
+    alpha_blend := false
 ) -> ^sdl.GPUGraphicsPipeline {
     using renderer
     vert_shader := load_shader(gpu, vert_shader); defer sdl.ReleaseGPUShader(renderer.gpu, vert_shader)
     frag_shader := load_shader(gpu, frag_shader); defer sdl.ReleaseGPUShader(renderer.gpu, frag_shader)
-    // vb_descriptions: [1]sdl.GPUVertexBufferDescription
+
     vb_descriptions := make([]sdl.GPUVertexBufferDescription, num_vertex_buffers, context.temp_allocator)
     for i in 0..<num_vertex_buffers {
         vb_descriptions[i] = sdl.GPUVertexBufferDescription {
@@ -649,7 +654,16 @@ create_render_pipeline :: proc(
         target_info = {
             num_color_targets = 1,
             color_target_descriptions = &(sdl.GPUColorTargetDescription {
-                format = format
+                format = format,
+                blend_state = {
+                    src_color_blendfactor = .SRC_ALPHA,
+                    dst_color_blendfactor = .ONE_MINUS_SRC_ALPHA,
+                    color_blend_op = .ADD,
+                    src_alpha_blendfactor = .ONE,
+                    dst_alpha_blendfactor = .ONE_MINUS_SRC_ALPHA,
+                    alpha_blend_op = .ADD,
+                    enable_blend = alpha_blend
+                }
             }),
             has_depth_stencil_target = use_depth_buffer,
             depth_stencil_format = .D32_FLOAT,
