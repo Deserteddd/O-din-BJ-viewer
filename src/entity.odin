@@ -1,31 +1,70 @@
 package obj_viewer
 
 import "core:mem"
-import "core:math/linalg"
 import sdl "vendor:sdl3"
 
 Entity :: struct {
-    id: int,
-    name: string,
+    id: i32,
     model: ^Model,
     transform: Transform,
 }
 
-create_entity :: proc(state: ^AppState, model: u32, name: string) -> int {
+entity_from_model :: proc(state: ^AppState, model_name: string) -> (id: i32, ok: bool) {
     entity: Entity
-    entity.id = len(state.entities)
-    entity.name = name
-    entity.model = &state.models[model]
+    for &model in state.models {
+        if model.format == .GLTF do return
+        if model.name == model_name {
+            entity.model = &model
+            break
+        }
+    }
+    if entity.model == nil do return
+    ok = true
+    id = lowest_free_id(state.entities.id, len(state.entities))
+    entity.id = id
     append_soa(&state.entities, entity)
-    return entity.id
+    return
 }
 
-set_entity_position :: proc(state: ^AppState, id: int, pos: vec3) {
-    state.entities[id].transform.translation = pos
+lowest_free_id :: proc(ids: [^]i32, len: int) -> i32 {
+    ids := new_clone(ids, context.temp_allocator)
+    len := i32(len)
+    for i in 0..<len {
+        for {
+            val := ids[i];
+            if val <= 0 || val > len {
+                break;
+            }
+            correct_index := val - 1;
+            if ids[correct_index] == val {
+                break;
+            }
+            temp := ids[i];
+            ids[i] = ids[correct_index];
+            ids[correct_index] = temp;
+        }
+    }
+
+    for i in 0..<len {
+        if ids[i] != i + 1 {
+            return i + 1;
+        }
+    }
+
+    return len + 1;
 }
 
-add_obj_model :: proc(data: OBJObjectData, renderer: ^Renderer) -> Model {
-    using renderer
+set_entity_position :: proc(state: ^AppState, id: i32, pos: vec3) {
+    for &e in state.entities {
+        if e.id == id {
+            e.transform.translation = pos
+            break
+        }
+    }
+}
+
+add_obj_model :: proc(data: OBJObjectData, state: ^AppState) {
+    using state.renderer
     model: Model
     model.format = .OBJ
     tex_transfer_buffers: [4]^sdl.GPUTransferBuffer
@@ -90,6 +129,7 @@ add_obj_model :: proc(data: OBJObjectData, renderer: ^Renderer) -> Model {
     }
     model.data.obj.bbox = bbox
     model.data.obj.num_vertices = u32(len(data.vertices))
+    model.name = data.name
 
     for j in 0..<i {
         sdl.UploadToGPUTexture(copy_pass, 
@@ -108,7 +148,7 @@ add_obj_model :: proc(data: OBJObjectData, renderer: ^Renderer) -> Model {
     // Assignments
     model.data.obj.vbo = vbo
     model.data.obj.material_buffer = material_buffer
-    return model
+    append(&state.models, model)
 }
 
 add_gltf_model :: proc(data: GLTFObjectData, state: ^AppState) {

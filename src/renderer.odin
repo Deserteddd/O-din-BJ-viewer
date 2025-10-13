@@ -28,7 +28,7 @@ Renderer :: struct {
     props:              RND_Props,
     light:              PointLight,
     draw_distance:      f32,
-    r2d:                 Renderer2D,
+    r2d:                Renderer2D,
 }
 
 PointLight :: struct #packed {

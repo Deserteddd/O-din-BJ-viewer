@@ -13,9 +13,10 @@ import stbi "vendor:stb/image"
 import sdl "vendor:sdl3"
 
 OBJObjectData :: struct {
-    vertices: [dynamic]OBJVertex,
-    materials: []Material,
-    texture_data: TextureData
+    name:           string,
+    vertices:       [dynamic]OBJVertex,
+    materials:      []Material,
+    texture_data:   TextureData
 }
 
 Material :: struct {
@@ -94,14 +95,17 @@ delete_obj :: proc(data: OBJObjectData) {
 }
 
 load_object :: proc(dir_path: string) -> OBJObjectData {
-    load_time: f64
     defer free_all(context.temp_allocator)
     fmt.println("Loading:", dir_path)
     obj: OBJObjectData
     asset_handle, err := os.open(dir_path, 0, 0); assert(err == nil)
+    dir_split: []string
+    dir_split, err = strings.split(dir_path, "/", context.temp_allocator); assert(err == nil)
+    obj.name = strings.clone(dir_split[len(dir_split)-1])
     asset_dir: []os.File_Info
     asset_dir, err = os.read_dir(asset_handle, 0); assert(err == nil)
     vertex_groups: [dynamic]OBJVertex
+
     materials: []Material
     material_names: []string
     texture_data: TextureData
@@ -114,7 +118,7 @@ load_object :: proc(dir_path: string) -> OBJObjectData {
     obj.texture_data = texture_data
 
     for file in asset_dir {
-        if line_len := len(file.name); line_len > 3 && file.name[line_len-3:] == "obj"{
+        if line_len := len(file.name); line_len > 3 && file.name[line_len-3:] == "obj" {
             positions: [dynamic]vec3;    defer delete(positions)
             uvs: [dynamic]vec2;          defer delete(uvs)
             normals: [dynamic]vec3;      defer delete(normals)
@@ -122,10 +126,8 @@ load_object :: proc(dir_path: string) -> OBJObjectData {
 
             // Load materials
             obj_path := strings.concatenate({path, ".obj"}, context.temp_allocator)
-            test_time := time.now()
             file, err := os.read_entire_file_or_err(obj_path); assert(err == nil); defer delete(file)
-            src := string(file)
-            line_arr := strings.split_lines(src); defer delete(line_arr)
+            line_arr := strings.split_lines(string(file)); defer delete(line_arr)
             start, i: int
             for line in line_arr {
                 if len(line) < 2 do continue
@@ -134,17 +136,12 @@ load_object :: proc(dir_path: string) -> OBJObjectData {
                     if start != 0 {
                         now := time.now()
                         new_obj := load_obj(line_arr[start:i], material_names, &positions, &uvs, &normals)
-                        elapsed := time.since(now)
-                        load_time += time.duration_milliseconds(elapsed)
                         for v in new_obj do append(&obj.vertices, v)
                     }
                     start = i
                 }
             }
-            now := time.now()
             new_obj := load_obj(line_arr[start:i], material_names, &positions, &uvs, &normals)
-            elapsed := time.since(now)
-            load_time += time.duration_milliseconds(elapsed)
             for v in new_obj do append(&obj.vertices, v)
 
         }

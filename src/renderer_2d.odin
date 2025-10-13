@@ -17,12 +17,11 @@ Vertex2D :: struct {
 
 Renderer2D :: struct {
     ui_pipeline: ^sdl.GPUGraphicsPipeline,
-    crosshair: Crosshair,
     quad: Quad,
-    image: Image2D
+    sprites: [dynamic]Sprite,
 }
 
-Image2D :: struct {
+Sprite :: struct {
     sampler: ^sdl.GPUSampler,
     texture: ^sdl.GPUTexture,
     size: [2]i32
@@ -38,14 +37,50 @@ UBO2D :: struct {
     win_size: vec2
 }
 
-Crosshair :: struct {
-    vbo: ^sdl.GPUBuffer,
-    ibo: ^sdl.GPUBuffer,
-    num_vertices: u32,
-    num_indices: u32
+load_sprite :: proc(path: cstring, renderer: ^Renderer) -> Sprite {
+    using renderer
+    copy_commands := sdl.AcquireGPUCommandBuffer(gpu); assert(copy_commands != nil)
+    defer {ok := sdl.SubmitGPUCommandBuffer(copy_commands); assert(ok)}
+    copy_pass := sdl.BeginGPUCopyPass(copy_commands); assert(copy_pass != nil)
+    defer sdl.EndGPUCopyPass(copy_pass)
+    
+    size: [2]i32
+    pixels := stbi.load(path, &size.x, &size.y, nil, 4); assert(pixels != nil)
+    defer stbi.image_free(pixels)
+    pixels_byte_size := size.x * size.y * 4
+    texture := sdl.CreateGPUTexture(gpu, {
+        type = .D2,
+        format = .R8G8B8A8_UNORM,
+        usage = {.SAMPLER},
+        width = u32(size.x),
+        height = u32(size.y),
+        layer_count_or_depth = 1,
+        num_levels = 1
+    })
+    tex_transfer_buffer := sdl.CreateGPUTransferBuffer(gpu, {
+        usage = sdl.GPUTransferBufferUsage.UPLOAD,
+        size = u32(pixels_byte_size),
+    }); assert(tex_transfer_buffer != nil)
+
+    tex_transfer_mem := sdl.MapGPUTransferBuffer(gpu, tex_transfer_buffer, false)
+    mem.copy(tex_transfer_mem, pixels, int(pixels_byte_size))
+    sdl.UnmapGPUTransferBuffer(gpu, tex_transfer_buffer)
+    sdl.UploadToGPUTexture(copy_pass, 
+        {transfer_buffer = tex_transfer_buffer},
+        {texture = texture, w = u32(size.x), h = u32(size.y), d = 1},
+        false
+    )
+    sdl.ReleaseGPUTransferBuffer(gpu, tex_transfer_buffer)
+
+    sampler := sdl.CreateGPUSampler(gpu, {}); assert(sampler != nil)
+    return Sprite {
+        sampler,
+        texture,
+        size
+    }
 }
 
-init_r2d:: proc(renderer: ^Renderer) {
+init_r2d :: proc(renderer: ^Renderer) {
     using renderer
 
     copy_commands := sdl.AcquireGPUCommandBuffer(gpu); assert(copy_commands != nil)
@@ -66,44 +101,7 @@ init_r2d:: proc(renderer: ^Renderer) {
                 num_vertex_buffers = 2,
                 alpha_blend = true
         )
-        crosshair = init_crosshair(gpu, copy_pass)
         quad = init_quad(gpu, copy_pass)
-        
-        // Image
-        img_size: [2]i32
-        pixels := stbi.load("assets/KovaaK-Crosshair.png", &img_size.x, &img_size.y, nil, 4); assert(pixels != nil)
-        defer stbi.image_free(pixels)
-        pixels_byte_size := img_size.x * img_size.y * 4
-        fallback_texture := sdl.CreateGPUTexture(gpu, {
-            type = .D2,
-            format = .R8G8B8A8_UNORM,
-            usage = {.SAMPLER},
-            width = u32(img_size.x),
-            height = u32(img_size.y),
-            layer_count_or_depth = 1,
-            num_levels = 1
-        })
-        tex_transfer_buffer := sdl.CreateGPUTransferBuffer(gpu, {
-            usage = sdl.GPUTransferBufferUsage.UPLOAD,
-            size = u32(pixels_byte_size),
-        }); assert(tex_transfer_buffer != nil)
-
-        tex_transfer_mem := sdl.MapGPUTransferBuffer(gpu, tex_transfer_buffer, false)
-        mem.copy(tex_transfer_mem, pixels, int(pixels_byte_size))
-        sdl.UnmapGPUTransferBuffer(gpu, tex_transfer_buffer)
-        sdl.UploadToGPUTexture(copy_pass, 
-            {transfer_buffer = tex_transfer_buffer},
-            {texture = fallback_texture, w = u32(img_size.x), h = u32(img_size.y), d = 1},
-            false
-        )
-        sdl.ReleaseGPUTransferBuffer(gpu, tex_transfer_buffer)
-
-        sampler := sdl.CreateGPUSampler(gpu, {}); assert(sampler != nil)
-        image = Image2D {
-            texture = fallback_texture,
-            sampler = sampler,
-            size = img_size
-        }
     }
 }
 
@@ -127,41 +125,6 @@ init_quad :: proc(
     return Quad {vbo, ibo}
 }
 
-init_crosshair :: proc(
-    gpu:            ^sdl.GPUDevice,
-    copy_pass:      ^sdl.GPUCopyPass
-) -> Crosshair {
-    verts := [16]Vertex2D{
-        // top bar
-        Vertex2D{{ -0.0010417,  0.0222222 }, {}},
-        Vertex2D{{  0.0010417,  0.0222222 }, {}},
-        Vertex2D{{  0.0010417,  0.0074074 }, {}},
-        Vertex2D{{ -0.0010417,  0.0074074 }, {}},
-        Vertex2D{{ -0.0010417, -0.0074074 }, {}},
-        Vertex2D{{  0.0010417, -0.0074074 }, {}},
-        Vertex2D{{  0.0010417, -0.0222222 }, {}},
-        Vertex2D{{ -0.0010417, -0.0222222 }, {}},
-        Vertex2D{{ -0.0125000,  0.0018519 }, {}},
-        Vertex2D{{ -0.0041667,  0.0018519 }, {}},
-        Vertex2D{{ -0.0041667, -0.0018519 }, {}},
-        Vertex2D{{ -0.0125000, -0.0018519 }, {}},
-        Vertex2D{{  0.0041667,  0.0018519 }, {}},
-        Vertex2D{{  0.0125000,  0.0018519 }, {}},
-        Vertex2D{{  0.0125000, -0.0018519 }, {}},
-        Vertex2D{{  0.0041667, -0.0018519 }, {}},
-    };
-    indices := [24]u16{
-        0,1,2, 2,3,0,
-        4,5,6, 6,7,4,
-        8,9,10, 10,11,8,
-        12,13,14, 14,15,12
-    };
-
-    vbo, ibo := upload_polygon(gpu, copy_pass, verts[:], indices[:])
-
-    return {vbo, ibo, u32(len(verts)), u32(len(indices))}
-}
-
 draw_2d :: proc(state: ^AppState) {
     using state.renderer
     assert(cmd_buff != nil)
@@ -170,11 +133,6 @@ draw_2d :: proc(state: ^AppState) {
 
     win_size := get_window_size(state.renderer)
 
-    im_w := f32(r2d.image.size.x); im_h := f32(r2d.image.size.y)
-    ubo := UBO2D {
-        {win_size.x/2-im_w/2, win_size.y/2-im_h/2, f32(r2d.image.size.x), f32(r2d.image.size.y)},
-        win_size
-    }
 
     color_target := sdl.GPUColorTargetInfo {
         texture = swapchain_texture,
@@ -185,36 +143,34 @@ draw_2d :: proc(state: ^AppState) {
     
     sdl.BindGPUGraphicsPipeline(render_pass, r2d.ui_pipeline)
     assert(r2d.quad.vbo != nil)
-    bindings: [4]sdl.GPUBufferBinding = {
+    bindings: [2]sdl.GPUBufferBinding = {
         sdl.GPUBufferBinding {buffer = r2d.quad.vbo},
         sdl.GPUBufferBinding {buffer = r2d.quad.ibo},
-        
-        sdl.GPUBufferBinding {buffer = r2d.crosshair.vbo},
-        sdl.GPUBufferBinding {buffer = r2d.crosshair.ibo},
-    }
-    // Draw crosshair
-    // { 
-    //     sdl.BindGPUVertexBuffers(render_pass, 0, &bindings[2], 1)
-    //     sdl.BindGPUIndexBuffer(render_pass, bindings[3], ._16BIT)
-    //     using r2d.crosshair
-    //     sdl.DrawGPUIndexedPrimitives(render_pass, num_indices, 1, 0, 0, 0)
-    // }
-    // Draw Quad
-    sdl.PushGPUVertexUniformData(cmd_buff, 0, &ubo, size_of(UBO2D))
-    sdl.BindGPUFragmentSamplers(render_pass, 0, 
-        &(sdl.GPUTextureSamplerBinding {
-            texture = r2d.image.texture,
-            sampler = r2d.image.sampler
-        }), 1
-    )
-    { 
-        sdl.BindGPUVertexBuffers(render_pass, 0, &bindings[0], 1)
-        sdl.BindGPUIndexBuffer(render_pass, bindings[1], ._16BIT)
-        using r2d.quad
-        sdl.DrawGPUIndexedPrimitives(render_pass, 6, 1, 0, 0, 0)
     }
 
+    // Draw sprites
+    for sprite in r2d.sprites {
+        im_w := f32(sprite.size.x); im_h := f32(sprite.size.y)
+        ubo := UBO2D {
+            {win_size.x/2-im_w/2, win_size.y/2-im_h/2, f32(sprite.size.x), f32(sprite.size.y)},
+            win_size
+        }
+        sdl.PushGPUVertexUniformData(cmd_buff, 0, &ubo, size_of(UBO2D))
+        sdl.BindGPUFragmentSamplers(render_pass, 0, 
+            &(sdl.GPUTextureSamplerBinding {
+                texture = sprite.texture,
+                sampler = sprite.sampler
+            }), 1
+        )
+        { 
+            sdl.BindGPUVertexBuffers(render_pass, 0, &bindings[0], 1)
+            sdl.BindGPUIndexBuffer(render_pass, bindings[1], ._16BIT)
+            using r2d.quad
+            sdl.DrawGPUIndexedPrimitives(render_pass, 6, 1, 0, 0, 0)
+        }
+    }
     sdl.EndGPURenderPass(render_pass)
+
     draw_imgui(state)
 }
 

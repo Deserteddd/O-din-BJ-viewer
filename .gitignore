@@ -1,7 +1,5 @@
-/Gaym.exe
-/Gaym.pdb
-/Build.exe
+/*.exe
+/*.pdb
 /ols.json
-/SDL3.dll
 /shaders/out
 /assets/*/.blend*

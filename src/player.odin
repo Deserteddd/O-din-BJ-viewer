@@ -2,6 +2,7 @@ package obj_viewer
 
 import "core:math"
 import "core:math/linalg"
+import "core:fmt"
 import sdl "vendor:sdl3"
 
 Player :: struct {
@@ -14,12 +15,10 @@ Player :: struct {
 }
 
 create_player :: proc() -> Player {
-    position: vec3 = {0, 0, 15}
     return Player {
-        position = position,
         bbox = AABB {
-            min = position + {-0.3, 0, -0.3},
-            max = position + {0.3, 2.0, 0.3}
+            min = {-0.3, 0, -0.3},
+            max = {0.3, 2.0, 0.3}
         },
     }
 }
@@ -64,9 +63,9 @@ update_player :: proc(state: ^AppState, dt: f32) #no_bounds_check {
     
     ray_origin, ray_dir := ray_from_screen(renderer.view_projection)
     closest_hit: f32 = math.F32_MAX
-    closest_index := -1
+    closest_entity: i32
 
-    for entity, i in entities {
+    for &entity in entities {
         aabb := entity_aabb(entity)
         if aabbs_collide(bbox, aabb) {
             found_collision = true
@@ -88,7 +87,7 @@ update_player :: proc(state: ^AppState, dt: f32) #no_bounds_check {
         intersection := ray_intersect_aabb(ray_origin, ray_dir, aabb)
         if intersection != -1 && intersection < closest_hit {
             closest_hit = intersection
-            closest_index = i
+            closest_entity = entity.id
         }
 
     }
@@ -100,8 +99,15 @@ update_player :: proc(state: ^AppState, dt: f32) #no_bounds_check {
 
     if linalg.length(speed.xz) > 20 do speed.xz *= 0.9
 
-    if closest_index != -1 && state.entities[closest_index].name == "slab" && state.props.lmb_pressed == true {
-        unordered_remove_soa(&state.entities, closest_index)
+    if closest_entity != 0 && state.props.lmb_pressed == true {
+        for &e, i in state.entities {
+            // fmt.println(closest_entityd)
+            if e.id == closest_entity {
+                unordered_remove_soa(&state.entities, i)
+                break
+            }
+
+        }
     }
 
     if position.y < -5 {

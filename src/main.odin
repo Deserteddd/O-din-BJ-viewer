@@ -36,7 +36,8 @@ main :: proc() {
     fmt.println("MAIN: Exiting")
 }
 
-Model:: struct {
+Model :: struct {
+    name: string,
     format: ModelFormat,
     data: struct #raw_union {
         gltf: GLTFNode,
@@ -54,6 +55,7 @@ AppState :: struct {
     entities:           #soa[dynamic]Entity,
     checkpoint:         [2]vec3,                // Position, Rotation
     props:              Props,
+    slabs:              u32
 }
 
 // Replace with bit set
@@ -64,9 +66,9 @@ Props :: struct {
 }
 
 DebugInfo :: struct {
-    frame_time:     time.Duration,
-    objects_rendered:       u32,
-    player_speed:   f32,
+    frame_time:         time.Duration,
+    objects_rendered:   u32,
+    player_speed:       f32,
 }
 
 init :: proc(state: ^AppState) {
@@ -82,18 +84,16 @@ init :: proc(state: ^AppState) {
     )
     
     renderer = RND_Init({})
-    player = create_player()
-    ground := load_object("assets/ref_tris"); defer delete_obj(ground)
-    slab   := load_object("assets/ref_cube"); defer delete_obj(slab)
-    ground_model := add_obj_model(ground, &state.renderer)
-    append(&state.models, ground_model)
-    slab_model := add_obj_model(slab, &state.renderer)
-    append(&state.models, slab_model)
-    create_entity(state, 0, "ground")
-    for i in 1..<(1<<11) do create_entity(state, 1, "slab")
-    randomize_tile_positions(state)
-    state.props.attatch_light_to_player = true
     init_imgui(state)
+    player = create_player()
+    slab   := load_object("assets/slab"); defer delete_obj(slab)
+
+    add_obj_model(slab, state)
+    entity_from_model(state, "slab")
+    state.props.attatch_light_to_player = true
+
+    crosshair := load_sprite("assets/KovaaK-Crosshair.png", &renderer)
+    append(&renderer.r2d.sprites, crosshair)
 }
 
 init_imgui :: proc(state: ^AppState) {
@@ -154,13 +154,12 @@ run :: proc(state: ^AppState) {
                         case 1:
                             state.props.lmb_pressed = true
                         case 3:
-                            new := create_entity(state, 1, "slab")
+                            new, ok := entity_from_model(state, "slab"); assert(ok)
                             set_entity_position(state, new, player.position)
                     }
                 }
             }
         }
-
         update_camera(&player)
         update_vp(state)
         update(state)
@@ -187,7 +186,6 @@ toggle_ui :: proc(state: ^AppState) {
 }
 
 randomize_tile_positions :: proc(state: ^AppState) {
-    static_collider_index := 0
     for &entity, i in state.entities {
         if i < 1 do continue
         entity.transform.translation = {
