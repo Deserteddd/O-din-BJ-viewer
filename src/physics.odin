@@ -11,14 +11,9 @@ AABB :: struct {
 
 entity_aabb :: proc(entity: Entity) -> AABB {
     using entity
-    bbox: AABB
-    switch model.format {
-        case .OBJ:  bbox = model.data.obj.bbox
-        case .GLTF: bbox = model.data.gltf.aabb
-    }
     return AABB {
-        min = bbox.min + transform.translation,
-        max = bbox.max + transform.translation
+        min = model.bbox.min + transform.translation,
+        max = model.bbox.max + transform.translation
     }
 }
 

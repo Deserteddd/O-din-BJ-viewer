@@ -1,3 +1,5 @@
+#include "common.hlsl"
+
 struct Input {
     float3 position : TEXCOORD0;
 };
@@ -5,10 +7,6 @@ struct Input {
 struct Output {
     float4 clip_position : sv_position;
     float4 p_color : TEXCOORD0;
-};
-
-cbuffer UBO : register(b0, space1) {
-    float4x4 vp;
 };
 
 cbuffer PROJ : register(b1, space1) {

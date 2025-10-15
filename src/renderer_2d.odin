@@ -2,10 +2,7 @@ package obj_viewer
 
 import "core:time"
 import "core:math"
-import "core:fmt"
-import "core:mem"
 import sdl "vendor:sdl3"
-import stbi "vendor:stb/image"
 import im "shared:imgui"
 import im_sdl "shared:imgui/imgui_impl_sdl3"
 import im_sdlgpu "shared:imgui/imgui_impl_sdlgpu3"
@@ -15,7 +12,7 @@ Vertex2D :: struct {
     uv:       vec2,
 }
 
-Renderer2D :: struct {
+R2D :: struct {
     ui_pipeline: ^sdl.GPUGraphicsPipeline,
     quad: Quad,
     sprites: [dynamic]Sprite,
@@ -37,40 +34,15 @@ UBO2D :: struct {
     win_size: vec2
 }
 
-load_sprite :: proc(path: cstring, renderer: ^Renderer) -> Sprite {
+load_sprite :: proc(path: string, renderer: ^Renderer) -> Sprite {
     using renderer
     copy_commands := sdl.AcquireGPUCommandBuffer(gpu); assert(copy_commands != nil)
     defer {ok := sdl.SubmitGPUCommandBuffer(copy_commands); assert(ok)}
     copy_pass := sdl.BeginGPUCopyPass(copy_commands); assert(copy_pass != nil)
     defer sdl.EndGPUCopyPass(copy_pass)
     
-    size: [2]i32
-    pixels := stbi.load(path, &size.x, &size.y, nil, 4); assert(pixels != nil)
-    defer stbi.image_free(pixels)
-    pixels_byte_size := size.x * size.y * 4
-    texture := sdl.CreateGPUTexture(gpu, {
-        type = .D2,
-        format = .R8G8B8A8_UNORM,
-        usage = {.SAMPLER},
-        width = u32(size.x),
-        height = u32(size.y),
-        layer_count_or_depth = 1,
-        num_levels = 1
-    })
-    tex_transfer_buffer := sdl.CreateGPUTransferBuffer(gpu, {
-        usage = sdl.GPUTransferBufferUsage.UPLOAD,
-        size = u32(pixels_byte_size),
-    }); assert(tex_transfer_buffer != nil)
-
-    tex_transfer_mem := sdl.MapGPUTransferBuffer(gpu, tex_transfer_buffer, false)
-    mem.copy(tex_transfer_mem, pixels, int(pixels_byte_size))
-    sdl.UnmapGPUTransferBuffer(gpu, tex_transfer_buffer)
-    sdl.UploadToGPUTexture(copy_pass, 
-        {transfer_buffer = tex_transfer_buffer},
-        {texture = texture, w = u32(size.x), h = u32(size.y), d = 1},
-        false
-    )
-    sdl.ReleaseGPUTransferBuffer(gpu, tex_transfer_buffer)
+    pixels, size := load_pixels(path)
+    texture := upload_texture(gpu, copy_pass, pixels, transmute([2]u32)size)
 
     sampler := sdl.CreateGPUSampler(gpu, {}); assert(sampler != nil)
     return Sprite {

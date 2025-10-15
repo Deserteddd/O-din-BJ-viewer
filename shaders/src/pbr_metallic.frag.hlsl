@@ -1,3 +1,4 @@
+#include "common.hlsl"
 // #define PI 3.14159265
 
 struct Input {
@@ -16,12 +17,6 @@ SamplerState albedoSmp : register(s0, space2);
 SamplerState metalRoughSmp : register(s1, space2);
 SamplerState normalSmp : register(s2, space2);
 */
-cbuffer LIGHT : register(b0, space3) {
-    float3 lightPosition;
-    float3 lightColor;
-    float lightIntensity;
-    float3 viewPosition;
-};
 
 // cbuffer MATERIAL : register(b1, space3) {
 //     float4 base_color;

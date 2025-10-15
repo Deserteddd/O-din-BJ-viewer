@@ -61,7 +61,7 @@ update_player :: proc(state: ^AppState, dt: f32) #no_bounds_check {
     bbox.max += delta_pos
     found_collision: bool
     
-    ray_origin, ray_dir := ray_from_screen(renderer.view_projection)
+    ray_origin, ray_dir := ray_from_screen(renderer.vert_ubo_global.vp)
     closest_hit: f32 = math.F32_MAX
     closest_entity: i32
 

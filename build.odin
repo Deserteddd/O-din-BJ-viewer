@@ -34,7 +34,7 @@ build_shaders :: proc() {
 shadercross :: proc(file: os.File_Info, format: string) {
     basename := filepath.stem(file.name)
     outfile := filepath.join({"shaders/out", strings.concatenate({basename, ".", format})})
-    run({"shadercross", file.fullpath, "-o", outfile})
+    run({"shadercross", file.fullpath, "-o", outfile, "-I", "shaders/include"})
 }
 
 run_str :: proc(cmd: string) {

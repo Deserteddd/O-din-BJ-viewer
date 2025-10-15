@@ -38,11 +38,11 @@ main :: proc() {
 
 Model :: struct {
     name: string,
-    format: ModelFormat,
-    data: struct #raw_union {
-        gltf: GLTFNode,
-        obj:  OBJModel,
-    },
+    textures:        []^sdl.GPUTexture,
+    vbo:             ^sdl.GPUBuffer,
+    material_buffer: ^sdl.GPUBuffer,
+    num_vertices:    u32,
+    bbox: AABB
 }
 
 AppState :: struct {
@@ -51,7 +51,6 @@ AppState :: struct {
     debug_info:         DebugInfo,
     ui_context:         ^im.Context,
     models:             [dynamic]Model,
-    gltf_meshes:        [dynamic]GLTFMesh,
     entities:           #soa[dynamic]Entity,
     checkpoint:         [2]vec3,                // Position, Rotation
     props:              Props,
@@ -90,9 +89,11 @@ init :: proc(state: ^AppState) {
 
     add_obj_model(slab, state)
     entity_from_model(state, "slab")
+
     state.props.attatch_light_to_player = true
 
     crosshair := load_sprite("assets/KovaaK-Crosshair.png", &renderer)
+
     append(&renderer.r2d.sprites, crosshair)
 }
 
@@ -119,8 +120,8 @@ init_imgui :: proc(state: ^AppState) {
 }
 
 run :: proc(state: ^AppState) {
+
     using state
-    assert(gltf_meshes == nil)
     main_loop: for {
         now := time.now()
         defer FRAMES += 1

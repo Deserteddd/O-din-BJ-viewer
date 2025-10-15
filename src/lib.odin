@@ -7,17 +7,12 @@ import sdl "vendor:sdl3"
 vec2 :: [2]f32
 vec3 :: [3]f32
 vec4 :: [4]f32
-
+mat4 :: matrix[4,4]f32
 
 TRANSFORM_IDENTITY :: Transform {
     translation = 0,
     scale = 1,
     rotation = linalg.QUATERNIONF32_IDENTITY
-}
-
-ModelFormat :: enum {
-    OBJ,
-    GLTF
 }
 
 to_vec4 :: proc(v: vec3, f: f32) -> vec4 { return vec4{v.x, v.y, v.z, f} }

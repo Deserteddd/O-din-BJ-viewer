@@ -6,11 +6,9 @@ import "core:strings"
 import "core:strconv"
 import "core:log"
 import "core:time"
-import "core:thread"
-import "core:sync"
-import "core:mem"
-import stbi "vendor:stb/image"
+import "core:slice"
 import sdl "vendor:sdl3"
+import stbi "vendor:stb/image"
 
 OBJObjectData :: struct {
     name:           string,
@@ -34,16 +32,12 @@ OBJVertex :: struct {
 
 TextureData :: struct {
     names:     [dynamic]string,
-    textures:  [dynamic][^]u8,
+    textures:  [dynamic][]u8,
     sizes:     [dynamic][2]i32
 }
 
 OBJModel :: struct {
-    textures:        []^sdl.GPUTexture,
-    vbo:             ^sdl.GPUBuffer,
-    material_buffer: ^sdl.GPUBuffer,
-    num_vertices:    u32,
-    bbox: AABB
+
 }
 
 print_obj :: proc(data: OBJObjectData, verbose := false) {
@@ -238,7 +232,7 @@ load_mtl :: proc(mtl_path: string) -> ([]Material, []string, TextureData) {
 // returns: index to texture/sampler that should be bound to the material field. -1 if the there is no space for a new textures
 @(private="file")
 new_texture :: proc(tex_path: string, data: ^TextureData) -> f32 {
-    tex_path_cstring := strings.clone_to_cstring(tex_path); 
+    tex_path_cstring := strings.clone_to_cstring(tex_path, context.temp_allocator); 
     path_split       := strings.split(tex_path, "/");
     tex_name         := strings.clone(path_split[len(path_split)-1])
     i: int
@@ -257,15 +251,13 @@ new_texture :: proc(tex_path: string, data: ^TextureData) -> f32 {
 
     // At this point we know there is no space for new textures, and it doesn't exist in our texture collection
     if i == 4 do return -1
-    
-    img_size: [2]i32
-    pixels := stbi.load(tex_path_cstring, &img_size.x, &img_size.y, nil, 4)
-    if pixels == nil do pixels = stbi.load("assets/err_tex.jpg", &img_size.x, &img_size.y, nil, 4)
-    assert(pixels != nil) 
-    // fmt.println("Loaded ok")
-    append(&data.textures, pixels)
+
+    size: [2]i32
+    pixel_data := stbi.load(tex_path_cstring, &size.x, &size.y, nil, 4)
+    if pixel_data == nil do pixel_data = stbi.load("assets/err_tex.jpg", &size.x, &size.y, nil, 4)
+    append(&data.textures, slice.bytes_from_ptr(pixel_data, int(size.x * size.y * 4)))
     append(&data.names   , tex_name)
-    append(&data.sizes   , img_size)
+    append(&data.sizes   , size)
     return f32(i)
 }
 

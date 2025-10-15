@@ -1,3 +1,5 @@
+#include "common.hlsl"
+
 struct Input {
     float3 position : TEXCOORD0;
     float3 normal : TEXCOORD1;
@@ -11,10 +13,6 @@ struct Output {
     float3 normal : texcoord1;
     float2 uv : texcoord2;
     nointerpolation uint material : texcoord3;
-};
-
-cbuffer UBO : register(b0, space1) {
-    float4x4 vp;
 };
 
 cbuffer PROJ : register(b1, space1) {

@@ -3,6 +3,10 @@ package obj_viewer
 import "core:sys/windows"
 import "core:strings"
 import "base:runtime"
+import "core:slice"
+import "core:fmt"
+import stbi "vendor:stb/image"
+import sdl "vendor:sdl3"
 
 open_file_window :: proc() -> (path: string) {
     using windows
@@ -17,4 +21,33 @@ open_file_window :: proc() -> (path: string) {
     err: runtime.Allocator_Error
     path, err = windows.wstring_to_utf8(ofn.lpstrFile, -1); assert(err == nil)
     return
+}
+
+load_pixels :: proc(path: string) -> (pixels: []byte, size: [2]i32) {
+    path_cstr := strings.clone_to_cstring(path, context.temp_allocator);
+    pixel_data := stbi.load(path_cstr, &size.x, &size.y, nil, 4); assert(pixel_data != nil)
+    pixels = slice.bytes_from_ptr(pixel_data, int(size.x * size.y * 4))
+    assert(pixels != nil)
+    stbi.image_free(pixel_data)
+    return
+}
+
+load_cubemap_texture :: proc(
+    gpu: ^sdl.GPUDevice,
+    copy_pass: ^sdl.GPUCopyPass, 
+    paths: [sdl.GPUCubeMapFace]string
+) -> ^sdl.GPUTexture {
+    pixels: [sdl.GPUCubeMapFace][]byte
+    size: u32
+    for path, side in paths {
+        side_pixels, img_size := load_pixels(path)
+        pixels[side] = side_pixels
+        assert(img_size.x == img_size.y)
+        if size == 0 do size = u32(img_size.x) 
+        else do assert(u32(img_size.x) == size)
+    }
+    texture := upload_cubemap_texture_sides(gpu, copy_pass, pixels, size)
+    for side_pixels in pixels do delete(side_pixels)
+    fmt.println("ok")
+    return texture
 }

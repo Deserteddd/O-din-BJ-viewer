@@ -1,35 +1,36 @@
 package obj_viewer
 
 import "core:mem"
-import "core:math"
 import "core:math/linalg"
 import "core:log"
 import "core:strings"
 import "core:c"
-import "core:time"
 import "core:os"
 import "core:path/filepath"
 import "core:encoding/json"
+import "core:slice"
 import sdl "vendor:sdl3"
-import stbi "vendor:stb/image"
 
 Renderer :: struct {
     window:             ^sdl.Window,
     gpu:                ^sdl.GPUDevice,
     obj_pipeline:       ^sdl.GPUGraphicsPipeline,
-    gltf_pipeline:      ^sdl.GPUGraphicsPipeline,
     bbox_pipeline:      ^sdl.GPUGraphicsPipeline,
+    skybox_pipeline:    ^sdl.GPUGraphicsPipeline,
     depth_texture:      ^sdl.GPUTexture,
     fallback_texture:   ^sdl.GPUTexture,
     swapchain_texture:  ^sdl.GPUTexture,
+    skybox_texture:     ^sdl.GPUTexture,
     cmd_buff:           ^sdl.GPUCommandBuffer,
     samplers:           [4]^sdl.GPUSampler,
-    view_projection:    matrix[4,4]f32,
+    vert_ubo_global:    VertUBO,
     props:              RND_Props,
     light:              PointLight,
     draw_distance:      f32,
-    r2d:                Renderer2D,
+    r2d:                R2D,
 }
+
+
 
 PointLight :: struct #packed {
     position: vec3,
@@ -44,6 +45,12 @@ FragUBO :: struct #packed {
     light_intensity: f32,
     view_pos: vec3
 
+}
+
+VertUBO :: struct #packed {
+	vp: mat4,
+	inv_view_mat: mat4,
+	inv_projection_mat: mat4,
 }
 
 RND_Props :: distinct bit_set[RND_Prop; u8]
@@ -75,38 +82,22 @@ RND_Init :: proc(props: RND_Props) -> Renderer {
     renderer.window = window
     renderer.gpu = gpu
 
-    img_size: [2]i32
-    pixels := stbi.load("assets/err_tex.jpg", &img_size.x, &img_size.y, nil, 4); assert(pixels != nil)
-    defer stbi.image_free(pixels)
-    pixels_byte_size := img_size.x * img_size.y * 4
-    fallback_texture := sdl.CreateGPUTexture(gpu, {
-        type = .D2,
-        format = .R8G8B8A8_UNORM,
-        usage = {.SAMPLER},
-        width = u32(img_size.x),
-        height = u32(img_size.y),
-        layer_count_or_depth = 1,
-        num_levels = 1
-    })
-    tex_transfer_buffer := sdl.CreateGPUTransferBuffer(gpu, {
-        usage = sdl.GPUTransferBufferUsage.UPLOAD,
-        size = u32(pixels_byte_size),
-    }); assert(tex_transfer_buffer != nil)
+    pixels, size := load_pixels("assets/err_tex.jpg")
 
-    tex_transfer_mem := sdl.MapGPUTransferBuffer(gpu, tex_transfer_buffer, false)
-    mem.copy(tex_transfer_mem, pixels, int(pixels_byte_size))
-    sdl.UnmapGPUTransferBuffer(gpu, tex_transfer_buffer)
     copy_commands := sdl.AcquireGPUCommandBuffer(gpu); assert(copy_commands != nil)
     copy_pass := sdl.BeginGPUCopyPass(copy_commands); assert(copy_pass != nil)
-    sdl.UploadToGPUTexture(copy_pass, 
-        {transfer_buffer = tex_transfer_buffer},
-        {texture = fallback_texture, w = u32(img_size.x), h = u32(img_size.y), d = 1},
-        false
-    )
-    sdl.ReleaseGPUTransferBuffer(gpu, tex_transfer_buffer)
+    renderer.skybox_texture = load_cubemap_texture(gpu, copy_pass, {
+        .POSITIVEX = "assets/skybox/right.png",
+        .NEGATIVEX = "assets/skybox/left.png",
+        .POSITIVEY = "assets/skybox/top.png",
+        .NEGATIVEY = "assets/skybox/bottom.png",
+        .POSITIVEZ = "assets/skybox/back.png",
+        .NEGATIVEZ = "assets/skybox/front.png",
+    })
+    renderer.fallback_texture = upload_texture(gpu, copy_pass, pixels, transmute([2]u32)size)
+
     sdl.EndGPUCopyPass(copy_pass)
     ok = sdl.SubmitGPUCommandBuffer(copy_commands); assert(ok)
-    renderer.fallback_texture = fallback_texture
 
     depth_texture := sdl.CreateGPUTexture(gpu, {
         type = .D2,
@@ -126,14 +117,7 @@ RND_Init :: proc(props: RND_Props) -> Renderer {
         {.FLOAT3, .FLOAT3, .FLOAT2, .UINT},
         true
     )
-    renderer.gltf_pipeline = create_render_pipeline(
-        &renderer,
-        "pbr_metallic.vert",
-        "pbr_metallic.frag",
-        GLTFVertex,
-        {.FLOAT3, .FLOAT3, .FLOAT2, .FLOAT3},
-        true
-    )
+
     renderer.bbox_pipeline = create_render_pipeline(
         &renderer,
         "bbox.vert",
@@ -143,6 +127,7 @@ RND_Init :: proc(props: RND_Props) -> Renderer {
         false,
         sdl.GPUPrimitiveType.LINELIST
     )
+    setup_skybox_pipeline(&renderer)
     for i in 0..<4 {
         sampler := sdl.CreateGPUSampler(gpu, {}); assert(sampler != nil)
         renderer.samplers[i] = sampler
@@ -160,7 +145,6 @@ RND_Init :: proc(props: RND_Props) -> Renderer {
 RND_Destroy :: proc(renderer: ^Renderer) {
     using renderer
     sdl.ReleaseGPUGraphicsPipeline(gpu, obj_pipeline)
-    sdl.ReleaseGPUGraphicsPipeline(gpu, gltf_pipeline)
     sdl.ReleaseGPUGraphicsPipeline(gpu, bbox_pipeline)
     sdl.ReleaseGPUGraphicsPipeline(gpu, r2d.ui_pipeline)
     sdl.ReleaseGPUTexture(gpu, depth_texture)
@@ -238,7 +222,10 @@ update_vp :: proc(state: ^AppState) {
     using state
     proj_matrix := create_proj_matrix(renderer)
     view_matrix := create_view_matrix(player)
-    state.renderer.view_projection = proj_matrix * view_matrix;
+    using renderer.vert_ubo_global
+    vp = proj_matrix * view_matrix;
+    inv_view_mat = linalg.inverse(view_matrix)
+    inv_projection_mat = linalg.inverse(proj_matrix)
 }
 
 frame_submit :: proc(renderer: ^Renderer) -> bool {
@@ -268,173 +255,9 @@ create_model_matrix :: proc(transform: Transform, position_offset: vec3 = 0) -> 
     linalg.matrix4_scale(model_transform.scale)
 }
 
-RND_DrawGLTF :: proc(state: ^AppState) {
-    using state
-    vp := renderer.view_projection
-    assert(renderer.cmd_buff != nil)
-    assert(renderer.swapchain_texture != nil)
-    color_target := sdl.GPUColorTargetInfo {
-        texture = renderer.swapchain_texture,
-        load_op = .LOAD,
-        store_op = .STORE,
-        clear_color = 0,
-    }
-    depth_target_info := sdl.GPUDepthStencilTargetInfo {
-        texture = renderer.depth_texture,
-        clear_depth = 1,
-        load_op = .LOAD,
-        store_op = .STORE,
-        stencil_load_op = .LOAD,
-        stencil_store_op = .STORE,
-        cycle = false,
-        clear_stencil = 1,
-    }
-
-    furstum_planes := create_furstum_planes(vp)
-    render_pass := sdl.BeginGPURenderPass(renderer.cmd_buff, &color_target, 1, &depth_target_info)
-    assert(render_pass != nil)
-    frag_ubo := create_frag_ubo(state)
-    sdl.BindGPUGraphicsPipeline(render_pass, renderer.gltf_pipeline)
-    sdl.PushGPUVertexUniformData(renderer.cmd_buff, 0, &vp, size_of(matrix[4,4]f32))
-    sdl.PushGPUFragmentUniformData(renderer.cmd_buff, 0, &frag_ubo, size_of(FragUBO))
-    for entity, i in entities {
-        if entity.model.format != .GLTF do continue
-        draw_gltf_node(
-            render_pass, 
-            state, 
-            entity.model.data.gltf, 
-            linalg.matrix4_translate(entity.transform.translation), 
-            entity.transform.translation, 
-            furstum_planes
-        )
-    }
-    sdl.EndGPURenderPass(render_pass)
-
-    if !DEBUG_GPU do return
-    bbox_pass := sdl.BeginGPURenderPass(renderer.cmd_buff, &color_target, 1, nil)
-    sdl.BindGPUGraphicsPipeline(render_pass, renderer.bbox_pipeline)
-    sdl.PushGPUVertexUniformData(renderer.cmd_buff, 0, &vp, size_of(matrix[4,4]f32))
-    for entity, i in state.entities {
-        if entity.model.format != .GLTF do continue
-        draw_gltf_aabb(
-            render_pass, 
-            state, 
-            entity.model.data.gltf, 
-            linalg.matrix4_translate(entity.transform.translation), 
-        )
-    }
-    sdl.EndGPURenderPass(bbox_pass)
-}
-
-draw_gltf_aabb :: proc(
-    render_pass: ^sdl.GPURenderPass,
-    state: ^AppState, 
-    node: GLTFNode,
-    parent_matrix: matrix[4,4]f32,
-){
-    using node, state
-    model_matrix := parent_matrix
-
-    if bbox_vbo != nil {
-        bindings: [1]sdl.GPUBufferBinding = { 
-            sdl.GPUBufferBinding { buffer = bbox_vbo },
-        } 
-        sdl.BindGPUVertexBuffers(render_pass, 0, &bindings[0], 1)
-        sdl.PushGPUVertexUniformData(renderer.cmd_buff, 1, &model_matrix, size_of(matrix[4,4]f32))
-        sdl.DrawGPUPrimitives(render_pass, 24, 1, 0, 0)
-    }
-
-    for &child in node.children {
-        draw_gltf_aabb(render_pass, state, child, model_matrix)
-    }
-}
-
-draw_gltf_node :: proc(
-    render_pass: ^sdl.GPURenderPass,
-    state: ^AppState, 
-    node: GLTFNode,
-    parent_matrix: matrix[4,4]f32,
-    entity_pos: vec3,
-    frustum_planes: [6]vec4,
-){
-    using node, state
-
-    offset: vec3
-    model_matrix := parent_matrix * create_model_matrix(node.transform)
-
-    visible := true
-    if node.mesh != nil {
-        aabb_transformed := AABB {min = node.aabb.min + entity_pos, max = node.aabb.max + entity_pos}
-        visible = aabb_intersects_frustum(frustum_planes, aabb_transformed)
-    }
-    if mesh != nil && visible {
-        bindings: [2]sdl.GPUBufferBinding = { 
-            sdl.GPUBufferBinding { buffer = mesh.vbo },
-            sdl.GPUBufferBinding { buffer = mesh.ibo }
-        } 
-        sdl.BindGPUVertexBuffers(render_pass, 0, &bindings[0], 1)
-        sdl.BindGPUIndexBuffer(render_pass, bindings[1], ._16BIT)
-        sdl.PushGPUVertexUniformData(renderer.cmd_buff, 1, &model_matrix, size_of(matrix[4,4]f32))
-        using mesh
-        for primitive in data.primitives {
-            frag_ubo: GLTF_FragUBO
-            frag_ubo.base_color = primitive.material.base_color_factor
-            frag_ubo.metallic_factor = primitive.material.metallic_factor
-            frag_ubo.roughness_factor = primitive.material.roughness_factor
-            tex_bindings: [3]sdl.GPUTextureSamplerBinding
-            if primitive.material.base_color_texture.texture != nil {
-                tex_bindings[0] = sdl.GPUTextureSamplerBinding {
-                    texture = primitive.material.base_color_texture.texture,
-                    sampler = primitive.material.base_color_texture.sampler
-                }
-                frag_ubo.has_albedo_tex = true
-            } else {
-                tex_bindings[0] = sdl.GPUTextureSamplerBinding {
-                    texture = renderer.fallback_texture,
-                    sampler = renderer.samplers[0]
-                }
-            }
-            if primitive.material.metallic_roughness_texture.texture != nil {
-                tex_bindings[1] = (sdl.GPUTextureSamplerBinding {
-                    texture = primitive.material.metallic_roughness_texture.texture,
-                    sampler = primitive.material.metallic_roughness_texture.sampler
-                })
-                frag_ubo.has_metallic_roughness_tex = true
-            } else {
-                tex_bindings[1] = sdl.GPUTextureSamplerBinding {
-                    texture = renderer.fallback_texture,
-                    sampler = renderer.samplers[1]
-                }
-            }
-            if primitive.material.normal_map.texture != nil {
-                tex_bindings[2] = (sdl.GPUTextureSamplerBinding {
-                    texture = primitive.material.normal_map.texture,
-                    sampler = primitive.material.normal_map.sampler
-                })
-                frag_ubo.has_normal_map = true
-            } else {
-                tex_bindings[2] = sdl.GPUTextureSamplerBinding {
-                    texture = renderer.fallback_texture,
-                    sampler = renderer.samplers[2]
-                }
-            }
-            sdl.BindGPUFragmentSamplers(render_pass, 0, raw_data(tex_bindings[:]), 3)
-            sdl.PushGPUFragmentUniformData(renderer.cmd_buff, 1, &frag_ubo, size_of(GLTF_FragUBO))
-            num_indices := u32(primitive.end - primitive.start)
-            sdl.DrawGPUIndexedPrimitives(render_pass, num_indices, 1, u32(primitive.start), 0, 0)
-            debug_info.objects_rendered += 1
-        }
-    }
-
-    for &child in node.children {
-        draw_gltf_node(render_pass, state, child, model_matrix, entity_pos, frustum_planes)
-    }
-}
-
-
 render_obj :: proc(state: ^AppState) {
     using state
-    vp := renderer.view_projection
+
     assert(renderer.cmd_buff != nil)
     assert(renderer.swapchain_texture != nil)
 
@@ -455,16 +278,15 @@ render_obj :: proc(state: ^AppState) {
         clear_stencil = 1,
     }
 
-    frustum_planes := create_furstum_planes(vp)
+    frustum_planes := create_furstum_planes(renderer.vert_ubo_global.vp)
 
     frag_ubo := create_frag_ubo(state);
     render_pass := sdl.BeginGPURenderPass(renderer.cmd_buff, &color_target, 1, &depth_target_info); assert(render_pass != nil)
     sdl.BindGPUGraphicsPipeline(render_pass, renderer.obj_pipeline)
     sdl.PushGPUFragmentUniformData(renderer.cmd_buff, 0, &frag_ubo, size_of(FragUBO))
-    sdl.PushGPUVertexUniformData(renderer.cmd_buff, 0, &vp, size_of(matrix[4,4]f32))
+    sdl.PushGPUVertexUniformData(renderer.cmd_buff, 0, &renderer.vert_ubo_global, size_of(VertUBO))
     for &model, model_index in models {
-        if model.format == .GLTF do continue
-        using model.data.obj
+        using model
         bindings: [1]sdl.GPUBufferBinding = { sdl.GPUBufferBinding { buffer = vbo } } 
         sdl.BindGPUVertexBuffers(render_pass, 0, &bindings[0], 1)
         texture_count := len(textures)
@@ -486,7 +308,6 @@ render_obj :: proc(state: ^AppState) {
 
         sdl.BindGPUFragmentStorageBuffers(render_pass, 0, &material_buffer, 1)
         for &entity, i in entities {
-            if entity.model.format == .GLTF do continue
             if entity.model != &model do continue
             if linalg.distance(player.position, entity.transform.translation) > renderer.draw_distance - 1 &&
                 model_index != 0 { continue }
@@ -496,6 +317,14 @@ render_obj :: proc(state: ^AppState) {
             sdl.PushGPUVertexUniformData(renderer.cmd_buff, 1, &model_matrix, size_of(matrix[4,4]f32))
             sdl.DrawGPUPrimitives(render_pass, num_vertices, 1, 0, 0)
         }
+    }
+    {
+        sdl.BindGPUGraphicsPipeline(render_pass, renderer.skybox_pipeline)
+        sdl.BindGPUFragmentSamplers(render_pass, 0, &(sdl.GPUTextureSamplerBinding  {
+            texture = renderer.skybox_texture,
+            sampler = renderer.samplers[0]
+        }), 1)
+        sdl.DrawGPUPrimitives(render_pass, 3, 1, 0, 0)
     }
     sdl.EndGPURenderPass(render_pass)
 }
@@ -567,6 +396,88 @@ create_buffer_with_data :: proc(
     return buffer
 }
 
+upload_texture :: proc(
+    gpu: ^sdl.GPUDevice,
+    copy_pass: ^sdl.GPUCopyPass, 
+    pixels: []byte, 
+    size: [2]u32
+) -> ^sdl.GPUTexture {
+
+    texture := sdl.CreateGPUTexture(gpu, {
+        type = .D2,
+        format = .R8G8B8A8_UNORM_SRGB,
+        usage = {.SAMPLER},
+        width = u32(size.x),
+        height = u32(size.y),
+        layer_count_or_depth = 1,
+        num_levels = 1
+    })
+
+    tex_transfer_buffer := sdl.CreateGPUTransferBuffer(gpu, {
+        usage = .UPLOAD,
+        size = u32(len(pixels)),
+    }); assert(tex_transfer_buffer != nil)
+
+    tex_transfer_mem := sdl.MapGPUTransferBuffer(gpu, tex_transfer_buffer, false)
+    mem.copy(tex_transfer_mem, raw_data(pixels), len(pixels))
+    sdl.UnmapGPUTransferBuffer(gpu, tex_transfer_buffer)
+    sdl.UploadToGPUTexture(copy_pass, 
+        {transfer_buffer = tex_transfer_buffer},
+        {texture = texture, w = u32(size.x), h = u32(size.y), d = 1},
+        false
+    )
+
+    sdl.ReleaseGPUTransferBuffer(gpu, tex_transfer_buffer)
+    return texture
+}
+
+upload_cubemap_texture_sides :: proc(
+    gpu: ^sdl.GPUDevice,
+    copy_pass: ^sdl.GPUCopyPass,
+    pixels: [sdl.GPUCubeMapFace][]byte,
+    size: u32
+) -> ^sdl.GPUTexture {
+	texture := sdl.CreateGPUTexture(gpu, {
+		type = .CUBE,
+		format = .R8G8B8A8_UNORM_SRGB, // pixels are in sRGB, converted to linear in shaders
+		usage = {.SAMPLER},
+		width = size,
+		height = size,
+		layer_count_or_depth = 6,
+		num_levels = 1,
+	})
+
+	side_byte_size := int(size * size * 4) // 4 bytes per pixel
+	for side_pixels in pixels do assert(len(side_pixels) == side_byte_size)
+
+	tex_transfer_buf := sdl.CreateGPUTransferBuffer(gpu, {
+		usage = .UPLOAD,
+		size = u32(side_byte_size * 6)
+	})
+	tex_transfer_mem := transmute([^]byte)sdl.MapGPUTransferBuffer(gpu, tex_transfer_buf, false)
+
+	offset := 0
+	for side_pixels in pixels {
+		mem.copy(tex_transfer_mem[offset:], raw_data(side_pixels), side_byte_size)
+		offset += side_byte_size
+	}
+
+	sdl.UnmapGPUTransferBuffer(gpu, tex_transfer_buf)
+
+	offset = 0
+	for side_pixels, side in pixels {
+		sdl.UploadToGPUTexture(copy_pass,
+			{transfer_buffer = tex_transfer_buf, offset = u32(offset)},
+			{texture = texture, layer = u32(side), w = size, h = size, d = 1},
+			false
+		)
+		offset += side_byte_size
+	}
+
+	sdl.ReleaseGPUTransferBuffer(gpu, tex_transfer_buf)
+	return texture
+}
+
 load_shader :: proc(device: ^sdl.GPUDevice, shaderfile: string) -> ^sdl.GPUShader {
     stage: sdl.GPUShaderStage
     switch filepath.ext(shaderfile) {
@@ -606,6 +517,32 @@ load_shader_info :: proc(shaderfile: string) -> Shader_Info {
     result: Shader_Info
     err := json.unmarshal(json_data, &result, allocator = context.temp_allocator); assert(err == nil)
     return result
+}
+
+setup_skybox_pipeline :: proc(renderer: ^Renderer) {
+    using renderer
+    vert_shader := load_shader(gpu, "skybox.vert"); defer sdl.ReleaseGPUShader(renderer.gpu, vert_shader)
+    frag_shader := load_shader(gpu, "skybox.frag"); defer sdl.ReleaseGPUShader(renderer.gpu, frag_shader)
+    format := sdl.GetGPUSwapchainTextureFormat(gpu, window)
+    renderer.skybox_pipeline = sdl.CreateGPUGraphicsPipeline(gpu, {
+        vertex_shader = vert_shader,
+        fragment_shader = frag_shader,
+        primitive_type = .TRIANGLELIST,
+        depth_stencil_state = {
+            enable_depth_test = true,
+            enable_depth_write = false,
+            compare_op = .EQUAL,
+        },
+        rasterizer_state = {cull_mode = .BACK},
+        target_info = {
+            num_color_targets = 1,
+            color_target_descriptions = &(sdl.GPUColorTargetDescription {
+                format = format
+            }),
+            has_depth_stencil_target = true,
+            depth_stencil_format = .D32_FLOAT
+        }
+    })
 }
 
 create_render_pipeline :: proc(

@@ -1,3 +1,5 @@
+#include "common.hlsl"
+
 struct Material {
     float4 Ka;
     float4 Kd;
@@ -23,14 +25,6 @@ SamplerState smp2 : register(s2, space2);
 SamplerState smp3 : register(s3, space2);
 
 StructuredBuffer<Material> materials : register(t4, space2);
-
-cbuffer UBO : register(b0, space3) {
-    float3 lightPosition;
-    float3 lightColor;
-    float lightIntensity;
-    float3 viewPosition;
-};
-
 
 float4 diffuseColor(Input input) {
     float is_texture = materials[input.material].Kd.x;
