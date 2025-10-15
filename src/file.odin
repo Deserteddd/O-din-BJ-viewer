@@ -28,8 +28,11 @@ load_pixels :: proc(path: string) -> (pixels: []byte, size: [2]i32) {
     pixel_data := stbi.load(path_cstr, &size.x, &size.y, nil, 4); assert(pixel_data != nil)
     pixels = slice.bytes_from_ptr(pixel_data, int(size.x * size.y * 4))
     assert(pixels != nil)
-    stbi.image_free(pixel_data)
     return
+}
+
+free_pixels :: proc(pixels: []byte) {
+    stbi.image_free(raw_data(pixels))
 }
 
 load_cubemap_texture :: proc(
@@ -41,13 +44,13 @@ load_cubemap_texture :: proc(
     size: u32
     for path, side in paths {
         side_pixels, img_size := load_pixels(path)
+        assert(side_pixels != nil)
         pixels[side] = side_pixels
         assert(img_size.x == img_size.y)
         if size == 0 do size = u32(img_size.x) 
         else do assert(u32(img_size.x) == size)
     }
     texture := upload_cubemap_texture_sides(gpu, copy_pass, pixels, size)
-    for side_pixels in pixels do delete(side_pixels)
-    fmt.println("ok")
+    for side_pixels in pixels do free_pixels(side_pixels)
     return texture
 }

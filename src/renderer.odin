@@ -83,6 +83,7 @@ RND_Init :: proc(props: RND_Props) -> Renderer {
     renderer.gpu = gpu
 
     pixels, size := load_pixels("assets/err_tex.jpg")
+    defer free_pixels(pixels)
 
     copy_commands := sdl.AcquireGPUCommandBuffer(gpu); assert(copy_commands != nil)
     copy_pass := sdl.BeginGPUCopyPass(copy_commands); assert(copy_pass != nil)
@@ -91,8 +92,8 @@ RND_Init :: proc(props: RND_Props) -> Renderer {
         .NEGATIVEX = "assets/skybox/left.png",
         .POSITIVEY = "assets/skybox/top.png",
         .NEGATIVEY = "assets/skybox/bottom.png",
-        .POSITIVEZ = "assets/skybox/back.png",
-        .NEGATIVEZ = "assets/skybox/front.png",
+        .POSITIVEZ = "assets/skybox/front.png",
+        .NEGATIVEZ = "assets/skybox/back.png",
     })
     renderer.fallback_texture = upload_texture(gpu, copy_pass, pixels, transmute([2]u32)size)
 
@@ -255,7 +256,7 @@ create_model_matrix :: proc(transform: Transform, position_offset: vec3 = 0) -> 
     linalg.matrix4_scale(model_transform.scale)
 }
 
-render_obj :: proc(state: ^AppState) {
+render_3D :: proc(state: ^AppState) {
     using state
 
     assert(renderer.cmd_buff != nil)
@@ -543,6 +544,7 @@ setup_skybox_pipeline :: proc(renderer: ^Renderer) {
             depth_stencil_format = .D32_FLOAT
         }
     })
+    assert(renderer.skybox_pipeline != nil)
 }
 
 create_render_pipeline :: proc(

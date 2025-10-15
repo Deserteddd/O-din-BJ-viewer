@@ -43,6 +43,7 @@ load_sprite :: proc(path: string, renderer: ^Renderer) -> Sprite {
     
     pixels, size := load_pixels(path)
     texture := upload_texture(gpu, copy_pass, pixels, transmute([2]u32)size)
+    free_pixels(pixels)
 
     sampler := sdl.CreateGPUSampler(gpu, {}); assert(sampler != nil)
     return Sprite {
@@ -164,7 +165,6 @@ draw_imgui :: proc(state: ^AppState) {
             im.LabelText("", "General")
             im.DragFloat3("Player position", &player.position, 0.25, 0, 60)
             im.DragFloat("Draw distance", &renderer.draw_distance, 0.5, 10, 250)
-            if im.Button("Random tiles") do randomize_tile_positions(state)
         }
         im.End()
     }
@@ -180,7 +180,11 @@ draw_imgui :: proc(state: ^AppState) {
         im.SetNextItemWidth(50)
         im.DragInt("Drawn", &rendered)
         im.SetNextItemWidth(50)
-        im.DragFloat("Speed", &debug_info.player_speed)
+        im.LabelText("", "Player")
+        im.DragFloat("Vel", &debug_info.player_speed)
+        im.DragFloat("X", &player.position.x)
+        im.DragFloat("Y", &player.position.y)
+        im.DragFloat("Z", &player.position.z)
     }
     im.End()
     im.Render()

@@ -18,9 +18,8 @@ import im_sdl "shared:imgui/imgui_impl_sdl3"
 import im_sdlgpu "shared:imgui/imgui_impl_sdlgpu3"
 
 // Constants
-WORLD_SIZE: vec3 = {100, 40, 100}
-DEBUG_GPU :: true
-PRESENT_MODE: sdl.GPUPresentMode = .VSYNC
+DEBUG_GPU :: false
+PRESENT_MODE: sdl.GPUPresentMode = .IMMEDIATE
 
 // Globals
 default_context: runtime.Context
@@ -165,7 +164,7 @@ run :: proc(state: ^AppState) {
         update_vp(state)
         update(state)
         frame_begin(&renderer)
-        render_obj(state)
+        render_3D(state)
         draw_2d(state)
 
         state.debug_info.frame_time = time.since(now)
@@ -183,17 +182,6 @@ toggle_ui :: proc(state: ^AppState) {
     } else {
         ok := sdl.HideCursor(); assert(ok)
         ok = sdl.SetWindowRelativeMouseMode(state.renderer.window, true); assert(ok)
-    }
-}
-
-randomize_tile_positions :: proc(state: ^AppState) {
-    for &entity, i in state.entities {
-        if i < 1 do continue
-        entity.transform.translation = {
-            random_range(-WORLD_SIZE.x, WORLD_SIZE.x),
-            random_range(0, WORLD_SIZE.y),
-            random_range(-WORLD_SIZE.z, WORLD_SIZE.z)
-        }
     }
 }
 
