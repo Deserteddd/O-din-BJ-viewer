@@ -1,5 +1,5 @@
 /*.exe
 /*.pdb
 /ols.json
-/shaders/out
+/shaders/out/*
 /assets/*/.blend*

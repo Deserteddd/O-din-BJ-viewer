@@ -23,6 +23,7 @@ Renderer :: struct {
     skybox_texture:     ^sdl.GPUTexture,
     cmd_buff:           ^sdl.GPUCommandBuffer,
     samplers:           [4]^sdl.GPUSampler,
+    default_sampler:    ^sdl.GPUSampler,
     vert_ubo_global:    VertUBO,
     props:              RND_Props,
     light:              PointLight,
@@ -129,6 +130,9 @@ RND_Init :: proc(props: RND_Props) -> Renderer {
         sdl.GPUPrimitiveType.LINELIST
     )
     setup_skybox_pipeline(&renderer)
+    renderer.default_sampler = sdl.CreateGPUSampler(gpu, {})
+    assert(renderer.default_sampler != nil)
+
     for i in 0..<4 {
         sampler := sdl.CreateGPUSampler(gpu, {}); assert(sampler != nil)
         renderer.samplers[i] = sampler
@@ -293,11 +297,15 @@ render_3D :: proc(state: ^AppState) {
         texture_count := len(textures)
         for tex, i in textures {
             sdl.BindGPUFragmentSamplers(render_pass, u32(i), 
-                &(sdl.GPUTextureSamplerBinding{texture = tex, sampler = renderer.samplers[i]}), u32(texture_count)
+                &(sdl.GPUTextureSamplerBinding{
+                    texture = tex, 
+                    sampler = renderer.samplers[i]
+                }),
+                u32(texture_count)
             )
         }
         for i in texture_count..<4 {
-            if texture_count == 0 do texture_count = 1
+            if texture_count == 1 do texture_count = 2
             sdl.BindGPUFragmentSamplers(render_pass, u32(i), 
                 &(sdl.GPUTextureSamplerBinding{
                     texture = renderer.fallback_texture, 
@@ -306,6 +314,10 @@ render_3D :: proc(state: ^AppState) {
                 u32(texture_count)
             )
         }
+        sdl.BindGPUFragmentSamplers(render_pass, 4, &(sdl.GPUTextureSamplerBinding  {
+            texture = renderer.skybox_texture,
+            sampler = renderer.default_sampler
+        }), u32(texture_count))
 
         sdl.BindGPUFragmentStorageBuffers(render_pass, 0, &material_buffer, 1)
         for &entity, i in entities {
@@ -320,10 +332,11 @@ render_3D :: proc(state: ^AppState) {
         }
     }
     {
+
         sdl.BindGPUGraphicsPipeline(render_pass, renderer.skybox_pipeline)
         sdl.BindGPUFragmentSamplers(render_pass, 0, &(sdl.GPUTextureSamplerBinding  {
             texture = renderer.skybox_texture,
-            sampler = renderer.samplers[0]
+            sampler = renderer.default_sampler
         }), 1)
         sdl.DrawGPUPrimitives(render_pass, 3, 1, 0, 0)
     }

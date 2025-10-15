@@ -14,4 +14,5 @@ cbuffer UBO : register(b0, space3) {
     float3 viewPosition;
 };
 
+
 #endif

@@ -18,7 +18,7 @@ import im_sdl "shared:imgui/imgui_impl_sdl3"
 import im_sdlgpu "shared:imgui/imgui_impl_sdlgpu3"
 
 // Constants
-DEBUG_GPU :: false
+DEBUG_GPU :: true
 PRESENT_MODE: sdl.GPUPresentMode = .IMMEDIATE
 
 // Globals

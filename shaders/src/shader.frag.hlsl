@@ -24,7 +24,11 @@ SamplerState smp1 : register(s1, space2);
 SamplerState smp2 : register(s2, space2);
 SamplerState smp3 : register(s3, space2);
 
-StructuredBuffer<Material> materials : register(t4, space2);
+TextureCube<float4> cubeMap : register(t4, space2);
+SamplerState smp : register(s4, space2);
+
+
+StructuredBuffer<Material> materials : register(t5, space2);
 
 float4 diffuseColor(Input input) {
     float is_texture = materials[input.material].Kd.x;
@@ -44,15 +48,13 @@ float4 diffuseColor(Input input) {
 }
 
 float3 blinnPhongBRDF(float3 dirToLight, float3 dirToView, float3 surfaceNormal, Input input) {
-    float3 materialDiffuseReflection = diffuseColor(input).rgb;
     float shininess = materials[input.material].Ka.a;
-
     float3 halfWayDir = normalize(dirToLight + dirToView);
     float specularDot = max(0, dot(halfWayDir, surfaceNormal));
     float specularFactor = pow(specularDot, shininess);
 
-    float3 specularReflection = materials[input.material].Ks.rgb * specularFactor;
-    return materialDiffuseReflection + specularReflection;
+    return materials[input.material].Ks.rgb * specularFactor;
+
 }
 
 float4 main(Input input) : SV_Target0 {
@@ -63,18 +65,19 @@ float4 main(Input input) : SV_Target0 {
     float3 surfaceNormal = normalize(input.normal);
 
     float incidenceAngleFactor = dot(dirToLight, surfaceNormal);
+    float4 ambientLight = cubeMap.Sample(smp, surfaceNormal);
+    float3 diff_color = diffuseColor(input).xyz;
     float3 reflectedRadiance;
     if (incidenceAngleFactor > 0) {
         float attenuationFactor = 1 / (distToLight * distToLight);
+
         float3 incomingRadiance = lightColor * lightIntensity;
         float3 irradiance = incomingRadiance * incidenceAngleFactor * attenuationFactor;
-        float3 brdf = blinnPhongBRDF(dirToLight, dirToView, surfaceNormal, input);
-        reflectedRadiance = irradiance * brdf;
+        float3 brdf = blinnPhongBRDF(dirToLight, dirToView, surfaceNormal, input) + diff_color;
+        reflectedRadiance = irradiance * brdf + (ambientLight*diff_color);
     } else {
-        reflectedRadiance = float3(0, 0, 0);
+        reflectedRadiance = diff_color * ambientLight;
     }
-
-    float3 emittedRadiance = float3(0, 0, 0);
-    float3 outRadiance = emittedRadiance + reflectedRadiance;
+    float3 outRadiance = reflectedRadiance;
     return float4(outRadiance, 1);
 }
