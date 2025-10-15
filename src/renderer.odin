@@ -8,7 +8,6 @@ import "core:c"
 import "core:os"
 import "core:path/filepath"
 import "core:encoding/json"
-import "core:slice"
 import sdl "vendor:sdl3"
 
 Renderer :: struct {
@@ -126,7 +125,7 @@ RND_Init :: proc(props: RND_Props) -> Renderer {
         "bbox.frag",
         vec3,
         {.FLOAT3},
-        false,
+        true,
         sdl.GPUPrimitiveType.LINELIST
     )
     setup_skybox_pipeline(&renderer)
@@ -268,7 +267,7 @@ render_3D :: proc(state: ^AppState) {
 
     color_target := sdl.GPUColorTargetInfo {
         texture = renderer.swapchain_texture,
-        load_op = .CLEAR,
+        load_op = .LOAD,
         store_op = .STORE,
         clear_color = 0,
     }
@@ -326,11 +325,13 @@ render_3D :: proc(state: ^AppState) {
                 model_index != 0 { continue }
             if !aabb_intersects_frustum(frustum_planes, entity_aabb(entity)) do continue
             debug_info.objects_rendered += 1
-            model_matrix := linalg.matrix4_translate_f32(entity.transform.translation)
+            model_matrix := linalg.matrix4_translate_f32(entity.transform.translation) *
+                linalg.matrix4_from_quaternion(entity.transform.rotation)
             sdl.PushGPUVertexUniformData(renderer.cmd_buff, 1, &model_matrix, size_of(matrix[4,4]f32))
             sdl.DrawGPUPrimitives(render_pass, num_vertices, 1, 0, 0)
         }
     }
+    // Skybox
     {
 
         sdl.BindGPUGraphicsPipeline(render_pass, renderer.skybox_pipeline)
@@ -340,7 +341,22 @@ render_3D :: proc(state: ^AppState) {
         }), 1)
         sdl.DrawGPUPrimitives(render_pass, 3, 1, 0, 0)
     }
+    // Bounding Box
+    {
+        sdl.BindGPUGraphicsPipeline(render_pass, renderer.bbox_pipeline)
+        for model in models {
+            using model
+            bindings: [1]sdl.GPUBufferBinding = { sdl.GPUBufferBinding { buffer = bbox_vbo } } 
+            sdl.BindGPUVertexBuffers(render_pass, 0, &bindings[0], 1)
+            for entity in entities {
+                model_matrix := linalg.matrix4_translate_f32(entity.transform.translation)
+                sdl.PushGPUVertexUniformData(renderer.cmd_buff, 1, &model_matrix, size_of(matrix[4,4]f32))
+                sdl.DrawGPUPrimitives(render_pass, 24, 1, 0, 0)
+            }
+        }
+    }
     sdl.EndGPURenderPass(render_pass)
+
 }
 
 get_camera_position :: proc(player: Player) -> (camera_position: vec3) {
@@ -627,7 +643,7 @@ create_render_pipeline :: proc(
             num_vertex_attributes = u32(len(vb_attributes))
         },
         rasterizer_state = {
-            fill_mode = .FILL,
+            fill_mode = primitive_type == .TRIANGLELIST ? .FILL : .LINE,
             cull_mode = cull_mode
         },
         depth_stencil_state = {

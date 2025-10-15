@@ -88,8 +88,6 @@ add_obj_model :: proc(data: OBJObjectData, state: ^AppState) {
         assert(size.y >= 1)
         pixels := data.texture_data.textures[i]
         texture := upload_texture(gpu, copy_pass, pixels, transmute([2]u32)size)
-        fmt.println("YES")
-
         append(&textures, texture)
     }
     model.textures = textures[:]
@@ -104,6 +102,7 @@ add_obj_model :: proc(data: OBJObjectData, state: ^AppState) {
         if (position.z > bbox.max.z) do bbox.max.z = position.z;
     }
     model.bbox = bbox
+    bbox_vertices := get_bbox_vertices(bbox)
 
     // Create and upload buffers
     len_bytes := u32(len(data.vertices) * size_of(OBJVertex))
@@ -113,6 +112,7 @@ add_obj_model :: proc(data: OBJObjectData, state: ^AppState) {
         usage = sdl.GPUTransferBufferUsage.UPLOAD,
         size = len_bytes,
     }); assert(transfer_buffer != nil)
+    bbox_vbo         := create_buffer_with_data(gpu, transfer_buffer, copy_pass, {.VERTEX}, bbox_vertices[:])
     vbo              := create_buffer_with_data(gpu, transfer_buffer, copy_pass, {.VERTEX}, data.vertices[:])
     material_buffer  := create_buffer_with_data(gpu, transfer_buffer, copy_pass, {.GRAPHICS_STORAGE_READ}, material_matrices[:])
     model.num_vertices = u32(len(data.vertices))
@@ -124,49 +124,8 @@ add_obj_model :: proc(data: OBJObjectData, state: ^AppState) {
     ok := sdl.SubmitGPUCommandBuffer(copy_commands); assert(ok)
 
     // Assignments
+    model.bbox_vbo = bbox_vbo
     model.vbo = vbo
     model.material_buffer = material_buffer
     append(&state.models, model)
-}
-
-_get_bbox_vertices :: proc(bbox: AABB) -> [24]vec3 {
-    using bbox
-    return {
-        vec3{min.x, min.y, min.z},
-        vec3{max.x, min.y, min.z},
-
-        vec3{max.x, max.y, min.z},
-        vec3{min.x, max.y, min.z},
-
-        vec3{min.x, min.y, min.z},
-        vec3{min.x, min.y, max.z},
-
-        vec3{max.x, min.y, max.z},
-        vec3{min.x, min.y, max.z},
-
-        vec3{max.x, max.y, max.z},
-        vec3{min.x, max.y, max.z},
-
-        vec3{max.x, min.y, max.z},
-        vec3{max.x, min.y, min.z},
-
-        vec3{max.x, max.y, min.z},
-        vec3{max.x, max.y, max.z},
-
-        vec3{min.x, max.y, min.z},
-        vec3{min.x, max.y, max.z},
-        
-        // Vertical bars
-        vec3{min.x, min.y, min.z},
-        vec3{min.x, max.y, min.z},
-
-        vec3{max.x, min.y, min.z},
-        vec3{max.x, max.y, min.z},
-
-        vec3{min.x, min.y, max.z},
-        vec3{min.x, max.y, max.z},
-
-        vec3{max.x, min.y, max.z},
-        vec3{max.x, max.y, max.z},
-    }
 }

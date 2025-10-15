@@ -41,7 +41,8 @@ Model :: struct {
     vbo:             ^sdl.GPUBuffer,
     material_buffer: ^sdl.GPUBuffer,
     num_vertices:    u32,
-    bbox: AABB
+    bbox:            AABB,
+    bbox_vbo:        ^sdl.GPUBuffer
 }
 
 AppState :: struct {
@@ -201,12 +202,17 @@ reset_player_pos :: proc(state: ^AppState, at_origin := false) {
     }
 }
 
+
 update :: proc(state: ^AppState) {
     using state
     debug_info.objects_rendered = 0
     new_ticks := sdl.GetTicks();
     dt := f32(new_ticks - last_ticks) / 1000
     last_ticks = new_ticks
+    x, y, z := linalg.euler_angles_from_quaternion(state.entities[0].transform.rotation, .XYZ)
+    y += dt
+    if y > 1.57 do y = 0
+    state.entities[0].transform.rotation = linalg.quaternion_from_euler_angles(x, y, z, .XYZ)
     if !props.ui_visible {
         update_player(state, dt)
     }
