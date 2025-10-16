@@ -65,7 +65,7 @@ float4 main(Input input) : SV_Target0 {
     float3 surfaceNormal = normalize(input.normal);
 
     float incidenceAngleFactor = dot(dirToLight, surfaceNormal);
-    float4 ambientLight = cubeMap.Sample(smp, surfaceNormal);
+    float3 ambientLight = cubeMap.Sample(smp, surfaceNormal).xyz;
     float3 diff_color = diffuseColor(input).xyz;
     float3 reflectedRadiance;
     if (incidenceAngleFactor > 0) {

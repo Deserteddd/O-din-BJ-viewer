@@ -18,9 +18,7 @@ Renderer :: struct {
     skybox_pipeline:    ^sdl.GPUGraphicsPipeline,
     depth_texture:      ^sdl.GPUTexture,
     fallback_texture:   ^sdl.GPUTexture,
-    swapchain_texture:  ^sdl.GPUTexture,
     skybox_texture:     ^sdl.GPUTexture,
-    cmd_buff:           ^sdl.GPUCommandBuffer,
     samplers:           [4]^sdl.GPUSampler,
     default_sampler:    ^sdl.GPUSampler,
     vert_ubo_global:    VertUBO,
@@ -153,7 +151,6 @@ RND_Destroy :: proc(renderer: ^Renderer) {
     sdl.ReleaseGPUGraphicsPipeline(gpu, r2d.ui_pipeline)
     sdl.ReleaseGPUTexture(gpu, depth_texture)
     sdl.ReleaseGPUTexture(gpu, fallback_texture)
-    sdl.ReleaseGPUTexture(gpu, swapchain_texture)
     for sampler in samplers {
         sdl.ReleaseGPUSampler(gpu, sampler)
     }
@@ -211,15 +208,27 @@ RND_ToggleFullscreen :: proc(state: ^AppState) {
     init_imgui(state)
 }
 
+Frame :: struct {
+    cmd_buff:   ^sdl.GPUCommandBuffer,
+    swapchain:  ^sdl.GPUTexture,
+    win_size:   vec2
+}
 
-
-frame_begin :: proc(renderer: ^Renderer) {
+frame_begin :: proc(renderer: ^Renderer) -> Frame {
     using renderer
-    assert(cmd_buff == nil)
-    assert(swapchain_texture == nil)
-    cmd_buff = sdl.AcquireGPUCommandBuffer(renderer.gpu); assert(cmd_buff != nil)
-    ok := sdl.WaitAndAcquireGPUSwapchainTexture(cmd_buff, renderer.window, &renderer.swapchain_texture, nil, nil)
+    frame: Frame
+    cmd_buff := sdl.AcquireGPUCommandBuffer(renderer.gpu); assert(cmd_buff != nil)
+    swapchain: ^sdl.GPUTexture
+    ok := sdl.WaitAndAcquireGPUSwapchainTexture(cmd_buff, renderer.window, &swapchain, nil, nil)
+    win_size := get_window_size(renderer^)
     assert(ok)
+    assert(cmd_buff  != nil)
+    assert(swapchain != nil)
+    return Frame {
+        cmd_buff,
+        swapchain,
+        win_size
+    }
 }
 
 update_vp :: proc(state: ^AppState) {
@@ -232,10 +241,8 @@ update_vp :: proc(state: ^AppState) {
     inv_projection_mat = linalg.inverse(proj_matrix)
 }
 
-frame_submit :: proc(renderer: ^Renderer) -> bool {
-    ok := sdl.SubmitGPUCommandBuffer(renderer.cmd_buff)
-    renderer.cmd_buff = nil
-    renderer.swapchain_texture = nil
+frame_submit :: proc(renderer: ^Renderer, frame: Frame) -> bool {
+    ok := sdl.SubmitGPUCommandBuffer(frame.cmd_buff)
     return ok
 }
 
@@ -259,14 +266,14 @@ create_model_matrix :: proc(transform: Transform, position_offset: vec3 = 0) -> 
     linalg.matrix4_scale(model_transform.scale)
 }
 
-render_3D :: proc(state: ^AppState) {
-    using state
+render_3D :: proc(state: ^AppState, frame: Frame) {
+    using state, frame
 
-    assert(renderer.cmd_buff != nil)
-    assert(renderer.swapchain_texture != nil)
+    assert(cmd_buff  != nil)
+    assert(swapchain != nil)
 
     color_target := sdl.GPUColorTargetInfo {
-        texture = renderer.swapchain_texture,
+        texture = swapchain,
         load_op = .LOAD,
         store_op = .STORE,
         clear_color = 0,
@@ -285,10 +292,10 @@ render_3D :: proc(state: ^AppState) {
     frustum_planes := create_furstum_planes(renderer.vert_ubo_global.vp)
 
     frag_ubo := create_frag_ubo(state);
-    render_pass := sdl.BeginGPURenderPass(renderer.cmd_buff, &color_target, 1, &depth_target_info); assert(render_pass != nil)
+    render_pass := sdl.BeginGPURenderPass(cmd_buff, &color_target, 1, &depth_target_info); assert(render_pass != nil)
     sdl.BindGPUGraphicsPipeline(render_pass, renderer.obj_pipeline)
-    sdl.PushGPUFragmentUniformData(renderer.cmd_buff, 0, &frag_ubo, size_of(FragUBO))
-    sdl.PushGPUVertexUniformData(renderer.cmd_buff, 0, &renderer.vert_ubo_global, size_of(VertUBO))
+    sdl.PushGPUFragmentUniformData(cmd_buff, 0, &frag_ubo, size_of(FragUBO))
+    sdl.PushGPUVertexUniformData(cmd_buff, 0, &renderer.vert_ubo_global, size_of(VertUBO))
     for &model, model_index in models {
         using model
         bindings: [1]sdl.GPUBufferBinding = { sdl.GPUBufferBinding { buffer = vbo } } 
@@ -327,7 +334,7 @@ render_3D :: proc(state: ^AppState) {
             debug_info.objects_rendered += 1
             model_matrix := linalg.matrix4_translate_f32(entity.transform.translation) *
                 linalg.matrix4_from_quaternion(entity.transform.rotation)
-            sdl.PushGPUVertexUniformData(renderer.cmd_buff, 1, &model_matrix, size_of(matrix[4,4]f32))
+            sdl.PushGPUVertexUniformData(cmd_buff, 1, &model_matrix, size_of(matrix[4,4]f32))
             sdl.DrawGPUPrimitives(render_pass, num_vertices, 1, 0, 0)
         }
     }
@@ -342,7 +349,7 @@ render_3D :: proc(state: ^AppState) {
         sdl.DrawGPUPrimitives(render_pass, 3, 1, 0, 0)
     }
     // Bounding Box
-    {
+    if DEBUG_GPU {
         sdl.BindGPUGraphicsPipeline(render_pass, renderer.bbox_pipeline)
         for model in models {
             using model
@@ -350,7 +357,7 @@ render_3D :: proc(state: ^AppState) {
             sdl.BindGPUVertexBuffers(render_pass, 0, &bindings[0], 1)
             for entity in entities {
                 model_matrix := linalg.matrix4_translate_f32(entity.transform.translation)
-                sdl.PushGPUVertexUniformData(renderer.cmd_buff, 1, &model_matrix, size_of(matrix[4,4]f32))
+                sdl.PushGPUVertexUniformData(cmd_buff, 1, &model_matrix, size_of(matrix[4,4]f32))
                 sdl.DrawGPUPrimitives(render_pass, 24, 1, 0, 0)
             }
         }

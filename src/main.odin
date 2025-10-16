@@ -2,15 +2,8 @@ package obj_viewer
 
 import "base:runtime"
 import "core:log"
-import "core:math"
 import "core:fmt"
-import "core:mem"
-import "core:os"
-import "core:strings"
-import "core:strconv"
 import "core:math/linalg"
-import "core:math/rand"
-import "core:path/filepath"
 import "core:time"
 import sdl "vendor:sdl3"
 import im "shared:imgui"
@@ -18,8 +11,8 @@ import im_sdl "shared:imgui/imgui_impl_sdl3"
 import im_sdlgpu "shared:imgui/imgui_impl_sdlgpu3"
 
 // Constants
-DEBUG_GPU :: true
-PRESENT_MODE: sdl.GPUPresentMode = .IMMEDIATE
+DEBUG_GPU :: false
+PRESENT_MODE: sdl.GPUPresentMode = .VSYNC
 
 // Globals
 default_context: runtime.Context
@@ -47,11 +40,12 @@ Model :: struct {
 
 AppState :: struct {
     player:             Player,
-    renderer:           Renderer,
     debug_info:         DebugInfo,
+    renderer:           Renderer,
     ui_context:         ^im.Context,
     models:             [dynamic]Model,
     entities:           #soa[dynamic]Entity,
+    sprites:            [dynamic]Sprite,
     checkpoint:         [2]vec3,                // Position, Rotation
     props:              Props,
     slabs:              u32
@@ -85,16 +79,18 @@ init :: proc(state: ^AppState) {
     renderer = RND_Init({})
     init_imgui(state)
     player = create_player()
-    slab   := load_object("assets/slab"); defer delete_obj(slab)
+    slab   := load_object("assets/slab2"); defer delete_obj(slab)
 
     add_obj_model(slab, state)
-    entity_from_model(state, "slab")
+    entity_from_model(state, "slab2")
 
     state.props.attatch_light_to_player = true
 
-    crosshair := load_sprite("assets/KovaaK-Crosshair.png", &renderer)
-
-    append(&renderer.r2d.sprites, crosshair)
+    crosshair := load_sprite("assets/crosshair.png", &renderer)
+    test := load_sprite("assets/err_tex.jpg", &renderer)
+    fmt.println(crosshair.name)
+    append(&sprites, crosshair)
+    append(&sprites, test)
 }
 
 init_imgui :: proc(state: ^AppState) {
@@ -155,7 +151,7 @@ run :: proc(state: ^AppState) {
                         case 1:
                             state.props.lmb_pressed = true
                         case 3:
-                            new, ok := entity_from_model(state, "slab"); assert(ok)
+                            new, ok := entity_from_model(state, "slab2"); assert(ok)
                             set_entity_position(state, new, player.position)
                     }
                 }
@@ -164,12 +160,16 @@ run :: proc(state: ^AppState) {
         update_camera(&player)
         update_vp(state)
         update(state)
-        frame_begin(&renderer)
-        render_3D(state)
-        draw_2d(state)
+        frame := frame_begin(&renderer)
+        render_3D(state, frame)
 
+        render_pass_2d := begin_2d(state.renderer, frame)
+        for sprite in state.sprites do draw_sprite(sprite, frame, render_pass_2d)
+
+        submit_2d(render_pass_2d)
+        draw_imgui(state, frame)
         state.debug_info.frame_time = time.since(now)
-        ok := frame_submit(&state.renderer); assert(ok)
+        ok := frame_submit(&state.renderer, frame); assert(ok)
     }
 }
 
@@ -209,10 +209,6 @@ update :: proc(state: ^AppState) {
     new_ticks := sdl.GetTicks();
     dt := f32(new_ticks - last_ticks) / 1000
     last_ticks = new_ticks
-    x, y, z := linalg.euler_angles_from_quaternion(state.entities[0].transform.rotation, .XYZ)
-    y += dt
-    if y > 1.57 do y = 0
-    state.entities[0].transform.rotation = linalg.quaternion_from_euler_angles(x, y, z, .XYZ)
     if !props.ui_visible {
         update_player(state, dt)
     }

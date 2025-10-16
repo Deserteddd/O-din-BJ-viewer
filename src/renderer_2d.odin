@@ -2,6 +2,7 @@ package obj_viewer
 
 import "core:time"
 import "core:math"
+import "core:strings"
 import sdl "vendor:sdl3"
 import im "shared:imgui"
 import im_sdl "shared:imgui/imgui_impl_sdl3"
@@ -15,10 +16,10 @@ Vertex2D :: struct {
 R2D :: struct {
     ui_pipeline: ^sdl.GPUGraphicsPipeline,
     quad: Quad,
-    sprites: [dynamic]Sprite,
 }
 
 Sprite :: struct {
+    name: string,
     sampler: ^sdl.GPUSampler,
     texture: ^sdl.GPUTexture,
     size: [2]i32
@@ -45,8 +46,13 @@ load_sprite :: proc(path: string, renderer: ^Renderer) -> Sprite {
     texture := upload_texture(gpu, copy_pass, pixels, transmute([2]u32)size)
     free_pixels(pixels)
 
+    file_name  := strings.split(path, "/", context.temp_allocator)
+    name_split := strings.split(file_name[len(file_name)-1], ".", context.temp_allocator)
+    name       := strings.clone(name_split[0])
+
     sampler := sdl.CreateGPUSampler(gpu, {}); assert(sampler != nil)
     return Sprite {
+        name,
         sampler,
         texture,
         size
@@ -98,17 +104,15 @@ init_quad :: proc(
     return Quad {vbo, ibo}
 }
 
-draw_2d :: proc(state: ^AppState) {
-    using state.renderer
+begin_2d :: proc(renderer: Renderer, frame: Frame) -> ^sdl.GPURenderPass {
+    using renderer, frame
     assert(cmd_buff != nil)
-    assert(swapchain_texture != nil)
+    assert(swapchain != nil)
     assert(r2d.ui_pipeline != nil)
-
-    win_size := get_window_size(state.renderer)
 
 
     color_target := sdl.GPUColorTargetInfo {
-        texture = swapchain_texture,
+        texture = swapchain,
         load_op = .LOAD,
         store_op = .STORE,
     }
@@ -121,35 +125,34 @@ draw_2d :: proc(state: ^AppState) {
         sdl.GPUBufferBinding {buffer = r2d.quad.ibo},
     }
 
-    // Draw sprites
-    for sprite in r2d.sprites {
-        im_w := f32(sprite.size.x); im_h := f32(sprite.size.y)
-        ubo := UBO2D {
-            {win_size.x/2-im_w/2, win_size.y/2-im_h/2, f32(sprite.size.x), f32(sprite.size.y)},
-            win_size
-        }
-        sdl.PushGPUVertexUniformData(cmd_buff, 0, &ubo, size_of(UBO2D))
-        sdl.BindGPUFragmentSamplers(render_pass, 0, 
-            &(sdl.GPUTextureSamplerBinding {
-                texture = sprite.texture,
-                sampler = sprite.sampler
-            }), 1
-        )
-        { 
-            sdl.BindGPUVertexBuffers(render_pass, 0, &bindings[0], 1)
-            sdl.BindGPUIndexBuffer(render_pass, bindings[1], ._16BIT)
-            using r2d.quad
-            sdl.DrawGPUIndexedPrimitives(render_pass, 6, 1, 0, 0, 0)
-        }
-    }
-    sdl.EndGPURenderPass(render_pass)
-
-    draw_imgui(state)
+    sdl.BindGPUVertexBuffers(render_pass, 0, &bindings[0], 1)
+    sdl.BindGPUIndexBuffer(render_pass, bindings[1], ._16BIT)
+    return render_pass
 }
 
-@(private="file")
-draw_imgui :: proc(state: ^AppState) {
-    using state
+draw_sprite :: proc(sprite: Sprite, frame: Frame, pass: ^sdl.GPURenderPass) {
+    using frame
+    im_w := f32(sprite.size.x); im_h := f32(sprite.size.y)
+    ubo := UBO2D {
+        {win_size.x/2-im_w/2, win_size.y/2-im_h/2, f32(sprite.size.x), f32(sprite.size.y)},
+        win_size
+    }
+    sdl.PushGPUVertexUniformData(cmd_buff, 0, &ubo, size_of(UBO2D))
+    sdl.BindGPUFragmentSamplers(pass, 0, 
+        &(sdl.GPUTextureSamplerBinding {
+            texture = sprite.texture,
+            sampler = sprite.sampler
+        }), 1
+    )
+    sdl.DrawGPUIndexedPrimitives(pass, 6, 1, 0, 0, 0)
+}
+
+submit_2d :: proc(pass: ^sdl.GPURenderPass) {
+    sdl.EndGPURenderPass(pass)
+}
+
+draw_imgui :: proc(state: ^AppState, frame: Frame) {
+    using state, frame
     im_sdlgpu.NewFrame()
     im_sdl.NewFrame()
     im.NewFrame()
@@ -189,14 +192,14 @@ draw_imgui :: proc(state: ^AppState) {
     im.End()
     im.Render()
     im_draw_data := im.GetDrawData()
-    im_sdlgpu.PrepareDrawData(im_draw_data, renderer.cmd_buff)
+    im_sdlgpu.PrepareDrawData(im_draw_data, cmd_buff)
     im_color_target := sdl.GPUColorTargetInfo {
-        texture = renderer.swapchain_texture,
+        texture = swapchain,
         load_op = .LOAD,
         store_op = .STORE
     }
-    im_render_pass := sdl.BeginGPURenderPass(renderer.cmd_buff, &im_color_target, 1, nil); assert(im_render_pass != nil)
-    im_sdlgpu.RenderDrawData(im_draw_data, renderer.cmd_buff, im_render_pass)
+    im_render_pass := sdl.BeginGPURenderPass(cmd_buff, &im_color_target, 1, nil); assert(im_render_pass != nil)
+    im_sdlgpu.RenderDrawData(im_draw_data, cmd_buff, im_render_pass)
     sdl.EndGPURenderPass(im_render_pass)
 }
 
