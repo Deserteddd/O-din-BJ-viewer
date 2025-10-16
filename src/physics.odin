@@ -1,7 +1,6 @@
 package obj_viewer
 
 import "core:math/linalg"
-import "core:time"
 import "core:math"
 
 AABB :: struct {
@@ -25,6 +24,7 @@ vector_normalize :: proc(v: ^vec3) -> f32 {
     }
     return length
 }
+
 
 create_furstum_planes :: proc(vp: matrix[4,4]f32) -> [6]vec4 {
     vp := linalg.transpose(vp)

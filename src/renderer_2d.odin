@@ -104,7 +104,7 @@ init_quad :: proc(
     return Quad {vbo, ibo}
 }
 
-begin_2d :: proc(renderer: Renderer, frame: Frame) -> ^sdl.GPURenderPass {
+begin_2d :: proc(renderer: Renderer, frame: ^Frame) -> ^sdl.GPURenderPass {
     using renderer, frame
     assert(cmd_buff != nil)
     assert(swapchain != nil)
@@ -116,8 +116,7 @@ begin_2d :: proc(renderer: Renderer, frame: Frame) -> ^sdl.GPURenderPass {
         load_op = .LOAD,
         store_op = .STORE,
     }
-    render_pass := sdl.BeginGPURenderPass(cmd_buff, &color_target, 1, nil); assert(render_pass != nil)
-    
+    render_pass = sdl.BeginGPURenderPass(cmd_buff, &color_target, 1, nil); assert(render_pass != nil)
     sdl.BindGPUGraphicsPipeline(render_pass, r2d.ui_pipeline)
     assert(r2d.quad.vbo != nil)
     bindings: [2]sdl.GPUBufferBinding = {
@@ -130,25 +129,30 @@ begin_2d :: proc(renderer: Renderer, frame: Frame) -> ^sdl.GPURenderPass {
     return render_pass
 }
 
-draw_sprite :: proc(sprite: Sprite, frame: Frame, pass: ^sdl.GPURenderPass) {
+draw_sprite :: proc(sprite: Sprite, frame: Frame, pos: vec2 = 0, scale: f32 = 1) {
     using frame
-    im_w := f32(sprite.size.x); im_h := f32(sprite.size.y)
+    if render_pass == nil do panic("Render pass not in progress")
+    // Sprite will be centered if no position is provided
+    x := pos == 0 ? win_size.x/2 - f32(sprite.size.x)/2 : pos.x
+    y := pos == 0 ? win_size.y/2 - f32(sprite.size.y)/2 : pos.y
+
     ubo := UBO2D {
-        {win_size.x/2-im_w/2, win_size.y/2-im_h/2, f32(sprite.size.x), f32(sprite.size.y)},
+        {x, y, f32(sprite.size.x)*scale, f32(sprite.size.y)*scale},
         win_size
     }
     sdl.PushGPUVertexUniformData(cmd_buff, 0, &ubo, size_of(UBO2D))
-    sdl.BindGPUFragmentSamplers(pass, 0, 
+    sdl.BindGPUFragmentSamplers(render_pass, 0, 
         &(sdl.GPUTextureSamplerBinding {
             texture = sprite.texture,
             sampler = sprite.sampler
         }), 1
     )
-    sdl.DrawGPUIndexedPrimitives(pass, 6, 1, 0, 0, 0)
+    sdl.DrawGPUIndexedPrimitives(render_pass, 6, 1, 0, 0, 0)
 }
 
-submit_2d :: proc(pass: ^sdl.GPURenderPass) {
-    sdl.EndGPURenderPass(pass)
+submit_2d :: proc(frame: ^Frame) {
+    sdl.EndGPURenderPass(frame.render_pass)
+    frame.render_pass = nil
 }
 
 draw_imgui :: proc(state: ^AppState, frame: Frame) {

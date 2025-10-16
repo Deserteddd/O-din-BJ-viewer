@@ -11,7 +11,7 @@ import im_sdl "shared:imgui/imgui_impl_sdl3"
 import im_sdlgpu "shared:imgui/imgui_impl_sdlgpu3"
 
 // Constants
-DEBUG_GPU :: false
+DEBUG_GPU :: true
 PRESENT_MODE: sdl.GPUPresentMode = .VSYNC
 
 // Globals
@@ -45,10 +45,10 @@ AppState :: struct {
     ui_context:         ^im.Context,
     models:             [dynamic]Model,
     entities:           #soa[dynamic]Entity,
-    sprites:            [dynamic]Sprite,
     checkpoint:         [2]vec3,                // Position, Rotation
     props:              Props,
-    slabs:              u32
+    slabs:              u32,
+    sprites:            [dynamic]Sprite,
 }
 
 // Replace with bit set
@@ -83,14 +83,9 @@ init :: proc(state: ^AppState) {
 
     add_obj_model(slab, state)
     entity_from_model(state, "slab2")
-
     state.props.attatch_light_to_player = true
-
     crosshair := load_sprite("assets/crosshair.png", &renderer)
-    test := load_sprite("assets/err_tex.jpg", &renderer)
-    fmt.println(crosshair.name)
     append(&sprites, crosshair)
-    append(&sprites, test)
 }
 
 init_imgui :: proc(state: ^AppState) {
@@ -116,12 +111,12 @@ init_imgui :: proc(state: ^AppState) {
 }
 
 run :: proc(state: ^AppState) {
-
+    free_all(context.temp_allocator)
     using state
     main_loop: for {
-        now := time.now()
-        defer FRAMES += 1
         defer free_all(context.temp_allocator)
+        defer FRAMES += 1
+        now := time.now()
         ev: sdl.Event
         for sdl.PollEvent(&ev) {
             im_sdl.ProcessEvent(&ev)
@@ -161,15 +156,18 @@ run :: proc(state: ^AppState) {
         update_vp(state)
         update(state)
         frame := frame_begin(&renderer)
-        render_3D(state, frame)
+        render_3D(state, &frame)
 
-        render_pass_2d := begin_2d(state.renderer, frame)
-        for sprite in state.sprites do draw_sprite(sprite, frame, render_pass_2d)
+        begin_2d(state.renderer, &frame)
+        for sprite in state.sprites {
+            draw_sprite(sprite, frame)
+        } 
+        submit_2d(&frame)
 
-        submit_2d(render_pass_2d)
         draw_imgui(state, frame)
-        state.debug_info.frame_time = time.since(now)
+
         ok := frame_submit(&state.renderer, frame); assert(ok)
+        state.debug_info.frame_time = time.since(now)
     }
 }
 

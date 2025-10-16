@@ -209,9 +209,10 @@ RND_ToggleFullscreen :: proc(state: ^AppState) {
 }
 
 Frame :: struct {
-    cmd_buff:   ^sdl.GPUCommandBuffer,
-    swapchain:  ^sdl.GPUTexture,
-    win_size:   vec2
+    cmd_buff:       ^sdl.GPUCommandBuffer,
+    swapchain:      ^sdl.GPUTexture,
+    render_pass:    ^sdl.GPURenderPass,
+    win_size:       vec2,
 }
 
 frame_begin :: proc(renderer: ^Renderer) -> Frame {
@@ -227,6 +228,7 @@ frame_begin :: proc(renderer: ^Renderer) -> Frame {
     return Frame {
         cmd_buff,
         swapchain,
+        nil,
         win_size
     }
 }
@@ -266,11 +268,12 @@ create_model_matrix :: proc(transform: Transform, position_offset: vec3 = 0) -> 
     linalg.matrix4_scale(model_transform.scale)
 }
 
-render_3D :: proc(state: ^AppState, frame: Frame) {
+render_3D :: proc(state: ^AppState, frame: ^Frame) {
     using state, frame
 
     assert(cmd_buff  != nil)
     assert(swapchain != nil)
+    assert(render_pass == nil)
 
     color_target := sdl.GPUColorTargetInfo {
         texture = swapchain,
@@ -290,9 +293,8 @@ render_3D :: proc(state: ^AppState, frame: Frame) {
     }
 
     frustum_planes := create_furstum_planes(renderer.vert_ubo_global.vp)
-
     frag_ubo := create_frag_ubo(state);
-    render_pass := sdl.BeginGPURenderPass(cmd_buff, &color_target, 1, &depth_target_info); assert(render_pass != nil)
+    render_pass = sdl.BeginGPURenderPass(cmd_buff, &color_target, 1, &depth_target_info); assert(render_pass != nil)
     sdl.BindGPUGraphicsPipeline(render_pass, renderer.obj_pipeline)
     sdl.PushGPUFragmentUniformData(cmd_buff, 0, &frag_ubo, size_of(FragUBO))
     sdl.PushGPUVertexUniformData(cmd_buff, 0, &renderer.vert_ubo_global, size_of(VertUBO))
@@ -340,7 +342,6 @@ render_3D :: proc(state: ^AppState, frame: Frame) {
     }
     // Skybox
     {
-
         sdl.BindGPUGraphicsPipeline(render_pass, renderer.skybox_pipeline)
         sdl.BindGPUFragmentSamplers(render_pass, 0, &(sdl.GPUTextureSamplerBinding  {
             texture = renderer.skybox_texture,
