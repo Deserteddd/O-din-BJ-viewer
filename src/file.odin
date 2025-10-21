@@ -25,15 +25,18 @@ open_file_window :: proc() -> (path: string) {
 
 load_pixels :: proc(path: string) -> (pixels: []byte, size: [2]i32) {
     path_cstr := strings.clone_to_cstring(path, context.temp_allocator);
-    pixel_data := stbi.load(path_cstr, &size.x, &size.y, nil, 4); assert(pixel_data != nil)
+    pixel_data := stbi.load(path_cstr, &size.x, &size.y, nil, 4)
+    assert(pixel_data != nil)
     pixels = slice.bytes_from_ptr(pixel_data, int(size.x * size.y * 4))
     assert(pixels != nil)
     return
 }
 
-free_pixels :: proc(pixels: []byte) {
-    stbi.image_free(raw_data(pixels))
-}
+
+free_pixels_byte :: proc (pixels: []byte) {stbi.image_free(raw_data(pixels))}
+free_pixels_u16  :: proc (pixels: []u16)  {stbi.image_free(raw_data(pixels))}
+
+free_pixels :: proc {free_pixels_byte, free_pixels_u16}
 
 load_cubemap_texture :: proc(
     gpu: ^sdl.GPUDevice,
@@ -53,4 +56,13 @@ load_cubemap_texture :: proc(
     texture := upload_cubemap_texture_sides(gpu, copy_pass, pixels, size)
     for side_pixels in pixels do free_pixels(side_pixels)
     return texture
+}
+
+
+load_height_map_pixels :: proc(path: string) -> (pixels: []u16, size: [2]i32) {
+    path_cstr := strings.clone_to_cstring(path, context.temp_allocator);
+    pixel_data := stbi.load_16(path_cstr, &size.x, &size.y, nil, 1); assert(pixel_data != nil)
+    pixels = slice.from_ptr(pixel_data, int(size.x * size.y))
+    assert(pixels != nil)
+    return
 }

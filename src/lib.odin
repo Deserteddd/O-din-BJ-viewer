@@ -2,6 +2,7 @@ package obj_viewer
 import "core:math"
 import "core:math/linalg"
 import "core:math/rand"
+import "core:strings"
 import sdl "vendor:sdl3"
 
 vec2 :: [2]f32
@@ -15,12 +16,113 @@ TRANSFORM_IDENTITY :: Transform {
     rotation = linalg.QUATERNIONF32_IDENTITY
 }
 
+HeightMap :: struct {
+    size:           [2]i32,
+    vbo:            ^sdl.GPUBuffer,
+    ibo:            ^sdl.GPUBuffer,
+    num_indices:    u32
+}
+
+HeightMapVertex :: struct {
+    position, color: vec3,
+}
+
 to_vec4 :: proc(v: vec3, f: f32) -> vec4 { return vec4{v.x, v.y, v.z, f} }
 
 norm :: proc(v: vec3) -> f32 { return math.sqrt_f32(v.x*v.x + v.y*v.y + v.z*v.z) }
 
 random_range :: proc(min: f32, max: f32) -> f32 {
     return rand.float32() * (max - min) + min
+}
+import "core:fmt"
+import "core:time"
+load_height_map :: proc(path: string, gpu: ^sdl.GPUDevice, scale: f32) -> HeightMap {
+    now := time.now()
+    height_path  := strings.concatenate({path, "/height_map.png"}, context.temp_allocator)
+    diffuse_path := strings.concatenate({path, "/diffuse.png"}, context.temp_allocator)
+    pixels, size := load_height_map_pixels(height_path); defer free_pixels(pixels)
+    colors, dsize := load_pixels(diffuse_path); defer free_pixels(colors)
+    fmt.println("Pixel loading took", time.since(now))
+    start_time := now
+    now = time.now()
+    assert(size == dsize)
+    min: u16 = 1 << 15;
+    for pixel in pixels {
+        if pixel < min do min = pixel
+    }
+
+    vertices: [dynamic]HeightMapVertex; defer delete(vertices)
+    indices:  [dynamic]u32;             defer delete(indices)
+    index: u32
+    for pixel, i in pixels {
+        i := i32(i)
+        row := i / size.x
+        col := i % size.x
+        x := f32(row-size.x/2) * scale
+        y := f32(col-size.y/2) * scale
+        if col == size.x-1 do continue
+        if row == size.y-1 do break
+        vert := HeightMapVertex {
+            position = {x, f32(pixel-min)/10*scale, y},
+            color = get_pixel_color(colors, row, col, size.x)
+        }
+        r_pixel := pixels[i+1]
+        r_vert  := HeightMapVertex {
+            position = {x, f32(r_pixel-min)/10*scale, y+scale},
+            color = get_pixel_color(colors, row, col+1, size.x)
+        }
+        d_pixel := pixels[i+size.x]
+        d_vert  := HeightMapVertex {
+            position = {x+scale, f32(d_pixel-min)/10*scale, y},
+            color = get_pixel_color(colors, row+1, col, size.x)
+        }
+        dr_pixel := pixels[i+size.x+1]
+        dr_vert  := HeightMapVertex {
+            position = {x+scale, f32(dr_pixel-min)/10*scale, y+scale},
+            color = get_pixel_color(colors, row+1, col+1, size.x)
+        }
+        quad_verts: [4]HeightMapVertex = {vert, d_vert, r_vert, dr_vert}
+        quad_indices: [6]u32 = {
+            index, index + 1, index + 2,
+            index + 1, index + 2, index + 3 
+        }
+        index += 4
+        for v in quad_verts do append(&vertices, v)
+        for idx in quad_indices do append(&indices, idx)
+    }
+    copy_commands := sdl.AcquireGPUCommandBuffer(gpu); assert(copy_commands != nil)
+    copy_pass := sdl.BeginGPUCopyPass(copy_commands); assert(copy_pass != nil)
+    len_bytes := u32(len(vertices) * size_of(HeightMapVertex))
+    transfer_buffer := sdl.CreateGPUTransferBuffer(gpu, {
+        usage = sdl.GPUTransferBufferUsage.UPLOAD,
+        size = len_bytes,
+    }); assert(transfer_buffer != nil)
+    vbo := create_buffer_with_data(gpu, transfer_buffer, copy_pass, {.VERTEX}, vertices[:])
+    ibo := create_buffer_with_data(gpu, transfer_buffer, copy_pass, {.INDEX}, indices[:])
+
+    sdl.ReleaseGPUTransferBuffer(gpu, transfer_buffer)
+    sdl.EndGPUCopyPass(copy_pass)
+    ok := sdl.SubmitGPUCommandBuffer(copy_commands); assert(ok)
+
+    height_map: HeightMap
+    height_map.size = size
+    height_map.num_indices  = u32(len(indices))
+    height_map.vbo = vbo
+    height_map.ibo = ibo
+    fmt.println("Processing took:", time.since(now))
+    fmt.println("Total:", time.since(start_time))
+    return height_map
+}
+
+get_pixel_color :: proc(pixels: []byte, row, col: i32, width: i32) -> vec3 {
+    bytes_per_pixel: i32 = 4
+    index := (row * width + col) * bytes_per_pixel
+
+    r := f32(pixels[index + 0]) / 255.0
+    g := f32(pixels[index + 1]) / 255.0
+    b := f32(pixels[index + 2]) / 255.0
+
+    return vec3{r, g, b}
 }
 
 get_bbox_vertices :: proc(bbox: AABB) -> [24]vec3 {

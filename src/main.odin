@@ -12,7 +12,7 @@ import im_sdlgpu "shared:imgui/imgui_impl_sdlgpu3"
 
 // Constants
 DEBUG_GPU :: true
-PRESENT_MODE: sdl.GPUPresentMode = .VSYNC
+PRESENT_MODE: sdl.GPUPresentMode = .IMMEDIATE
 
 // Globals
 default_context: runtime.Context
@@ -42,6 +42,7 @@ AppState :: struct {
     player:             Player,
     debug_info:         DebugInfo,
     renderer:           Renderer,
+    height_map:         HeightMap,
     ui_context:         ^im.Context,
     models:             [dynamic]Model,
     entities:           #soa[dynamic]Entity,
@@ -79,10 +80,15 @@ init :: proc(state: ^AppState) {
     renderer = RND_Init({})
     init_imgui(state)
     player = create_player()
-    slab   := load_object("assets/slab2"); defer delete_obj(slab)
 
+    
+    slab    := load_object("assets/slab"); defer delete_obj(slab)
     add_obj_model(slab, state)
-    entity_from_model(state, "slab2")
+
+    // Height map loading
+    height_map = load_height_map("assets/height_map", renderer.gpu, 0.1)
+
+
     state.props.attatch_light_to_player = true
     crosshair := load_sprite("assets/crosshair.png", &renderer)
     append(&sprites, crosshair)
@@ -111,6 +117,7 @@ init_imgui :: proc(state: ^AppState) {
 }
 
 run :: proc(state: ^AppState) {
+    paused: bool
     free_all(context.temp_allocator)
     using state
     main_loop: for {
@@ -126,6 +133,7 @@ run :: proc(state: ^AppState) {
                 case .KEY_DOWN: #partial switch ev.key.scancode {
                     case .ESCAPE:
                         toggle_ui(state)
+                        if props.ui_visible do paused = true
                     case .Q:
                         if !player.airborne do checkpoint = get_player_translation(player)
                     case .E:
@@ -146,15 +154,18 @@ run :: proc(state: ^AppState) {
                         case 1:
                             state.props.lmb_pressed = true
                         case 3:
-                            new, ok := entity_from_model(state, "slab2"); assert(ok)
+                            new, ok := entity_from_model(state, "slab"); assert(ok)
                             set_entity_position(state, new, player.position)
                     }
                 }
             }
         }
-        update_camera(&player)
+        if !props.ui_visible {
+            update_camera(&player)
+            update(state, paused)
+            paused = false
+        }
         update_vp(state)
-        update(state)
         frame := frame_begin(&renderer)
         render_3D(state, &frame)
 
@@ -201,11 +212,12 @@ reset_player_pos :: proc(state: ^AppState, at_origin := false) {
 }
 
 
-update :: proc(state: ^AppState) {
+update :: proc(state: ^AppState, unpaused: bool) {
     using state
     debug_info.objects_rendered = 0
     new_ticks := sdl.GetTicks();
     dt := f32(new_ticks - last_ticks) / 1000
+    if unpaused do dt = 0.01666
     last_ticks = new_ticks
     if !props.ui_visible {
         update_player(state, dt)

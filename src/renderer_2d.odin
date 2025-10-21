@@ -171,7 +171,7 @@ draw_imgui :: proc(state: ^AppState, frame: Frame) {
             im.ColorPicker3("color", transmute(^vec3)&renderer.light.color, {.InputRGB})
             im.LabelText("", "General")
             im.DragFloat3("Player position", &player.position, 0.25, 0, 60)
-            im.DragFloat("Draw distance", &renderer.draw_distance, 0.5, 10, 250)
+            im.DragFloat("Draw distance", &renderer.draw_distance, 1, 10, 1000)
         }
         im.End()
     }

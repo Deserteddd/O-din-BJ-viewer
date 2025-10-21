@@ -5,9 +5,7 @@ import "core:os"
 import "core:strings"
 import "core:strconv"
 import "core:log"
-import "core:time"
 import "core:slice"
-import sdl "vendor:sdl3"
 import stbi "vendor:stb/image"
 
 OBJObjectData :: struct {
@@ -36,9 +34,8 @@ TextureData :: struct {
     sizes:     [dynamic][2]i32
 }
 
-OBJModel :: struct {
 
-}
+
 
 print_obj :: proc(data: OBJObjectData, verbose := false) {
           fmt.println("-------------------- OBJObjectData --------------------")
@@ -89,7 +86,7 @@ delete_obj :: proc(data: OBJObjectData) {
 }
 
 load_object :: proc(dir_path: string) -> OBJObjectData {
-    defer free_all(context.temp_allocator)
+    defer free_all(context.temp_allocator) // Might cause incorrect behaviour if used mid frame
     fmt.println("Loading:", dir_path)
     obj: OBJObjectData
     asset_handle, err := os.open(dir_path, 0, 0); assert(err == nil)
@@ -128,7 +125,6 @@ load_object :: proc(dir_path: string) -> OBJObjectData {
                 defer i += 1
                 if line[0] == 'o' {
                     if start != 0 {
-                        now := time.now()
                         new_obj := load_obj(line_arr[start:i], material_names, &positions, &uvs, &normals)
                         for v in new_obj do append(&obj.vertices, v)
                     }
@@ -355,14 +351,13 @@ parse_face_data :: proc(line: string) -> [9]u32 {
     data: [9]u32;
     start := 2
     n := 0
-    errors: bool
     for i in 2..<len(line) {
         if !(rune(line[i]) >= '0' && rune(line[i]) <= '9')  {
             num, ok := strconv.parse_int(line[start:i])
             if !ok {
-                errors = true
                 data[n] = 0
             } else {
+                if n >= len(line) do panic("Mesh must be triangulated")
                 data[n] = u32(num)-1
             }
             n += 1

@@ -67,8 +67,6 @@ set_entity_position :: proc(state: ^AppState, id: i32, pos: vec3) {
     }
 }
 
-import "core:fmt"
-
 add_obj_model :: proc(data: OBJObjectData, state: ^AppState) {
     using state.renderer
     model: Model
@@ -92,7 +90,7 @@ add_obj_model :: proc(data: OBJObjectData, state: ^AppState) {
     }
     model.textures = textures[:]
     bbox: AABB = {min = max(f32), max = min(f32)}
-    for vert, v in data.vertices { // This seems very slow. Try making it branchless
+    for vert, v in data.vertices {
         using vert
         if (position.x < bbox.min.x) do bbox.min.x = position.x;
         if (position.y < bbox.min.y) do bbox.min.y = position.y;
