@@ -47,7 +47,7 @@ print_obj :: proc(data: OBJObjectData, verbose := false) {
         for mat, i in data.materials {
             fmt.printfln("\tMaterial {}", i)
             M := material_matrix(mat)
-            for i in 0..<4 do fmt.printfln("\t\t{}", M[i])
+            for j in 0..<4 do fmt.printfln("\t\t{}", M[j])
         }
     } else do fmt.println("Material count:", len(data.materials))
     tex := data.texture_data
@@ -117,8 +117,9 @@ load_object :: proc(dir_path: string) -> OBJObjectData {
 
             // Load materials
             obj_path := strings.concatenate({path, ".obj"}, context.temp_allocator)
-            file, err := os.read_entire_file_or_err(obj_path); assert(err == nil); defer delete(file)
-            line_arr := strings.split_lines(string(file)); defer delete(line_arr)
+            file_content, read_err := os.read_entire_file_or_err(obj_path)
+            assert(read_err == nil); defer delete(file_content)
+            line_arr := strings.split_lines(string(file_content)); defer delete(line_arr)
             start, i: int
             for line in line_arr {
                 if len(line) < 2 do continue
@@ -262,7 +263,6 @@ new_texture :: proc(tex_path: string, data: ^TextureData) -> f32 {
 load_obj :: proc(obj_data: []string, mat_names: []string, 
     positions: ^[dynamic]vec3, uvs: ^[dynamic]vec2, normals: ^[dynamic]vec3,
 ) -> []OBJVertex {
-    data: OBJObjectData
     vertex_count: u32
     for line in obj_data {
         assert(len(line)>=2)

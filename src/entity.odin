@@ -81,16 +81,16 @@ add_obj_model :: proc(data: OBJObjectData, state: ^AppState) {
     for i<len(data.texture_data.textures) {
         defer i += 1
         img_sizes[i] = data.texture_data.sizes[i]
-        size := img_sizes[i]
+        size: [2]u32 = {u32(img_sizes[i].x), u32(img_sizes[i].y)}
         assert(size.x >= 1)
         assert(size.y >= 1)
         pixels := data.texture_data.textures[i]
-        texture := upload_texture(gpu, copy_pass, pixels, transmute([2]u32)size)
+        texture := upload_texture(gpu, copy_pass, pixels, size)
         append(&textures, texture)
     }
     model.textures = textures[:]
     bbox: AABB = {min = max(f32), max = min(f32)}
-    for vert, v in data.vertices {
+    for vert in data.vertices {
         using vert
         if (position.x < bbox.min.x) do bbox.min.x = position.x;
         if (position.y < bbox.min.y) do bbox.min.y = position.y;

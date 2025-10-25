@@ -38,12 +38,14 @@ UBO2D :: struct {
 load_sprite :: proc(path: string, renderer: ^Renderer) -> Sprite {
     using renderer
     copy_commands := sdl.AcquireGPUCommandBuffer(gpu); assert(copy_commands != nil)
-    defer {ok := sdl.SubmitGPUCommandBuffer(copy_commands); assert(ok)}
     copy_pass := sdl.BeginGPUCopyPass(copy_commands); assert(copy_pass != nil)
+    defer {ok := sdl.SubmitGPUCommandBuffer(copy_commands); assert(ok)}
     defer sdl.EndGPUCopyPass(copy_pass)
     
-    pixels, size := load_pixels(path)
-    texture := upload_texture(gpu, copy_pass, pixels, transmute([2]u32)size)
+    pixels, size := load_pixels(path); assert(pixels != nil)
+    size_u32: [2]u32 = {u32(size.x), u32(size.y)}
+    texture := upload_texture(gpu, copy_pass, pixels, size_u32)
+    assert(texture != nil)
     free_pixels(pixels)
 
     file_name  := strings.split(path, "/", context.temp_allocator)
@@ -95,8 +97,8 @@ init_quad :: proc(
         Vertex2D{{-1,  1}, {0, 1}}, // Top-left
     }
     indices := [6]u16{
-        0, 1, 2, // First triangle
-        2, 3, 0, // Second triangle
+        0, 2, 1, // First triangle
+        2, 0, 3, // Second triangle
     }
     len_bytes := u32(len(verts) * size_of(Vertex2D))
 
@@ -168,10 +170,11 @@ draw_imgui :: proc(state: ^AppState, frame: Frame) {
             }
             im.Checkbox("Snap to player", &props.attatch_light_to_player)
             im.DragFloat("intensity", &renderer.light.power, 10, 0, 10000)
-            im.ColorPicker3("color", transmute(^vec3)&renderer.light.color, {.InputRGB})
+            im.ColorPicker3("color", &renderer.light.color, {.InputRGB})
             im.LabelText("", "General")
             im.DragFloat3("Player position", &player.position, 0.25, 0, 60)
-            im.DragFloat("Draw distance", &renderer.draw_distance, 1, 10, 1000)
+            im.DragFloat("Draw distance", &renderer.draw_distance, 1, 10, 2000)
+            im.DragFloat3("Heightmap scale", &height_map.scale, 0.001, 0, 2)
         }
         im.End()
     }

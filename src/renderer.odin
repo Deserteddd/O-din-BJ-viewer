@@ -22,7 +22,6 @@ Renderer :: struct {
     skybox_texture:     ^sdl.GPUTexture,
     samplers:           [4]^sdl.GPUSampler,
     default_sampler:    ^sdl.GPUSampler,
-    vert_ubo_global:    VertUBO,
     props:              RND_Props,
     light:              PointLight,
     draw_distance:      f32,
@@ -46,7 +45,7 @@ FragUBO :: struct #packed {
 
 }
 
-VertUBO :: struct #packed {
+VertUBO :: struct {
 	vp: mat4,
 	inv_view_mat: mat4,
 	inv_projection_mat: mat4,
@@ -58,8 +57,8 @@ RND_Prop :: enum u8 {
     FULLSCREEN = 0,
 }
 
-RND_Init :: proc(props: RND_Props) -> Renderer {
-    renderer: Renderer
+RND_Init :: proc(props: RND_Props) -> ^Renderer {
+    renderer := new(Renderer)
     renderer.props = props
     ok := sdl.Init({.VIDEO}); assert(ok)
     window_flags: sdl.WindowFlags
@@ -69,11 +68,12 @@ RND_Init :: proc(props: RND_Props) -> Renderer {
         w = 1920
         h = 1080
     } 
-    window  := sdl.CreateWindow("Demo window", w, h, window_flags); assert(ok)
+    window  := sdl.CreateWindow("Demo window", w, h, window_flags)
+    assert(ok); assert(window != nil)
     ok = sdl.HideCursor(); assert(ok)
     ok = sdl.SetWindowRelativeMouseMode(window, true); assert(ok)
     width, height: i32
-    sdl.GetWindowSize(window, &width, &height)
+    ok = sdl.GetWindowSize(window, &width, &height); assert(ok)
     gpu := sdl.CreateGPUDevice({.SPIRV}, DEBUG_GPU, nil); assert(gpu != nil)
     ok = sdl.ClaimWindowForGPUDevice(gpu, window); assert(ok)
     ok = sdl.SetGPUSwapchainParameters(gpu, window, .SDR_LINEAR, PRESENT_MODE); assert(ok)
@@ -82,6 +82,7 @@ RND_Init :: proc(props: RND_Props) -> Renderer {
     renderer.gpu = gpu
 
     pixels, size := load_pixels("assets/err_tex.jpg")
+    size_u32: [2]u32 = {u32(size.x), u32(size.y)}
     defer free_pixels(pixels)
 
     copy_commands := sdl.AcquireGPUCommandBuffer(gpu); assert(copy_commands != nil)
@@ -94,7 +95,7 @@ RND_Init :: proc(props: RND_Props) -> Renderer {
         .POSITIVEZ = "assets/skybox/front.png",
         .NEGATIVEZ = "assets/skybox/back.png",
     })
-    renderer.fallback_texture = upload_texture(gpu, copy_pass, pixels, transmute([2]u32)size)
+    renderer.fallback_texture = upload_texture(gpu, copy_pass, pixels, size_u32)
 
     sdl.EndGPUCopyPass(copy_pass)
     ok = sdl.SubmitGPUCommandBuffer(copy_commands); assert(ok)
@@ -110,7 +111,7 @@ RND_Init :: proc(props: RND_Props) -> Renderer {
     })
     renderer.depth_texture = depth_texture
     renderer.obj_pipeline = create_render_pipeline(
-        &renderer,
+        renderer,
         "shader.vert",
         "shader.frag",
         OBJVertex,
@@ -119,7 +120,7 @@ RND_Init :: proc(props: RND_Props) -> Renderer {
     )
 
     renderer.bbox_pipeline = create_render_pipeline(
-        &renderer,
+        renderer,
         "bbox.vert",
         "bbox.frag",
         vec3,
@@ -128,15 +129,14 @@ RND_Init :: proc(props: RND_Props) -> Renderer {
         primitive_type = sdl.GPUPrimitiveType.LINELIST
     )
     renderer.heightmap_pipeline = create_render_pipeline(
-        &renderer,
+        renderer,
         "heightmap.vert",
         "heightmap.frag",
         HeightMapVertex,
         {.FLOAT3, .FLOAT3},
         true,
-        cull_mode = .NONE
     )
-    setup_skybox_pipeline(&renderer)
+    setup_skybox_pipeline(renderer)
     renderer.default_sampler = sdl.CreateGPUSampler(gpu, {})
     assert(renderer.default_sampler != nil)
 
@@ -149,8 +149,8 @@ RND_Init :: proc(props: RND_Props) -> Renderer {
         color = 1,
         power = 50
     }
-    renderer.draw_distance = 1000
-    init_r2d(&renderer)
+    renderer.draw_distance = 2000
+    init_r2d(renderer)
     return renderer
 }
 
@@ -223,11 +223,11 @@ Frame :: struct {
     swapchain:      ^sdl.GPUTexture,
     render_pass:    ^sdl.GPURenderPass,
     win_size:       vec2,
+    ubo_global:     VertUBO
 }
 
-frame_begin :: proc(renderer: ^Renderer) -> Frame {
+frame_begin :: proc(renderer: ^Renderer, ubo: VertUBO) -> Frame {
     using renderer
-    frame: Frame
     cmd_buff := sdl.AcquireGPUCommandBuffer(renderer.gpu); assert(cmd_buff != nil)
     swapchain: ^sdl.GPUTexture
     ok := sdl.WaitAndAcquireGPUSwapchainTexture(cmd_buff, renderer.window, &swapchain, nil, nil)
@@ -239,18 +239,20 @@ frame_begin :: proc(renderer: ^Renderer) -> Frame {
         cmd_buff,
         swapchain,
         nil,
-        win_size
+        win_size,
+        ubo
     }
 }
 
-update_vp :: proc(state: ^AppState) {
+get_vertex_ubo_global :: proc(state: AppState) -> VertUBO {
     using state
-    proj_matrix := create_proj_matrix(renderer)
+    proj_matrix := create_proj_matrix(renderer^)
     view_matrix := create_view_matrix(player)
-    using renderer.vert_ubo_global
-    vp = proj_matrix * view_matrix;
-    inv_view_mat = linalg.inverse(view_matrix)
-    inv_projection_mat = linalg.inverse(proj_matrix)
+    return VertUBO {
+        vp = proj_matrix * view_matrix,
+        inv_view_mat = linalg.inverse(view_matrix),
+        inv_projection_mat = linalg.inverse(proj_matrix)
+    }
 }
 
 frame_submit :: proc(renderer: ^Renderer, frame: Frame) -> bool {
@@ -280,7 +282,10 @@ create_model_matrix :: proc(transform: Transform, position_offset: vec3 = 0) -> 
 
 render_3D :: proc(state: ^AppState, frame: ^Frame) {
     using state, frame
-
+    defer {
+        sdl.EndGPURenderPass(render_pass)
+        frame.render_pass = nil
+    }
     assert(cmd_buff  != nil)
     assert(swapchain != nil)
     assert(render_pass == nil)
@@ -302,15 +307,16 @@ render_3D :: proc(state: ^AppState, frame: ^Frame) {
         clear_stencil = 1,
     }
     frag_ubo := create_frag_ubo(state);
-    frustum_planes := create_furstum_planes(renderer.vert_ubo_global.vp)
+    frustum_planes := create_frustum_planes(frame.ubo_global.vp)
 
     render_pass = sdl.BeginGPURenderPass(cmd_buff, &color_target, 1, &depth_target_info); assert(render_pass != nil)
-    sdl.BindGPUGraphicsPipeline(render_pass, renderer.heightmap_pipeline)
-    sdl.PushGPUVertexUniformData(cmd_buff, 0, &renderer.vert_ubo_global, size_of(VertUBO))
+    sdl.PushGPUVertexUniformData(cmd_buff, 0, &frame.ubo_global, size_of(VertUBO))
+    sdl.PushGPUVertexUniformData(cmd_buff, 1, &height_map.scale, size_of(vec3))
     bindings: [2]sdl.GPUBufferBinding = {
         sdl.GPUBufferBinding{buffer = height_map.vbo},
         sdl.GPUBufferBinding{buffer = height_map.ibo}
     }
+    sdl.BindGPUGraphicsPipeline(render_pass, renderer.heightmap_pipeline)
     sdl.BindGPUVertexBuffers(render_pass, 0, &bindings[0], 1)
     sdl.BindGPUIndexBuffer(render_pass, bindings[1], ._32BIT)
     sdl.DrawGPUIndexedPrimitives(render_pass, height_map.num_indices, 1, 0, 0, 0)
@@ -383,7 +389,6 @@ render_3D :: proc(state: ^AppState, frame: ^Frame) {
             }
         }
     }
-    sdl.EndGPURenderPass(render_pass)
 
 }
 
@@ -436,7 +441,7 @@ create_buffer_with_data :: proc(
         size = u32(len_bytes),
     });
 
-    transfer_mem := transmute([^]byte) sdl.MapGPUTransferBuffer(gpu, transfer_buffer, true)
+    transfer_mem := cast([^]byte) sdl.MapGPUTransferBuffer(gpu, transfer_buffer, true)
     mem.copy(transfer_mem, raw_data(data), len_bytes)
     sdl.UnmapGPUTransferBuffer(gpu, transfer_buffer)
     sdl.UploadToGPUBuffer(copy_pass, 
@@ -512,7 +517,7 @@ upload_cubemap_texture_sides :: proc(
 		usage = .UPLOAD,
 		size = u32(side_byte_size * 6)
 	})
-	tex_transfer_mem := transmute([^]byte)sdl.MapGPUTransferBuffer(gpu, tex_transfer_buf, false)
+	tex_transfer_mem := cast([^]byte)sdl.MapGPUTransferBuffer(gpu, tex_transfer_buf, false)
 
 	offset := 0
 	for side_pixels in pixels {
@@ -523,7 +528,7 @@ upload_cubemap_texture_sides :: proc(
 	sdl.UnmapGPUTransferBuffer(gpu, tex_transfer_buf)
 
 	offset = 0
-	for side_pixels, side in pixels {
+	for side in 0..<len(pixels) {
 		sdl.UploadToGPUTexture(copy_pass,
 			{transfer_buffer = tex_transfer_buf, offset = u32(offset)},
 			{texture = texture, layer = u32(side), w = size, h = size, d = 1},
@@ -545,10 +550,10 @@ load_shader :: proc(device: ^sdl.GPUDevice, shaderfile: string) -> ^sdl.GPUShade
             stage = .FRAGMENT
     }
 
-    shaderfile := filepath.join({"shaders", "out", shaderfile})
-    filename := strings.concatenate({shaderfile, ".spv"}, context.temp_allocator)
+    shaderfile_path := filepath.join({"shaders", "out", shaderfile})
+    filename := strings.concatenate({shaderfile_path, ".spv"}, context.temp_allocator)
     code, ok := os.read_entire_file_from_filename(filename, context.temp_allocator); assert(ok)
-    info := load_shader_info(shaderfile)
+    info := load_shader_info(shaderfile_path)
     return sdl.CreateGPUShader(device, {
         code_size = len(code),
         code = raw_data(code),

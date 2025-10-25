@@ -6,8 +6,8 @@ import "core:slice"
 import "core:path/filepath"
 import os "core:os/os2"
 
-BUILD_SHADERS :: false
-ODIN_PATH :: "C:\\odin-windows-amd64-dev-2025-02"
+BUILD_SHADERS :: true
+ODIN_PATH     :: "C:\\odin-windows-amd64-dev-2025-06"
 main :: proc() {
     context.logger = log.create_console_logger()
     EXE :: "Gaym"

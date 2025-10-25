@@ -14,11 +14,12 @@ Player :: struct {
     noclip: bool,
 }
 
-create_player :: proc() -> Player {
+create_player :: proc(pos: vec3 = 0) -> Player {
     return Player {
+        position = pos,
         bbox = AABB {
-            min = {-0.3, 0, -0.3},
-            max = {0.3, 2.0, 0.3}
+            min = pos + {-0.3, 0, -0.3},
+            max = pos + {0.3, 2.0, 0.3}
         },
     }
 }
@@ -30,7 +31,7 @@ get_player_translation :: proc(p: Player) -> [2]vec3 {
     }
 }
 
-update_player :: proc(state: ^AppState, dt: f32) #no_bounds_check {
+update_player :: proc(state: ^AppState, dt: f32, vp: matrix[4,4]f32) #no_bounds_check {
     using state, player
     defer props.lmb_pressed = false
     g: f32 = 25
@@ -38,7 +39,7 @@ update_player :: proc(state: ^AppState, dt: f32) #no_bounds_check {
     airborne_at_start := airborne
     if noclip {
         speed = 0
-        delta_pos := wishveloc * dt * 10
+        delta_pos := wishveloc * dt * 100
         position += delta_pos
         bbox.min += delta_pos
         bbox.max += delta_pos
@@ -61,7 +62,7 @@ update_player :: proc(state: ^AppState, dt: f32) #no_bounds_check {
     bbox.max += delta_pos
     found_collision: bool
     
-    ray_origin, ray_dir := ray_from_screen(renderer.vert_ubo_global.vp)
+    ray_origin, ray_dir := ray_from_screen(vp)
     closest_hit: f32 = math.F32_MAX
     closest_entity: i32
 

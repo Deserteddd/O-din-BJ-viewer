@@ -9,10 +9,9 @@ AABB :: struct {
 }
 
 entity_aabb :: proc(entity: Entity) -> AABB {
-    using entity
     return AABB {
-        min = model.bbox.min + transform.translation,
-        max = model.bbox.max + transform.translation
+        min = entity.model.bbox.min + entity.transform.translation,
+        max = entity.model.bbox.max + entity.transform.translation
     }
 }
 
@@ -25,16 +24,15 @@ vector_normalize :: proc(v: ^vec3) -> f32 {
     return length
 }
 
-
-create_furstum_planes :: proc(vp: matrix[4,4]f32) -> [6]vec4 {
-    vp := linalg.transpose(vp)
+create_frustum_planes :: proc "contextless" (vp: matrix[4,4]f32) -> [6]vec4 {
+    t := linalg.transpose(vp)
     return {
-        vp[3]+vp[0],
-        vp[3]-vp[0],
-        vp[3]+vp[1],
-        vp[3]-vp[1],
-        vp[3]+vp[2],
-        vp[3]-vp[2],
+        t[3]+t[0],
+        t[3]+t[0],
+        t[3]+t[1],
+        t[3]+t[1],
+        t[3]+t[2],
+        t[3]+t[2],
     }
 }
 
@@ -43,9 +41,9 @@ aabb_intersects_frustum :: proc(frustum_planes: [6]vec4, aabb: AABB) -> bool #no
     p_vertex: vec3
     for p in frustum_planes {
         p_vertex = {
-            f32(transmute(byte)bool(p.x >= 0))*(max.x)+f32(transmute(byte)bool(p.x<0))*min.x,
-            f32(transmute(byte)bool(p.y >= 0))*(max.y)+f32(transmute(byte)bool(p.y<0))*min.y,
-            f32(transmute(byte)bool(p.z >= 0))*(max.z)+f32(transmute(byte)bool(p.z<0))*min.z,
+            f32(cast(byte)bool(p.x >= 0))*(max.x)+f32(cast(byte)bool(p.x<0))*min.x,
+            f32(cast(byte)bool(p.y >= 0))*(max.y)+f32(cast(byte)bool(p.y<0))*min.y,
+            f32(cast(byte)bool(p.z >= 0))*(max.z)+f32(cast(byte)bool(p.z<0))*min.z,
         }
 
         if linalg.dot(p.xyz, p_vertex) + p.w < 0 {

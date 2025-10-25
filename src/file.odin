@@ -9,14 +9,13 @@ import stbi "vendor:stb/image"
 import sdl "vendor:sdl3"
 
 open_file_window :: proc() -> (path: string) {
-    using windows
-    file_path := make([^]u16, MAX_PATH, context.temp_allocator)
-    ofn: OPENFILENAMEW = {
-        lStructSize = u32(size_of(OPENFILENAMEW)),
+    file_path := make([^]u16, windows.MAX_PATH, context.temp_allocator)
+    ofn: windows.OPENFILENAMEW = {
+        lStructSize = u32(size_of(windows.OPENFILENAMEW)),
         lpstrFile = file_path,
-        nMaxFile = MAX_PATH,
+        nMaxFile = windows.MAX_PATH,
     }
-    ok := bool(GetOpenFileNameW(&ofn));
+    ok := bool(windows.GetOpenFileNameW(&ofn));
     if !ok do return ""
     err: runtime.Allocator_Error
     path, err = windows.wstring_to_utf8(ofn.lpstrFile, -1); assert(err == nil)

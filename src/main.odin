@@ -21,7 +21,7 @@ last_ticks := sdl.GetTicks();
 
 main :: proc() {
     fmt.println("MAIN: initing")
-    state: AppState
+    state: AppState = {}
     init(&state)
     fmt.println("MAIN: init done")
     run(&state)
@@ -41,8 +41,7 @@ Model :: struct {
 AppState :: struct {
     player:             Player,
     debug_info:         DebugInfo,
-    renderer:           Renderer,
-    height_map:         HeightMap,
+    renderer:           ^Renderer,
     ui_context:         ^im.Context,
     models:             [dynamic]Model,
     entities:           #soa[dynamic]Entity,
@@ -50,6 +49,7 @@ AppState :: struct {
     props:              Props,
     slabs:              u32,
     sprites:            [dynamic]Sprite,
+    height_map:         HeightMap,
 }
 
 // Replace with bit set
@@ -79,18 +79,21 @@ init :: proc(state: ^AppState) {
     
     renderer = RND_Init({})
     init_imgui(state)
-    player = create_player()
+    player = create_player({-115, 125, 20})
 
     
     slab    := load_object("assets/slab"); defer delete_obj(slab)
     add_obj_model(slab, state)
 
     // Height map loading
-    height_map = load_height_map("assets/height_map", renderer.gpu, 0.1)
+    height_map = load_height_map("assets/height_map", renderer.gpu)
+    height_map.scale = {1, 0.1, 1}
 
+    new_slab, ok := entity_from_model(state, "slab"); assert(ok)
+    set_entity_position(state, new_slab, player.position)
 
     state.props.attatch_light_to_player = true
-    crosshair := load_sprite("assets/crosshair.png", &renderer)
+    crosshair := load_sprite("assets/crosshair.png", renderer)
     append(&sprites, crosshair)
 }
 
@@ -120,6 +123,7 @@ run :: proc(state: ^AppState) {
     paused: bool
     free_all(context.temp_allocator)
     using state
+
     main_loop: for {
         defer free_all(context.temp_allocator)
         defer FRAMES += 1
@@ -160,24 +164,26 @@ run :: proc(state: ^AppState) {
                 }
             }
         }
+        ubo := get_vertex_ubo_global(state^)
         if !props.ui_visible {
             update_camera(&player)
-            update(state, paused)
+            update(state, paused, ubo.vp)
             paused = false
         }
-        update_vp(state)
-        frame := frame_begin(&renderer)
-        render_3D(state, &frame)
+        frame := frame_begin(renderer, ubo)
 
-        begin_2d(state.renderer, &frame)
+        render_3D(state, &frame)
+        assert(frame.render_pass == nil)
+
+        begin_2d(state.renderer^, &frame)
         for sprite in state.sprites {
             draw_sprite(sprite, frame)
         } 
         submit_2d(&frame)
-
         draw_imgui(state, frame)
 
-        ok := frame_submit(&state.renderer, frame); assert(ok)
+
+        ok := frame_submit(state.renderer, frame); assert(ok)
         state.debug_info.frame_time = time.since(now)
     }
 }
@@ -212,7 +218,7 @@ reset_player_pos :: proc(state: ^AppState, at_origin := false) {
 }
 
 
-update :: proc(state: ^AppState, unpaused: bool) {
+update :: proc(state: ^AppState, unpaused: bool, vp: matrix[4,4]f32) {
     using state
     debug_info.objects_rendered = 0
     new_ticks := sdl.GetTicks();
@@ -220,7 +226,7 @@ update :: proc(state: ^AppState, unpaused: bool) {
     if unpaused do dt = 0.01666
     last_ticks = new_ticks
     if !props.ui_visible {
-        update_player(state, dt)
+        update_player(state, dt, vp)
     }
     debug_info.player_speed = linalg.length(player.speed)
     if props.attatch_light_to_player {
