@@ -11,11 +11,11 @@ import stbi "vendor:stb/image"
 OBJObjectData :: struct {
     name:           string,
     vertices:       [dynamic]OBJVertex,
-    materials:      []Material,
+    materials:      []OBJMaterial,
     texture_data:   TextureData
 }
 
-Material :: struct {
+OBJMaterial :: struct {
     Ka, Kd, Ks, Ke: vec3,
     Ns, Ni, d: f32,
     illum: uint,
@@ -62,7 +62,7 @@ print_obj :: proc(data: OBJObjectData, verbose := false) {
 
 }
 
-material_matrix :: proc(m: Material) -> [4]vec4 {
+material_matrix :: proc(m: OBJMaterial) -> [4]vec4 {
     return {
         to_vec4(m.Ka, m.Ns),
         to_vec4(m.Kd, m.Ni),
@@ -85,7 +85,7 @@ delete_obj :: proc(data: OBJObjectData) {
     delete(sizes)
 }
 
-load_object :: proc(dir_path: string) -> OBJObjectData {
+load_obj_object :: proc(dir_path: string) -> OBJObjectData {
     defer free_all(context.temp_allocator) // Might cause incorrect behaviour if used mid frame
     fmt.println("Loading:", dir_path)
     obj: OBJObjectData
@@ -97,7 +97,7 @@ load_object :: proc(dir_path: string) -> OBJObjectData {
     asset_dir, err = os.read_dir(asset_handle, 0); assert(err == nil)
     vertex_groups: [dynamic]OBJVertex
 
-    materials: []Material
+    materials: []OBJMaterial
     material_names: []string
     texture_data: TextureData
     for file in asset_dir {
@@ -149,8 +149,8 @@ load_object :: proc(dir_path: string) -> OBJObjectData {
         2. List of material names as they appear in the file
 */
 @(private = "file")
-load_mtl :: proc(mtl_path: string) -> ([]Material, []string, TextureData) {
-    materials:      [dynamic]Material
+load_mtl :: proc(mtl_path: string) -> ([]OBJMaterial, []string, TextureData) {
+    materials:      [dynamic]OBJMaterial
     material_names: [dynamic]string;  defer assert(len(materials) == len(material_names))
     tex_data: TextureData
 
@@ -162,7 +162,7 @@ load_mtl :: proc(mtl_path: string) -> ([]Material, []string, TextureData) {
     file, err := os.read_entire_file_or_err(mtl_path)
     if err != nil { log.warnf("COULDN'T FIND MTL FILE {}", mtl_path); return nil, nil, {} }
     file_data := string(file)
-    mat: Material
+    mat: OBJMaterial
     mat_name: string
     for line in strings.split_lines_iterator(&file_data) {
         // fmt.println(line)

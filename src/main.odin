@@ -12,7 +12,7 @@ import im_sdlgpu "shared:imgui/imgui_impl_sdlgpu3"
 
 // Constants
 DEBUG_GPU :: true
-PRESENT_MODE: sdl.GPUPresentMode = .IMMEDIATE
+PRESENT_MODE: sdl.GPUPresentMode = .VSYNC
 
 // Globals
 default_context: runtime.Context
@@ -28,8 +28,9 @@ main :: proc() {
     fmt.println("MAIN: Exiting")
 }
 
+
 Model :: struct {
-    name: string,
+    name:            string,
     textures:        []^sdl.GPUTexture,
     vbo:             ^sdl.GPUBuffer,
     material_buffer: ^sdl.GPUBuffer,
@@ -41,15 +42,15 @@ Model :: struct {
 AppState :: struct {
     player:             Player,
     debug_info:         DebugInfo,
-    renderer:           ^Renderer,
+    renderer:           Renderer,
     ui_context:         ^im.Context,
     models:             [dynamic]Model,
+    gltf_scenes:        [dynamic]GLTFScene,
     entities:           #soa[dynamic]Entity,
-    checkpoint:         [2]vec3,                // Position, Rotation
     props:              Props,
     slabs:              u32,
     sprites:            [dynamic]Sprite,
-    height_map:         HeightMap,
+    height_map:         ^HeightMap,
 }
 
 // Replace with bit set
@@ -79,18 +80,15 @@ init :: proc(state: ^AppState) {
     
     renderer = RND_Init({})
     init_imgui(state)
-    player = create_player({-115, 125, 20})
-
+    player = create_player()
     
-    slab    := load_object("assets/slab"); defer delete_obj(slab)
+    slab    := load_obj_object("assets/slab"); defer delete_obj(slab)
     add_obj_model(slab, state)
+    slab_entity, ok := entity_from_model(state, "slab"); assert(ok)
+    set_entity_position(state, slab_entity, player.position)
 
-    // Height map loading
-    height_map = load_height_map("assets/height_map", renderer.gpu)
-    height_map.scale = {1, 0.1, 1}
-
-    new_slab, ok := entity_from_model(state, "slab"); assert(ok)
-    set_entity_position(state, new_slab, player.position)
+    lantern := load_gltf_scene("assets/Lantern.glb", renderer.gpu)
+    append(&state.gltf_scenes, lantern)
 
     state.props.attatch_light_to_player = true
     crosshair := load_sprite("assets/crosshair.png", renderer)
@@ -139,9 +137,9 @@ run :: proc(state: ^AppState) {
                         toggle_ui(state)
                         if props.ui_visible do paused = true
                     case .Q:
-                        if !player.airborne do checkpoint = get_player_translation(player)
+                        if !player.airborne do player.checkpoint = get_player_translation(player)
                     case .E:
-                        reset_player_pos(state)
+                        reset_player_pos(&player)
                     case .F:
                         RND_ToggleFullscreen(state)
                     case .C:
@@ -173,9 +171,10 @@ run :: proc(state: ^AppState) {
         frame := frame_begin(renderer, ubo)
 
         render_3D(state, &frame)
+        render_gltf_scene(&renderer, state.gltf_scenes[0], &frame)
         assert(frame.render_pass == nil)
 
-        begin_2d(state.renderer^, &frame)
+        begin_2d(state.renderer, &frame)
         for sprite in state.sprites {
             draw_sprite(sprite, frame)
         } 
@@ -201,14 +200,13 @@ toggle_ui :: proc(state: ^AppState) {
     }
 }
 
-reset_player_pos :: proc(state: ^AppState, at_origin := false) {
-    using state
+reset_player_pos :: proc(player: ^Player, at_origin := false) {
     if at_origin do player.position = 0; 
-    else if checkpoint.x == 0 {
-        player.position = checkpoint.x
+    else if player.checkpoint.x == 0 {
+        player.position = player.checkpoint.x
     } else {
-        player.position = checkpoint.x
-        player.rotation = checkpoint.y
+        player.position = player.checkpoint.x
+        player.rotation = player.checkpoint.y
     }
     player.speed = 0
     player.bbox = AABB {

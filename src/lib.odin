@@ -18,7 +18,6 @@ TRANSFORM_IDENTITY :: Transform {
 
 HeightMap :: struct {
     scale:          vec3,
-
     num_indices:    u32,
     vbo:            ^sdl.GPUBuffer,
     ibo:            ^sdl.GPUBuffer,
@@ -26,6 +25,11 @@ HeightMap :: struct {
 
 HeightMapVertex :: struct {
     position, color: vec3,
+}
+
+ModelFormat :: enum {
+    OBJ,
+    GLTF
 }
 
 to_vec4 :: proc(v: vec3, f: f32) -> vec4 { return vec4{v.x, v.y, v.z, f} }
@@ -36,7 +40,7 @@ random_range :: proc(min: f32, max: f32) -> f32 {
     return rand.float32() * (max - min) + min
 }
 
-load_height_map :: proc(path: string, gpu: ^sdl.GPUDevice) -> HeightMap {
+load_height_map :: proc(path: string, renderer: Renderer) -> ^HeightMap {
     height_path  := strings.concatenate({path, "/height_map.png"})
     diffuse_path := strings.concatenate({path, "/diffuse.png"})
     pixels, size := load_height_map_pixels(height_path); defer free_pixels(pixels)
@@ -77,7 +81,7 @@ load_height_map :: proc(path: string, gpu: ^sdl.GPUDevice) -> HeightMap {
         rd_idx   := u32(i32(i)+size.x+1)
         append_elems(&indices, this_idx, r_idx, d_idx, d_idx, r_idx, rd_idx)
     }
-
+    using renderer
     copy_commands := sdl.AcquireGPUCommandBuffer(gpu); assert(copy_commands != nil)
     copy_pass := sdl.BeginGPUCopyPass(copy_commands); assert(copy_pass != nil)
     len_bytes := u32(len(vertices) * size_of(HeightMapVertex))
@@ -91,8 +95,15 @@ load_height_map :: proc(path: string, gpu: ^sdl.GPUDevice) -> HeightMap {
     sdl.ReleaseGPUTransferBuffer(gpu, transfer_buffer)
     sdl.EndGPUCopyPass(copy_pass)
     ok := sdl.SubmitGPUCommandBuffer(copy_commands); assert(ok)
-
-    height_map: HeightMap
+    pipeline := create_render_pipeline(
+        renderer,
+        "heightmap.vert",
+        "heightmap.frag",
+        HeightMapVertex,
+        {.FLOAT3, .FLOAT3},
+        true,
+    )
+    height_map := new(HeightMap)
     height_map.num_indices  = u32(len(indices))
     height_map.vbo = vbo
     height_map.ibo = ibo

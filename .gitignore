@@ -1,5 +1,8 @@
 /*.exe
 /*.pdb
+/*.rdi
 /ols.json
 /shaders/out/*
 /assets/*/.blend*
+/assets/height_map
+/assets/level

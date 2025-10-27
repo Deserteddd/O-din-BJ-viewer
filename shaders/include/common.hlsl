@@ -7,7 +7,7 @@ cbuffer Global : register(b0, space1) {
 
 #elif __SHADER_TARGET_STAGE == __SHADER_STAGE_PIXEL
 
-cbuffer UBO : register(b0, space3) {
+cbuffer PointLight : register(b0, space3) {
     float3 lightPosition;
     float3 lightColor;
     float lightIntensity;

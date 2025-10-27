@@ -1,6 +1,7 @@
 package obj_viewer
 
 import sdl "vendor:sdl3"
+import "core:strings"
 
 Entity :: struct {
     id: i32,
@@ -23,10 +24,10 @@ entity_from_model :: proc(state: ^AppState, model_name: string) -> (id: i32, ok:
         }
     }
     if entity.model == nil do return
-    ok = true
     id = lowest_free_id(state.entities.id, len(state.entities))
     entity.id = id
     append_soa(&state.entities, entity)
+    ok = true
     return
 }
 
@@ -113,7 +114,6 @@ add_obj_model :: proc(data: OBJObjectData, state: ^AppState) {
     bbox_vbo         := create_buffer_with_data(gpu, transfer_buffer, copy_pass, {.VERTEX}, bbox_vertices[:])
     vbo              := create_buffer_with_data(gpu, transfer_buffer, copy_pass, {.VERTEX}, data.vertices[:])
     material_buffer  := create_buffer_with_data(gpu, transfer_buffer, copy_pass, {.GRAPHICS_STORAGE_READ}, material_matrices[:])
-    model.num_vertices = u32(len(data.vertices))
     model.name = data.name
 
     // End copy pass
@@ -122,6 +122,7 @@ add_obj_model :: proc(data: OBJObjectData, state: ^AppState) {
     ok := sdl.SubmitGPUCommandBuffer(copy_commands); assert(ok)
 
     // Assignments
+    model.num_vertices = u32(len(data.vertices))
     model.bbox_vbo = bbox_vbo
     model.vbo = vbo
     model.material_buffer = material_buffer

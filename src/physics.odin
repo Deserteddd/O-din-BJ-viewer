@@ -9,9 +9,10 @@ AABB :: struct {
 }
 
 entity_aabb :: proc(entity: Entity) -> AABB {
+    using entity
     return AABB {
-        min = entity.model.bbox.min + entity.transform.translation,
-        max = entity.model.bbox.max + entity.transform.translation
+        min = model.bbox.min + transform.translation,
+        max = model.bbox.max + transform.translation
     }
 }
 

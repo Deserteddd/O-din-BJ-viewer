@@ -16,17 +16,17 @@ struct Output {
 };
 
 cbuffer PROJ : register(b1, space1) {
-    float4x4 m;
+    float4x4 model;
 };
 
 Output main(Input input) {
-    float4 worldPosition = mul(m, float4(input.position, 1));
+    float4 worldPosition = mul(model, float4(input.position, 1));
 
     Output output;
     output.clipPosition = mul(vp, worldPosition);
     output.uv = input.uv;
     output.position = worldPosition.xyz;
-    output.normal = normalize(mul(m, float4(input.normal, 0)).xyz);
+    output.normal = normalize(mul(model, float4(input.normal, 0)).xyz);
     output.material = input.material;
     return output;
 }

@@ -12,6 +12,7 @@ Player :: struct {
     bbox: AABB,
     airborne: bool,
     noclip: bool,
+    checkpoint:         [2]vec3,                // Position, Rotation
 }
 
 create_player :: proc(pos: vec3 = 0) -> Player {
@@ -102,18 +103,15 @@ update_player :: proc(state: ^AppState, dt: f32, vp: matrix[4,4]f32) #no_bounds_
 
     if closest_entity != 0 && state.props.lmb_pressed == true {
         for &e, i in state.entities {
-            // fmt.println(closest_entityd)
             if e.id == closest_entity {
                 unordered_remove_soa(&state.entities, i)
                 break
             }
-
         }
     }
-
+    
     if position.y < -5 {
-        reset_player_pos(state)
-        
+        reset_player_pos(&state.player)
     }
 
 }

@@ -35,7 +35,7 @@ UBO2D :: struct {
     win_size: vec2
 }
 
-load_sprite :: proc(path: string, renderer: ^Renderer) -> Sprite {
+load_sprite :: proc(path: string, renderer: Renderer) -> Sprite {
     using renderer
     copy_commands := sdl.AcquireGPUCommandBuffer(gpu); assert(copy_commands != nil)
     copy_pass := sdl.BeginGPUCopyPass(copy_commands); assert(copy_pass != nil)
@@ -61,7 +61,7 @@ load_sprite :: proc(path: string, renderer: ^Renderer) -> Sprite {
     }
 }
 
-init_r2d :: proc(renderer: ^Renderer) {
+init_r2d :: proc(renderer: Renderer) {
     using renderer
 
     copy_commands := sdl.AcquireGPUCommandBuffer(gpu); assert(copy_commands != nil)
@@ -164,19 +164,40 @@ draw_imgui :: proc(state: ^AppState, frame: Frame) {
     im.NewFrame()
     if props.ui_visible {
         if im.Begin("Properties") {
-            im.LabelText("", "Light")
-            if !props.attatch_light_to_player {
-                im.DragFloat3("position", &renderer.light.position, 0.5, -200, 200)
+            if im.BeginTabBar("PropertiesTabs") {
+                // --- General Tab ---
+                if im.BeginTabItem("General") {
+                    im.LabelText("", "General")
+                    im.DragFloat3("Player position", &player.position, 0.25, 0, 60)
+                    im.DragFloat("Draw distance", &renderer.draw_distance, 1, 10, 2000)
+                    if height_map != nil do im.DragFloat3("Heightmap scale", &height_map.scale, 0.001, 0, 2)
+                    im.EndTabItem()
+                }
+
+                // --- Point Light Tab ---
+                if im.BeginTabItem("Point Light") {
+                    im.LabelText("", "Point Light")
+                    if !props.attatch_light_to_player {
+                        im.DragFloat3("position", &renderer.light.position, 0.5, -200, 200)
+                    }
+                    im.Checkbox("Snap to player", &props.attatch_light_to_player)
+                    im.DragFloat("intensity", &renderer.light.power, 10, 0, 10000)
+                    im.ColorPicker3("color", &renderer.light.color, {.InputRGB})
+                    im.EndTabItem()
+                }
+
+                // --- Directional Light Tab ---
+                if im.BeginTabItem("Directional Light") {
+                    im.LabelText("", "Directional Light")
+                    im.DragFloat3("Direction", &renderer.dir_light.direction, 0.01, 0, 1)
+                    im.ColorPicker3("color", &renderer.dir_light.color, {.InputRGB})
+                    im.EndTabItem()
+                }
+
+                im.EndTabBar()
             }
-            im.Checkbox("Snap to player", &props.attatch_light_to_player)
-            im.DragFloat("intensity", &renderer.light.power, 10, 0, 10000)
-            im.ColorPicker3("color", &renderer.light.color, {.InputRGB})
-            im.LabelText("", "General")
-            im.DragFloat3("Player position", &player.position, 0.25, 0, 60)
-            im.DragFloat("Draw distance", &renderer.draw_distance, 1, 10, 2000)
-            im.DragFloat3("Heightmap scale", &height_map.scale, 0.001, 0, 2)
+            im.End()
         }
-        im.End()
     }
     if im.Begin("info", nil, {.NoTitleBar, .NoMouseInputs}) {
         w, h: i32
