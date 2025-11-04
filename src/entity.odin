@@ -1,7 +1,7 @@
 package obj_viewer
 
 import sdl "vendor:sdl3"
-import "core:strings"
+import "core:fmt"
 
 Entity :: struct {
     id: i32,
@@ -72,59 +72,65 @@ add_obj_model :: proc(data: OBJObjectData, state: ^AppState) {
     using state.renderer
     model: Model
 
-    img_sizes: [4][2]i32
-    i: int
-    textures: [dynamic]^sdl.GPUTexture; defer if len(textures) == 0 do delete(textures)
-
     copy_commands := sdl.AcquireGPUCommandBuffer(gpu); assert(copy_commands != nil)
     copy_pass := sdl.BeginGPUCopyPass(copy_commands); assert(copy_pass != nil)
 
-    for i<len(data.texture_data.textures) {
-        defer i += 1
-        img_sizes[i] = data.texture_data.sizes[i]
-        size: [2]u32 = {u32(img_sizes[i].x), u32(img_sizes[i].y)}
-        assert(size.x >= 1)
-        assert(size.y >= 1)
-        pixels := data.texture_data.textures[i]
-        texture := upload_texture(gpu, copy_pass, pixels, size)
-        append(&textures, texture)
+    model.textures = make([]^sdl.GPUTexture, len(data.textures))
+    for texture, i in data.textures {
+        size: [2]u32 = {u32(texture.size.x), u32(texture.size.y)}
+        model.textures[i] = upload_texture(gpu, copy_pass, texture.image, size)
     }
-    model.textures = textures[:]
-    bbox: AABB = {min = max(f32), max = min(f32)}
-    for vert in data.vertices {
-        using vert
-        if (position.x < bbox.min.x) do bbox.min.x = position.x;
-        if (position.y < bbox.min.y) do bbox.min.y = position.y;
-        if (position.z < bbox.min.z) do bbox.min.z = position.z;
-        if (position.x > bbox.max.x) do bbox.max.x = position.x;
-        if (position.y > bbox.max.y) do bbox.max.y = position.y;
-        if (position.z > bbox.max.z) do bbox.max.z = position.z;
+
+    model.aabbs = make([]AABB, len(data.vertex_groups))
+    model.bbox_vbos = make([]^sdl.GPUBuffer, len(data.vertex_groups))
+
+    vertices: [dynamic]OBJVertex; defer delete(vertices)
+
+    for object, i in data.vertex_groups {
+        bbox: AABB = {min = max(f32), max = min(f32)}
+        for vert in object {
+            using vert
+            if (position.x < bbox.min.x) do bbox.min.x = position.x;
+            if (position.y < bbox.min.y) do bbox.min.y = position.y;
+            if (position.z < bbox.min.z) do bbox.min.z = position.z;
+            if (position.x > bbox.max.x) do bbox.max.x = position.x;
+            if (position.y > bbox.max.y) do bbox.max.y = position.y;
+            if (position.z > bbox.max.z) do bbox.max.z = position.z;
+            append(&vertices, vert)
+        }
+        model.aabbs[i] = bbox
     }
-    model.bbox = bbox
-    bbox_vertices := get_bbox_vertices(bbox)
 
     // Create and upload buffers
-    len_bytes := u32(len(data.vertices) * size_of(OBJVertex))
-    material_matrices := make([dynamic][4]vec4, 0, len(data.materials)); defer delete(material_matrices)
-    for material in data.materials do append(&material_matrices, material_matrix(material))
+    material_matrices := make([][4]vec4, len(data.materials)); defer delete(material_matrices)
+    for material, i in data.materials do material_matrices[i] = material_matrix(material)
+
+    for object, i in data.vertex_groups {
+        len_bytes := u32(24 * size_of(vec3))
+        transfer_buffer := sdl.CreateGPUTransferBuffer(gpu, {
+            usage = sdl.GPUTransferBufferUsage.UPLOAD,
+            size = len_bytes,
+        }); assert(transfer_buffer != nil)
+        bbox_vertices    := get_bbox_vertices(model.aabbs[i])
+        bbox_vbo         := create_buffer_with_data(gpu, transfer_buffer, copy_pass, {.VERTEX}, bbox_vertices[:])
+        model.bbox_vbos[i] = bbox_vbo
+        sdl.ReleaseGPUTransferBuffer(gpu, transfer_buffer)
+    }
     transfer_buffer := sdl.CreateGPUTransferBuffer(gpu, {
         usage = sdl.GPUTransferBufferUsage.UPLOAD,
-        size = len_bytes,
+        size = u32(len(vertices) * size_of(OBJVertex) + len(material_matrices) * size_of(vec4) * 4),
     }); assert(transfer_buffer != nil)
-    bbox_vbo         := create_buffer_with_data(gpu, transfer_buffer, copy_pass, {.VERTEX}, bbox_vertices[:])
-    vbo              := create_buffer_with_data(gpu, transfer_buffer, copy_pass, {.VERTEX}, data.vertices[:])
+    vbo              := create_buffer_with_data(gpu, transfer_buffer, copy_pass, {.VERTEX}, vertices[:])
     material_buffer  := create_buffer_with_data(gpu, transfer_buffer, copy_pass, {.GRAPHICS_STORAGE_READ}, material_matrices[:])
+    sdl.ReleaseGPUTransferBuffer(gpu, transfer_buffer)
     model.name = data.name
+    model.vbo = vbo
+    model.num_vertices = u32(len(vertices))
+    model.material_buffer = material_buffer
 
     // End copy pass
-    sdl.ReleaseGPUTransferBuffer(gpu, transfer_buffer)
     sdl.EndGPUCopyPass(copy_pass)
     ok := sdl.SubmitGPUCommandBuffer(copy_commands); assert(ok)
 
-    // Assignments
-    model.num_vertices = u32(len(data.vertices))
-    model.bbox_vbo = bbox_vbo
-    model.vbo = vbo
-    model.material_buffer = material_buffer
     append(&state.models, model)
 }

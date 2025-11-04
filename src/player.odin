@@ -68,30 +68,33 @@ update_player :: proc(state: ^AppState, dt: f32, vp: matrix[4,4]f32) #no_bounds_
     closest_entity: i32
 
     for &entity in entities {
-        aabb := entity_aabb(entity)
-        if aabbs_collide(bbox, aabb) {
-            found_collision = true
-            mtv := resolve_aabb_collision_mtv(bbox, aabb)
-            for axis, j in mtv do if axis != 0 {
-                speed[j] *= 0.9
-                if j == 1 { 
-                    if axis > 0 { // This means we are standing on a block
-                        airborne = false
-                    } else {
-                        speed.y = -0.1
+        aabbs := entity_aabbs(entity); defer delete(aabbs)
+        for aabb in aabbs {
+
+            if aabbs_collide(bbox, aabb) {
+                found_collision = true
+                mtv := resolve_aabb_collision_mtv(bbox, aabb)
+                for axis, j in mtv do if axis != 0 {
+                    speed[j] *= 0.9
+                    if j == 1 { 
+                        if axis > 0 { // This means we are standing on a block
+                            airborne = false
+                        } else {
+                            speed.y = -0.1
+                        }
                     }
                 }
+                position += mtv
+                bbox.min += mtv
+                bbox.max += mtv
             }
-            position += mtv
-            bbox.min += mtv
-            bbox.max += mtv
-        }
-        intersection := ray_intersect_aabb(ray_origin, ray_dir, aabb)
-        if intersection != -1 && intersection < closest_hit {
-            closest_hit = intersection
-            closest_entity = entity.id
-        }
+            intersection := ray_intersect_aabb(ray_origin, ray_dir, aabb)
+            if intersection != -1 && intersection < closest_hit {
+                closest_hit = intersection
+                closest_entity = entity.id
+            }
 
+        }
     }
     if !found_collision do airborne = true
 

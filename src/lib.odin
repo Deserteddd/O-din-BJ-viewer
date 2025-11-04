@@ -3,6 +3,10 @@ import "core:math"
 import "core:math/linalg"
 import "core:math/rand"
 import "core:strings"
+import "core:os"
+import "core:encoding/json"
+
+
 import sdl "vendor:sdl3"
 
 vec2 :: [2]f32
@@ -32,12 +36,31 @@ ModelFormat :: enum {
     GLTF
 }
 
-to_vec4 :: proc(v: vec3, f: f32) -> vec4 { return vec4{v.x, v.y, v.z, f} }
+AssetInstance :: struct {
+    asset:    string,
+    position: [3]f32, // x, y, z
+}
 
-norm :: proc(v: vec3) -> f32 { return math.sqrt_f32(v.x*v.x + v.y*v.y + v.z*v.z) }
+SaveFile :: struct {
+    assets:    map[string]string,
+    instances: []AssetInstance
+}
 
-random_range :: proc(min: f32, max: f32) -> f32 {
-    return rand.float32() * (max - min) + min
+load_save_file :: proc(path: string) -> SaveFile {
+    json_filename := strings.concatenate({path, ".json"}, context.temp_allocator)
+    json_data, ok := os.read_entire_file_from_filename(json_filename, context.temp_allocator)
+    assert(ok)
+
+    result: SaveFile
+    err := json.unmarshal(json_data, &result)
+    assert(err == nil)
+
+    return result
+}
+
+free_save_file :: proc(savefile: SaveFile) {
+    delete(savefile.assets)
+    delete(savefile.instances)
 }
 
 load_height_map :: proc(path: string, renderer: Renderer) -> ^HeightMap {
@@ -202,3 +225,13 @@ decompose_trs :: proc(matrix_data: [16]f32) -> (translation: vec3, scale: vec3, 
 
     return
 }
+
+to_vec4 :: proc(v: vec3, f: f32) -> vec4 { return vec4{v.x, v.y, v.z, f} }
+
+norm :: proc(v: vec3) -> f32 { return math.sqrt_f32(v.x*v.x + v.y*v.y + v.z*v.z) }
+
+random_range :: proc(min: f32, max: f32) -> f32 {
+    return rand.float32() * (max - min) + min
+}
+
+

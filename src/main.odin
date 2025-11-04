@@ -16,7 +16,7 @@ PRESENT_MODE: sdl.GPUPresentMode = .VSYNC
 
 // Globals
 default_context: runtime.Context
-FRAMES := 0
+FRAMES: u64 = 0
 last_ticks := sdl.GetTicks();
 
 main :: proc() {
@@ -35,8 +35,8 @@ Model :: struct {
     vbo:             ^sdl.GPUBuffer,
     material_buffer: ^sdl.GPUBuffer,
     num_vertices:    u32,
-    bbox:            AABB,
-    bbox_vbo:        ^sdl.GPUBuffer
+    aabbs:            []AABB,
+    bbox_vbos:        []^sdl.GPUBuffer
 }
 
 AppState :: struct {
@@ -81,18 +81,28 @@ init :: proc(state: ^AppState) {
     renderer = RND_Init({})
     init_imgui(state)
     player = create_player()
-    
-    slab    := load_obj_object("assets/slab"); defer delete_obj(slab)
-    add_obj_model(slab, state)
-    slab_entity, ok := entity_from_model(state, "slab"); assert(ok)
-    set_entity_position(state, slab_entity, player.position)
 
-    lantern := load_gltf_scene("assets/Lantern.glb", renderer.gpu)
-    append(&state.gltf_scenes, lantern)
+    load_scene(state, "savefile")
 
     state.props.attatch_light_to_player = true
     crosshair := load_sprite("assets/crosshair.png", renderer)
     append(&sprites, crosshair)
+}
+
+load_scene :: proc(state: ^AppState, save_file: string) {
+    save_file := load_save_file("savefile")
+    defer free_save_file(save_file)
+    for asset in save_file.assets {
+        object := load_obj_object(save_file.assets[asset])
+        add_obj_model(object, state)
+        delete_obj(object)
+        for instance in save_file.instances {
+            if instance.asset == asset {
+                entity, ok := entity_from_model(state, asset); assert(ok)
+                set_entity_position(state, entity, instance.position)
+            }
+        }
+    }
 }
 
 init_imgui :: proc(state: ^AppState) {
@@ -145,11 +155,6 @@ run :: proc(state: ^AppState) {
                     case .C:
                         if .LCTRL in ev.key.mod do break main_loop
                     case .N: player.noclip = !player.noclip
-                    case .O:
-                        if .LCTRL in ev.key.mod {
-                            path := open_file_window()
-                            fmt.println("Opening ", path)
-                        }
                 }
                 case .MOUSE_BUTTON_DOWN: if !state.props.ui_visible {
                     switch ev.button.button {
@@ -162,16 +167,19 @@ run :: proc(state: ^AppState) {
                 }
             }
         }
-        ubo := get_vertex_ubo_global(state^)
+        vert_ubo := get_vertex_ubo_global(state^)
+        frag_ubo := create_frag_ubo(state)
         if !props.ui_visible {
             update_camera(&player)
-            update(state, paused, ubo.vp)
+            update(state, paused, vert_ubo.vp)
             paused = false
         }
-        frame := frame_begin(renderer, ubo)
+        frame := frame_begin(renderer, vert_ubo, frag_ubo)
 
+        begin_3d(renderer, &frame)
         render_3D(state, &frame)
-        render_gltf_scene(&renderer, state.gltf_scenes[0], &frame)
+        // render_gltf_scene(&renderer, state.gltf_scenes[0], &frame)
+        submit_3d(&frame)
         assert(frame.render_pass == nil)
 
         begin_2d(state.renderer, &frame)

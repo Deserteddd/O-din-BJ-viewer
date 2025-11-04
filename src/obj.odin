@@ -10,9 +10,9 @@ import stbi "vendor:stb/image"
 
 OBJObjectData :: struct {
     name:           string,
-    vertices:       [dynamic]OBJVertex,
+    vertex_groups:  [dynamic][]OBJVertex,
     materials:      []OBJMaterial,
-    texture_data:   TextureData
+    textures:       []Texture
 }
 
 OBJMaterial :: struct {
@@ -28,38 +28,10 @@ OBJVertex :: struct {
     material: u32 // Index: 0 ..< number of materials , in order they appear in .mtl file
 }
 
-TextureData :: struct {
-    names:     [dynamic]string,
-    textures:  [dynamic][]u8,
-    sizes:     [dynamic][2]i32
-}
-
-
-
-
-print_obj :: proc(data: OBJObjectData, verbose := false) {
-          fmt.println("-------------------- OBJObjectData --------------------")
-    defer fmt.println("----------------------------------------------------")
-
-    fmt.printfln("Vertices: {}", len(data.vertices))
-    if verbose {
-        fmt.printfln("Materials:")
-        for mat, i in data.materials {
-            fmt.printfln("\tMaterial {}", i)
-            M := material_matrix(mat)
-            for j in 0..<4 do fmt.printfln("\t\t{}", M[j])
-        }
-    } else do fmt.println("Material count:", len(data.materials))
-    tex := data.texture_data
-    if len(tex.sizes) == 0 do return
-    fmt.println("Texture data:")
-    for i in 0..<len(tex.sizes) {
-        fmt.printfln("\tTexture: {}", tex.names[i])
-        fmt.printfln("\tPointer: {}", tex.textures[i])
-        fmt.printfln("\tSize:    {} x {}", tex.sizes[i].x, tex.sizes[i].y)
-        if i != 2 do fmt.println()
-    }
-
+Texture:: struct {
+    name:      string,
+    image:     []u8,
+    size:      [2]i32
 }
 
 material_matrix :: proc(m: OBJMaterial) -> [4]vec4 {
@@ -73,20 +45,18 @@ material_matrix :: proc(m: OBJMaterial) -> [4]vec4 {
 
 delete_obj :: proc(data: OBJObjectData) {
     using data
-    using texture_data
-    assert(len(names) == len(sizes) && len(sizes) == len(textures))
-    delete(vertices)
-    delete(materials)
-    for i in 0..<len(names) {
-        delete(names[i])
+    for group in vertex_groups {
+        delete(group)
     }
-    delete(names)
-    delete(textures)
-    delete(sizes)
+    delete(vertex_groups)
+    delete(materials)
+    for texture in textures {
+        free_pixels(texture.image)
+        delete(texture.name)
+    }
 }
 
 load_obj_object :: proc(dir_path: string) -> OBJObjectData {
-    defer free_all(context.temp_allocator) // Might cause incorrect behaviour if used mid frame
     fmt.println("Loading:", dir_path)
     obj: OBJObjectData
     asset_handle, err := os.open(dir_path, 0, 0); assert(err == nil)
@@ -94,19 +64,20 @@ load_obj_object :: proc(dir_path: string) -> OBJObjectData {
     dir_split, err = strings.split(dir_path, "/", context.temp_allocator); assert(err == nil)
     obj.name = strings.clone(dir_split[len(dir_split)-1])
     asset_dir: []os.File_Info
-    asset_dir, err = os.read_dir(asset_handle, 0); assert(err == nil)
+    asset_dir, err = os.read_dir(asset_handle, 0, context.temp_allocator); assert(err == nil)
     vertex_groups: [dynamic]OBJVertex
 
     materials: []OBJMaterial
     material_names: []string
-    texture_data: TextureData
+    textures: []Texture
     for file in asset_dir {
         if file.name[len(file.name)-3:] == "mtl" { // If this crashes, add a check for name length
-            materials, material_names, texture_data = load_mtl(file.fullpath)
+            materials, material_names, textures = load_mtl(file.fullpath)
+            break
         }
     }
     obj.materials = materials
-    obj.texture_data = texture_data
+    obj.textures = textures
 
     for file in asset_dir {
         if line_len := len(file.name); line_len > 3 && file.name[line_len-3:] == "obj" {
@@ -117,9 +88,9 @@ load_obj_object :: proc(dir_path: string) -> OBJObjectData {
 
             // Load materials
             obj_path := strings.concatenate({path, ".obj"}, context.temp_allocator)
-            file_content, read_err := os.read_entire_file_or_err(obj_path)
-            assert(read_err == nil); defer delete(file_content)
-            line_arr := strings.split_lines(string(file_content)); defer delete(line_arr)
+            file_content, read_err := os.read_entire_file_or_err(obj_path, context.temp_allocator)
+            assert(read_err == nil)
+            line_arr := strings.split_lines(string(file_content), context.temp_allocator)
             start, i: int
             for line in line_arr {
                 if len(line) < 2 do continue
@@ -127,18 +98,17 @@ load_obj_object :: proc(dir_path: string) -> OBJObjectData {
                 if line[0] == 'o' {
                     if start != 0 {
                         new_obj := load_obj(line_arr[start:i], material_names, &positions, &uvs, &normals)
-                        for v in new_obj do append(&obj.vertices, v)
+                        append(&obj.vertex_groups, new_obj)
                     }
                     start = i
                 }
             }
             new_obj := load_obj(line_arr[start:i], material_names, &positions, &uvs, &normals)
-            for v in new_obj do append(&obj.vertices, v)
-
+            append(&obj.vertex_groups, new_obj)
+            break
         }
     }
-
-    // fmt.printfln("Object loading took: {}", load_time)
+    free_all(context.temp_allocator)
     return obj
 }
 
@@ -149,14 +119,14 @@ load_obj_object :: proc(dir_path: string) -> OBJObjectData {
         2. List of material names as they appear in the file
 */
 @(private = "file")
-load_mtl :: proc(mtl_path: string) -> ([]OBJMaterial, []string, TextureData) {
+load_mtl :: proc(mtl_path: string) -> ([]OBJMaterial, []string, []Texture) {
     materials:      [dynamic]OBJMaterial
     material_names: [dynamic]string;  defer assert(len(materials) == len(material_names))
-    tex_data: TextureData
+    textures:       [dynamic]Texture
 
-    defer { for s, i in tex_data.names {
-        if s != ""  do assert(tex_data.textures[i] != nil)
-        else        do assert(tex_data.textures[i] == nil)
+    defer { for tex, i in textures {
+        if tex.name != ""  do assert(textures[i].image != nil)
+        else        do assert(textures[i].image == nil)
     }}
 
     file, err := os.read_entire_file_or_err(mtl_path)
@@ -165,13 +135,12 @@ load_mtl :: proc(mtl_path: string) -> ([]OBJMaterial, []string, TextureData) {
     mat: OBJMaterial
     mat_name: string
     for line in strings.split_lines_iterator(&file_data) {
-        // fmt.println(line)
         if len(line) == 0 do continue
         if len(line) > 7  && line[:6] == "newmtl"{
             new_name := strings.clone(line[7:])
             if mat_name != "" {
                 append(&materials, mat)
-                name := strings.clone(mat_name)
+                name := mat_name
                 append(&material_names, name)
 
             }
@@ -208,7 +177,7 @@ load_mtl :: proc(mtl_path: string) -> ([]OBJMaterial, []string, TextureData) {
                     if s != "" do tex_path_extension = strings.concatenate({tex_path_extension, "\\", s})
                 }
                 tex_path := strings.concatenate({tex_path_base, tex_path_extension[1:]})
-                tex_index := new_texture(tex_path, &tex_data)
+                tex_index := new_texture(tex_path, &textures)
                 switch line[4:6] {
                     case "Ka":
                         if tex_index >= 0 do mat.Ka.xy = {-1, tex_index}
@@ -223,24 +192,20 @@ load_mtl :: proc(mtl_path: string) -> ([]OBJMaterial, []string, TextureData) {
     }
     append(&materials, mat)
     append(&material_names, mat_name)
-    return materials[:], material_names[:], tex_data
+    return materials[:], material_names[:], textures[:]
 }
 
 // returns: index to texture/sampler that should be bound to the material field. -1 if the there is no space for a new textures
 @(private="file")
-new_texture :: proc(tex_path: string, data: ^TextureData) -> f32 {
+new_texture :: proc(tex_path: string, textures: ^[dynamic]Texture) -> f32 {
     tex_path_cstring := strings.clone_to_cstring(tex_path, context.temp_allocator); 
     path_split       := strings.split(tex_path, "/");
     tex_name         := strings.clone(path_split[len(path_split)-1])
     i: int
-    for i = 0; i<len(data.textures); i += 1 {
-        if data.textures[i] == nil do break
-        assert(data.sizes[i] != {}); assert(data.names[i] != "")
-    }
 
     // If texture is loaded, we return the index of it
-    for name, j in data.names {
-        if name == tex_name {
+    for texture, j in textures {
+        if texture.name == tex_name {
             delete(tex_name)
             return f32(j)
         }
@@ -249,12 +214,17 @@ new_texture :: proc(tex_path: string, data: ^TextureData) -> f32 {
     // At this point we know there is no space for new textures, and it doesn't exist in our texture collection
     if i == 4 do return -1
 
-    size: [2]i32
-    pixel_data := stbi.load(tex_path_cstring, &size.x, &size.y, nil, 4)
-    if pixel_data == nil do pixel_data = stbi.load("assets/err_tex.jpg", &size.x, &size.y, nil, 4)
-    append(&data.textures, slice.bytes_from_ptr(pixel_data, int(size.x * size.y * 4)))
-    append(&data.names   , tex_name)
-    append(&data.sizes   , size)
+    pixels, size := load_pixels(tex_path)
+    if pixels == nil {
+        pixels, size = load_pixels("assets/err_tex.jpg")
+    }
+    texture: Texture = {
+        name = tex_name,
+        image = pixels,
+        size = size
+    }
+    append(textures, texture)
+
     return f32(i)
 }
 

@@ -106,7 +106,7 @@ init_quad :: proc(
     return Quad {vbo, ibo}
 }
 
-begin_2d :: proc(renderer: Renderer, frame: ^Frame) -> ^sdl.GPURenderPass {
+begin_2d :: proc(renderer: Renderer, frame: ^Frame) {
     using renderer, frame
     assert(cmd_buff != nil)
     assert(swapchain != nil)
@@ -128,7 +128,6 @@ begin_2d :: proc(renderer: Renderer, frame: ^Frame) -> ^sdl.GPURenderPass {
 
     sdl.BindGPUVertexBuffers(render_pass, 0, &bindings[0], 1)
     sdl.BindGPUIndexBuffer(render_pass, bindings[1], ._16BIT)
-    return render_pass
 }
 
 draw_sprite :: proc(sprite: Sprite, frame: Frame, pos: vec2 = 0, scale: f32 = 1) {

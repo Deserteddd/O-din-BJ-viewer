@@ -8,12 +8,16 @@ AABB :: struct {
     max: vec3
 }
 
-entity_aabb :: proc(entity: Entity) -> AABB {
+entity_aabbs :: proc(entity: Entity) -> []AABB {
     using entity
-    return AABB {
-        min = model.bbox.min + transform.translation,
-        max = model.bbox.max + transform.translation
+    aabbs := make([]AABB, len(entity.model.aabbs))
+    for aabb, i in entity.model.aabbs {
+        aabbs[i] = AABB {
+            min = aabb.min + transform.translation,
+            max = aabb.max + transform.translation
+        }
     }
+    return aabbs
 }
 
 vector_normalize :: proc(v: ^vec3) -> f32 {

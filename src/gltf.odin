@@ -7,7 +7,7 @@ import "core:log"
 import "core:fmt"
 import "core:mem"
 import "core:strings"
-import "core:slice"
+import "core:time"
 
 GLTFScene  :: struct {
     name:           string,
@@ -35,6 +35,7 @@ TextureBinding :: struct {
 GLTFMesh :: struct {
     vbo:            ^sdl.GPUBuffer,
     ibo:            ^sdl.GPUBuffer,
+    aabb:           AABB,
     data:           MeshData
 }
 
@@ -79,7 +80,6 @@ GLTFVertex :: struct {
 }
 
 GLTFNode :: struct {
-    aabb:       AABB,
     mesh:       ^GLTFMesh,
     children:   []GLTFNode,
     transform:  Transform,
@@ -102,6 +102,7 @@ print_node :: proc(node: GLTFNode, indent := 0) {
 
 
 load_gltf_scene :: proc(path: string, gpu: ^sdl.GPUDevice) -> GLTFScene {
+    start := time.now()
     path_cstr := strings.clone_to_cstring(path, context.temp_allocator)
     gltf_data := parse_file(path_cstr); defer gl.free(gltf_data)
     assert(len(gltf_data.buffers) == 1)
@@ -138,6 +139,7 @@ load_gltf_scene :: proc(path: string, gpu: ^sdl.GPUDevice) -> GLTFScene {
 
     sdl.EndGPUCopyPass(copy_pass)
     ok := sdl.SubmitGPUCommandBuffer(copy_commands); assert(ok)
+    fmt.println("gltf loader took", time.since(start))
     return GLTFScene {
         name,
         nodes,
@@ -248,16 +250,11 @@ build_scene :: proc(
     mesh_data := load_mesh_data(gl_node.mesh, gpu, copy_pass, material_bindings)
     if len(mesh_data.primitives) != 0 {
         mesh := load_mesh(mesh_data, gpu, copy_pass)
+        aabbs := load_aabbs(mesh_data.indices)
         append(meshes, mesh)
         node.mesh = &meshes[len(meshes)-1]
         bbox: AABB = {min = max(f32), max = min(f32)}
         for &v in mesh_data.positions {
-            v += parent_transform.translation
-            q := parent_transform.rotation
-            p := quaternion(w = 0, x = v.x, y = v.y, z = v.z)
-            q_ := conj(q)
-            p_ := q*p*q_
-            v = {p_.x, p_.y, p_.z}
             if (v.x < bbox.min.x) do bbox.min.x = v.x;
             if (v.y < bbox.min.y) do bbox.min.y = v.y;
             if (v.z < bbox.min.z) do bbox.min.z = v.z;
@@ -274,7 +271,7 @@ build_scene :: proc(
         }); assert(transfer_buffer != nil)
         node.bbox_vbo = create_buffer_with_data(gpu, transfer_buffer, copy_pass, {.VERTEX}, bbox_vertices[:])
         sdl.ReleaseGPUTransferBuffer(gpu, transfer_buffer)
-        node.aabb = bbox
+        node.mesh.aabb = bbox
     }
 
     if len(gl_node.children) == 0 do return
@@ -283,6 +280,25 @@ build_scene :: proc(
     for gl_child, i in gl_node.children {
         build_scene(gl_child, &node.children[i], gpu, copy_pass, meshes, material_bindings, transform)
     }
+}
+
+load_aabbs :: proc(indices: []u16) -> []AABB {
+    assert(len(indices)%3 == 0)
+    aabb_count: int; defer fmt.println(aabb_count)
+    tested_indices := make([]u16, len(indices))
+    for i := 0; i < len(indices); i += 3 {
+        new: bool
+        for tested in tested_indices[0:i] {
+            if tested != indices[i] && tested != indices[i+1] && tested != indices[i+2] {
+                new = true
+            }
+        }
+        if new do aabb_count += 1
+        tested_indices[i] = indices[i]
+        tested_indices[i+1] = indices[i+1]
+        tested_indices[i+2] = indices[i+2]
+    }
+    return nil
 }
 
 load_mesh :: proc(data: MeshData, gpu: ^sdl.GPUDevice, copy_pass: ^sdl.GPUCopyPass) -> GLTFMesh {
@@ -405,6 +421,7 @@ load_mesh_data :: proc(
         assert(positions == len(normals))
         assert(positions == len(uvs))
         assert(positions == len(tangents))
+        assert(positions % 3 == 0)
     }
     data: MeshData
     data.positions = positions[:]

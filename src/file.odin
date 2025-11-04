@@ -1,26 +1,10 @@
 package obj_viewer
 
-import "core:sys/windows"
 import "core:strings"
 import "base:runtime"
 import "core:slice"
-import "core:fmt"
 import stbi "vendor:stb/image"
 import sdl "vendor:sdl3"
-
-open_file_window :: proc() -> (path: string) {
-    file_path := make([^]u16, windows.MAX_PATH, context.temp_allocator)
-    ofn: windows.OPENFILENAMEW = {
-        lStructSize = u32(size_of(windows.OPENFILENAMEW)),
-        lpstrFile = file_path,
-        nMaxFile = windows.MAX_PATH,
-    }
-    ok := bool(windows.GetOpenFileNameW(&ofn));
-    if !ok do return ""
-    err: runtime.Allocator_Error
-    path, err = windows.wstring_to_utf8(ofn.lpstrFile, -1); assert(err == nil)
-    return
-}
 
 load_pixels :: proc(path: string) -> (pixels: []byte, size: [2]i32) {
     path_cstr := strings.clone_to_cstring(path, context.temp_allocator);
@@ -31,10 +15,8 @@ load_pixels :: proc(path: string) -> (pixels: []byte, size: [2]i32) {
     return
 }
 
-
 free_pixels_byte :: proc (pixels: []byte) {stbi.image_free(raw_data(pixels))}
 free_pixels_u16  :: proc (pixels: []u16)  {stbi.image_free(raw_data(pixels))}
-
 free_pixels :: proc {free_pixels_byte, free_pixels_u16}
 
 load_cubemap_texture :: proc(
