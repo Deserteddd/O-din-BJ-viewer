@@ -17,16 +17,13 @@ Renderer :: struct {
     bbox_pipeline:      ^sdl.GPUGraphicsPipeline,
     skybox_pipeline:    ^sdl.GPUGraphicsPipeline,
     heightmap_pipeline: ^sdl.GPUGraphicsPipeline,
-    gltf_pipeline:      ^sdl.GPUGraphicsPipeline,
     depth_texture:      ^sdl.GPUTexture,
     fallback_texture:   ^sdl.GPUTexture,
     skybox_texture:     ^sdl.GPUTexture,
     samplers:           [4]^sdl.GPUSampler,
     default_sampler:    ^sdl.GPUSampler,
-    props:              RND_Props,
+    fullscreen:         bool,
     light:              PointLight,
-    dir_light:          DirLight,
-    draw_distance:      f32,
     r2d:                R2D,
 }
 
@@ -55,23 +52,12 @@ VertUBO :: struct {
 	inv_projection_mat: mat4,
 }
 
-RND_Props :: distinct bit_set[RND_Prop; u8]
-
-RND_Prop :: enum u8 {
-    FULLSCREEN = 0,
-}
-
-RND_Init :: proc(props: RND_Props) -> Renderer {
+RND_Init :: proc() -> Renderer {
     renderer: Renderer
-    renderer.props = props
     ok := sdl.Init({.VIDEO}); assert(ok)
     window_flags: sdl.WindowFlags
     w, h: c.int = 1280, 720
-    if .FULLSCREEN in props {
-        window_flags += {.FULLSCREEN}
-        w = 1920
-        h = 1080
-    } 
+
     window  := sdl.CreateWindow("Demo window", w, h, window_flags)
     assert(ok); assert(window != nil)
     ok = sdl.HideCursor(); assert(ok)
@@ -121,16 +107,7 @@ RND_Init :: proc(props: RND_Props) -> Renderer {
         "shader.vert",
         "shader.frag",
         OBJVertex,
-        {.FLOAT3, .FLOAT3, .FLOAT2, .UINT},
-        true,
-        swapchain_format
-    )
-    renderer.gltf_pipeline = create_render_pipeline(
-        renderer,
-        "pbr_metallic.vert",
-        "pbr_metallic.frag",
-        GLTFVertex,
-        {.FLOAT3, .FLOAT3, .FLOAT2, .FLOAT3},
+        {.FLOAT3, .FLOAT3, .FLOAT2},
         true,
         swapchain_format
     )
@@ -166,11 +143,6 @@ RND_Init :: proc(props: RND_Props) -> Renderer {
         color = 1,
         power = 50
     }
-    renderer.dir_light = DirLight {
-        direction = 1,
-        color     = 1
-    }
-    renderer.draw_distance = 2000
     init_r2d(renderer)
     return renderer
 }
@@ -191,8 +163,7 @@ RND_Destroy :: proc(renderer: ^Renderer) {
 
 RND_ToggleFullscreen :: proc(state: ^AppState) {
     using state.renderer
-    if .FULLSCREEN in props do props -= {.FULLSCREEN}
-    else do props += {.FULLSCREEN}
+    fullscreen = !fullscreen
     ok: bool
     window_bounds: sdl.Rect
     if !sdl.GetDisplayBounds(1, &window_bounds) {
@@ -201,7 +172,7 @@ RND_ToggleFullscreen :: proc(state: ^AppState) {
     sdl.ReleaseWindowFromGPUDevice(gpu, window)
     sdl.DestroyWindow(window)
     width, height: i32
-    if .FULLSCREEN in props {
+    if fullscreen {
         width = window_bounds.w
         height = window_bounds.h
         new_window := sdl.CreateWindow("Demo window", width, height, {.FULLSCREEN}); assert(new_window != nil)
@@ -302,7 +273,6 @@ create_model_matrix :: proc(transform: Transform, position_offset: vec3 = 0) -> 
     if model_transform.scale == 0 do model_transform.scale = 1
     model_transform.translation += position_offset
     return linalg.matrix4_translate_f32(model_transform.translation) *
-    linalg.matrix4_from_quaternion_f32(model_transform.rotation) *
     linalg.matrix4_scale(model_transform.scale)
 }
 
@@ -348,6 +318,8 @@ submit_3d :: proc(frame: ^Frame) {
     frame.render_pass = nil
 }
 
+import "core:fmt"
+
 render_3D :: proc(state: ^AppState, frame: ^Frame) {
     using state, frame
 
@@ -355,60 +327,52 @@ render_3D :: proc(state: ^AppState, frame: ^Frame) {
     assert(swapchain != nil)
     assert(render_pass != nil)
 
+    // Heightmap
     if height_map != nil {
         assert(renderer.heightmap_pipeline != nil)
         sdl.BindGPUGraphicsPipeline(render_pass, renderer.heightmap_pipeline)
         render_heightmap(height_map^, frame^)
     }
-
+    fallback_binding := sdl.GPUTextureSamplerBinding {
+        texture = renderer.fallback_texture,
+        sampler = renderer.default_sampler
+    }
     sdl.BindGPUGraphicsPipeline(render_pass, renderer.obj_pipeline)
     sdl.PushGPUFragmentUniformData(cmd_buff, 0, &frame.frag_ubo_global, size_of(FragUBO))
-    for &model, model_index in models {
-        using model
-        bindings: [1]sdl.GPUBufferBinding = { sdl.GPUBufferBinding { buffer = vbo } } 
+    for &model in state.models {
+        bindings: [1]sdl.GPUBufferBinding = {{buffer = model.vbo}}
         sdl.BindGPUVertexBuffers(render_pass, 0, &bindings[0], 1)
-        texture_count := len(textures)
-        for tex, i in textures {
-            assert(tex != nil)
-            sdl.BindGPUFragmentSamplers(render_pass, u32(i), 
-                &(sdl.GPUTextureSamplerBinding{
-                    texture = tex, 
-                    sampler = renderer.samplers[i]
-                }),
-                u32(texture_count)
-            )
-        }
-        for i in texture_count..<4 {
-            if texture_count == 1 do texture_count = 2
-            sdl.BindGPUFragmentSamplers(render_pass, u32(i), 
-                &(sdl.GPUTextureSamplerBinding{
-                    texture = renderer.fallback_texture, 
-                    sampler = renderer.samplers[i]
-                }), 
-                u32(texture_count)
-            )
-        }
-        sdl.BindGPUFragmentSamplers(render_pass, 4, &(sdl.GPUTextureSamplerBinding  {
-            texture = renderer.skybox_texture,
-            sampler = renderer.default_sampler
-        }), u32(texture_count))
-
-        sdl.BindGPUFragmentStorageBuffers(render_pass, 0, &material_buffer, 1)
+        sdl.BindGPUFragmentStorageBuffers(render_pass, 0, &model.material_buffer, 1)
         for &entity, i in entities {
-            if entity.model != &model do continue
-            if linalg.distance(player.position, entity.transform.translation) > renderer.draw_distance - 1 &&
-                model_index != 0 { continue }
-            visible: bool
-            aabbs := entity_aabbs(entity); defer delete(aabbs)
-            for aabb in aabbs {
-                if aabb_intersects_frustum(frustum_planes, aabb) do visible = true
-            }
-            if !visible do continue
-            debug_info.objects_rendered += 1
-            model_matrix := linalg.matrix4_translate_f32(entity.transform.translation) *
-                linalg.matrix4_from_quaternion(entity.transform.rotation)
+            if &model != entity.model do continue
+            
+            model_matrix := linalg.matrix4_translate_f32(entity.transform.translation)
             sdl.PushGPUVertexUniformData(cmd_buff, 1, &model_matrix, size_of(matrix[4,4]f32))
-            sdl.DrawGPUPrimitives(render_pass, num_vertices, 1, 0, 0)
+            for &primitive in model.primitives {
+                material := model.materials[primitive.material]
+
+                tex_bindings: [2]sdl.GPUTextureSamplerBinding
+
+                tex_bindings[0] = material.has_diff_map? sdl.GPUTextureSamplerBinding {
+                    texture = material.diffuse_map.texture,
+                    sampler = material.diffuse_map.sampler
+                } : fallback_binding
+
+                tex_bindings[1] = material.has_spec_map? sdl.GPUTextureSamplerBinding {
+                    texture = material.specular_map.texture,
+                    sampler = material.specular_map.sampler
+                } : fallback_binding
+
+                sdl.BindGPUFragmentSamplers(frame.render_pass, 0, raw_data(tex_bindings[:]), len(tex_bindings))
+                sdl.PushGPUFragmentUniformData(cmd_buff, 1, &primitive.material, size_of(vec4))
+                sdl.DrawGPUPrimitives(
+                    render_pass,
+                    primitive.end - primitive.start,
+                    1,
+                    primitive.start,
+                    0
+                )           
+            }
         }
     }
     // Skybox
@@ -421,166 +385,23 @@ render_3D :: proc(state: ^AppState, frame: ^Frame) {
         sdl.DrawGPUPrimitives(render_pass, 3, 1, 0, 0)
     }
     // Bounding Box
-    if DEBUG_GPU {
-        sdl.BindGPUGraphicsPipeline(render_pass, renderer.bbox_pipeline)
-        for &model in models {
-            for vbo in model.bbox_vbos {
-                bindings: [1]sdl.GPUBufferBinding = { sdl.GPUBufferBinding { buffer = vbo } } 
-                sdl.BindGPUVertexBuffers(render_pass, 0, &bindings[0], 1)
-                for entity in entities {
-                    if entity.model != &model do continue
-                    model_matrix := linalg.matrix4_translate_f32(entity.transform.translation)
-                    sdl.PushGPUVertexUniformData(cmd_buff, 1, &model_matrix, size_of(matrix[4,4]f32))
-                    sdl.DrawGPUPrimitives(render_pass, 24, 1, 0, 0)
-                }
-            }
-            // using model
-        }
-    }
+    // if DEBUG_GPU {
+    //     sdl.BindGPUGraphicsPipeline(render_pass, renderer.bbox_pipeline)
+    //     for &model in models {
+    //         for vbo in model.bbox_vbos {
+    //             bindings: [1]sdl.GPUBufferBinding = { sdl.GPUBufferBinding { buffer = vbo } } 
+    //             sdl.BindGPUVertexBuffers(render_pass, 0, &bindings[0], 1)
+    //             for entity in entities {
+    //                 if entity.model != &model do continue
+    //                 model_matrix := linalg.matrix4_translate_f32(entity.transform.translation)
+    //                 sdl.PushGPUVertexUniformData(cmd_buff, 1, &model_matrix, size_of(matrix[4,4]f32))
+    //                 sdl.DrawGPUPrimitives(render_pass, 24, 1, 0, 0)
+    //             }
+    //         }
+    //         // using model
+    //     }
+    // }
 
-}
-
-render_gltf_scene :: proc(renderer: ^Renderer, scene: GLTFScene, frame: ^Frame) {
-    defer {
-        sdl.EndGPURenderPass(frame.render_pass)
-        frame.render_pass = nil
-    }
-    assert(frame.cmd_buff != nil)
-    assert(frame.swapchain != nil)
-    assert(frame.render_pass != nil)
-
-    sdl.BindGPUGraphicsPipeline(frame.render_pass, renderer.gltf_pipeline)
-    sdl.PushGPUFragmentUniformData(frame.cmd_buff, 0, &renderer.dir_light, size_of(DirLight))
-    for node in scene.root_nodes {
-        draw_gltf_node(
-            renderer^, 
-            frame,
-            node, 
-            linalg.matrix4_translate(node.transform.translation), 
-        )
-    }
-
-    if !DEBUG_GPU do return
-    sdl.BindGPUGraphicsPipeline(frame.render_pass, renderer.bbox_pipeline)
-    for node in scene.root_nodes {
-        draw_gltf_aabb(
-            renderer^, 
-            frame^,
-            node, 
-            linalg.matrix4_translate(node.transform.translation),
-        )
-    }
-}
-
-draw_gltf_aabb :: proc(
-    renderer: Renderer, 
-    frame: Frame,
-    node: GLTFNode,
-    parent_matrix: matrix[4,4]f32,
-){
-    using node, frame
-    model_matrix := parent_matrix * create_model_matrix(node.transform)
-
-    if bbox_vbo != nil {
-        assert(node.bbox_vbo != nil)
-        bindings: [1]sdl.GPUBufferBinding = { 
-            sdl.GPUBufferBinding { buffer = bbox_vbo },
-        } 
-        sdl.BindGPUVertexBuffers(render_pass, 0, &bindings[0], 1)
-        sdl.PushGPUVertexUniformData(cmd_buff, 1, &model_matrix, size_of(matrix[4,4]f32))
-        sdl.DrawGPUPrimitives(render_pass, 24, 1, 0, 0)
-    }
-
-    for &child in node.children {
-        draw_gltf_aabb(renderer, frame, child, model_matrix)
-    }
-}
-GLTF_FragUBO :: struct {
-    base_color_factor:      vec4,
-    metallic_factor:        f32,
-    roughness_factor:       f32,
-    has_base_col_tex:       b32,
-    has_metal_rough_tex:    b32,
-    has_normal_tex:         b32,
-    has_occlusion_tex:      b32,
-    _pad:                   [2]uint
-}
-
-DirLight :: struct {
-    direction: vec3,
-    _pad:      f32,
-    color:     vec3,
-    _pad2:     f32
-}
-import "core:fmt"
-draw_gltf_node :: proc(
-    renderer: Renderer, 
-    frame: ^Frame,
-    node: GLTFNode,
-    parent_matrix: matrix[4,4]f32,
-){
-    using node
-
-    offset: vec3
-    model_matrix := parent_matrix * create_model_matrix(node.transform)
-    if mesh != nil {
-        bindings: [2]sdl.GPUBufferBinding = { 
-            sdl.GPUBufferBinding { buffer = mesh.vbo },
-            sdl.GPUBufferBinding { buffer = mesh.ibo }
-        } 
-        sdl.BindGPUVertexBuffers(frame.render_pass, 0, &bindings[0], 1)
-        sdl.BindGPUIndexBuffer(frame.render_pass, bindings[1], ._16BIT)
-        sdl.PushGPUVertexUniformData(frame.cmd_buff, 1, &model_matrix, size_of(matrix[4,4]f32))
-        using mesh
-        for primitive in data.primitives {
-        // primitive := data.primitives[0]
-            frag_ubo: GLTF_FragUBO
-            frag_ubo.base_color_factor = primitive.material.pbr_metallic_roughness.base_color_factor
-            frag_ubo.metallic_factor = primitive.material.pbr_metallic_roughness.metallic_factor
-            frag_ubo.roughness_factor = primitive.material.pbr_metallic_roughness.roughness_factor
-
-            frag_ubo.has_base_col_tex = primitive.material.pbr_metallic_roughness.base_color_texture != {}
-            frag_ubo.has_metal_rough_tex = primitive.material.pbr_metallic_roughness.metallic_roughness_texture != {}
-            frag_ubo.has_normal_tex = primitive.material.normal_texture != {}
-            frag_ubo.has_occlusion_tex = primitive.material.occlusion_texture != {}
-
-            fallback_binding := sdl.GPUTextureSamplerBinding {
-                texture = renderer.fallback_texture,
-                sampler = renderer.default_sampler
-            }
-
-            tex_bindings: [3]sdl.GPUTextureSamplerBinding
-
-            tex_bindings[0] = frag_ubo.has_base_col_tex? sdl.GPUTextureSamplerBinding {
-                texture = primitive.material.pbr_metallic_roughness.base_color_texture.texture,
-                sampler = primitive.material.pbr_metallic_roughness.base_color_texture.sampler
-            } : fallback_binding
-
-            tex_bindings[1] = frag_ubo.has_base_col_tex? sdl.GPUTextureSamplerBinding {
-                texture = primitive.material.pbr_metallic_roughness.metallic_roughness_texture.texture,
-                sampler = primitive.material.pbr_metallic_roughness.metallic_roughness_texture.sampler
-            } : fallback_binding
-
-            tex_bindings[2] = frag_ubo.has_normal_tex? sdl.GPUTextureSamplerBinding {
-                texture = primitive.material.normal_texture.texture,
-                sampler = primitive.material.normal_texture.sampler
-            } : fallback_binding
-            // tex_bindings[3] = frag_ubo.has_occlusion_tex? sdl.GPUTextureSamplerBinding {
-            //     texture = primitive.material.occlusion_texture.texture,
-            //     sampler = primitive.material.occlusion_texture.sampler
-            //     // sampler = renderer.default_sampler
-            // } : fallback_binding
-
-            sdl.BindGPUFragmentSamplers(frame.render_pass, 0, raw_data(tex_bindings[:]), len(tex_bindings))
-            sdl.PushGPUFragmentUniformData(frame.cmd_buff, 1, &frag_ubo, size_of(GLTF_FragUBO))
-            num_indices := u32(primitive.end - primitive.start)
-            sdl.DrawGPUIndexedPrimitives(frame.render_pass, num_indices, 1, u32(primitive.start), 0, 0)
-        }
-    }
-
-    for &child in node.children {
-        draw_gltf_node(renderer, frame, child, model_matrix)
-    }
 }
 
 get_camera_position :: proc(player: Player) -> (camera_position: vec3) {
@@ -602,10 +423,10 @@ create_proj_matrix :: proc(renderer: Renderer) -> matrix[4,4]f32 {
     win_size := get_window_size(renderer)
     aspect := win_size.x / win_size.y
     return matrix4_perspective_f32(
-        89.75, 
+        90, 
         aspect, 
         0.01, 
-        renderer.draw_distance
+        1000
     )
 }
 

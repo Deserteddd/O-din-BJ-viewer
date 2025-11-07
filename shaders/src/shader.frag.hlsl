@@ -1,83 +1,90 @@
 #include "common.hlsl"
 
-struct Material {
-    float4 Ka;
-    float4 Kd;
-    float4 Ks;
-    float4 Ke;
-};
-
 struct Input {
     float3 position : TEXCOORD0;
-    float3 normal : TEXCOORD1;
-    float2 uv : TEXCOORD2;
-    nointerpolation uint material : TEXCOORD3;
+    float3 normal   : TEXCOORD1;
+    float2 uv       : TEXCOORD2;
 };
 
-Texture2D<float4> ts0 : register(t0, space2);
-Texture2D<float4> ts1 : register(t1, space2);
-Texture2D<float4> ts2 : register(t2, space2);
-Texture2D<float4> ts3 : register(t3, space2);
+struct Material {
+    float3 diffuseColor;
+    bool   hasDiffuseMap;
+    float3 specularColor;
+    bool   hasSpecularMap;
+    float  specularFactor;
+};
 
-SamplerState smp0 : register(s0, space2);
-SamplerState smp1 : register(s1, space2);
-SamplerState smp2 : register(s2, space2);
-SamplerState smp3 : register(s3, space2);
+Texture2D<float4> diffMap  : register(t0, space2);
+Texture2D<float4> specMap  : register(t1, space2);
 
-TextureCube<float4> cubeMap : register(t4, space2);
-SamplerState smp : register(s4, space2);
+SamplerState diffSmp : register(s0, space2);
+SamplerState specSmp : register(s1, space2);
 
+StructuredBuffer<Material> materials : register(t2, space2);
 
-StructuredBuffer<Material> materials : register(t5, space2);
+cbuffer Material : register(b1, space3) {
+    uint material_index;
+};
 
-float4 diffuseColor(Input input) {
-    float is_texture = materials[input.material].Kd.x;
-    if (is_texture == -1) {
-        float texture_index = materials[input.material].Kd.y;
-        if (texture_index == 0) {
-            return ts0.Sample(smp0, input.uv);
-        } else if (texture_index == 1) {
-            return ts1.Sample(smp1, input.uv);
-        } else if (texture_index == 2) {
-            return ts2.Sample(smp2, input.uv);
-        } else if (texture_index == 3) {
-            return ts3.Sample(smp3, input.uv);
-        }
-    } 
-    return float4(materials[input.material].Kd.xyz, 1);
-}
+float4 main(Input input) : SV_Target0
+{
+    Material material = materials[material_index];
+    // Assume input.position and input.normal are in world-space.
+    // Normalize incoming normal.
+    float3 N = normalize(input.normal);
 
-float3 blinnPhongBRDF(float3 dirToLight, float3 dirToView, float3 surfaceNormal, Input input) {
-    float shininess = materials[input.material].Ka.a;
-    float3 halfWayDir = normalize(dirToLight + dirToView);
-    float specularDot = max(0, dot(halfWayDir, surfaceNormal));
-    float specularFactor = pow(specularDot, shininess);
+    // Light vector (L) and distance-based attenuation
+    float3 Lvec = lightPosition - input.position;
+    float  dist = max(length(Lvec), 1e-4);
+    float3 L = normalize(Lvec);
 
-    return materials[input.material].Ks.rgb * specularFactor;
+    // View vector
+    float3 V = normalize(viewPosition - input.position);
 
-}
+    // Half-vector for Blinn-Phong
+    float3 H = normalize(L + V);
 
-float4 main(Input input) : SV_Target0 {
-    float3 vecToLight = lightPosition - input.position;
-    float distToLight = length(vecToLight);
-    float3 dirToLight = vecToLight / distToLight;
-    float3 dirToView = normalize(viewPosition - input.position);
-    float3 surfaceNormal = normalize(input.normal);
-
-    float incidenceAngleFactor = dot(dirToLight, surfaceNormal);
-    float3 ambientLight = cubeMap.Sample(smp, surfaceNormal).xyz;
-    float3 diff_color = diffuseColor(input).xyz;
-    float3 reflectedRadiance;
-    if (incidenceAngleFactor > 0) {
-        float attenuationFactor = 1 / (distToLight * distToLight);
-
-        float3 incomingRadiance = lightColor * lightIntensity;
-        float3 irradiance = incomingRadiance * incidenceAngleFactor * attenuationFactor;
-        float3 brdf = blinnPhongBRDF(dirToLight, dirToView, surfaceNormal, input) + diff_color;
-        reflectedRadiance = irradiance * brdf + (ambientLight*diff_color);
-    } else {
-        reflectedRadiance = diff_color * ambientLight;
+    // Sample diffuse map if present, otherwise use material diffuseColor
+    float3 baseDiffuse = material.diffuseColor;
+    if (material.hasDiffuseMap)
+    {
+        float4 d = diffMap.Sample(diffSmp, input.uv);
+        // assume texture in sRGB->linear already handled elsewhere; multiply RGB
+        baseDiffuse = d.rgb;
     }
-    float3 outRadiance = reflectedRadiance;
-    return float4(outRadiance, 1);
+
+    // Sample specular map if present, otherwise use material specularColor
+    float3 baseSpecular = material.specularColor;
+    if (material.hasSpecularMap)
+    {
+        float4 s = specMap.Sample(specSmp, input.uv);
+        baseSpecular = s.rgb;
+    }
+
+    // Diffuse term (Lambert)
+    float NdotL = saturate(dot(N, L));
+    float3 diffuse = baseDiffuse * NdotL;
+
+    // Specular term (Blinn-Phong)
+    float NdotH = saturate(dot(N, H));
+    // specularFactor used as shininess exponent; clamp to avoid huge pow
+    float shininess = max(material.specularFactor, 1.0);
+    float specularPower = pow(NdotH, shininess);
+    float3 specular = baseSpecular * specularPower;
+
+    // Distance attenuation (inverse-square), scaled by lightIntensity
+    float attenuation = lightIntensity / (dist * dist);
+    // Optionally clamp attenuation to avoid extremely bright near values
+    attenuation = min(attenuation, 128.0);
+
+    // Small ambient term to avoid fully black shadows (tweak as desired)
+    float3 ambient = 0.03 * baseDiffuse;
+
+    // Compose final color
+    float3 color = ambient + attenuation * (lightColor * (diffuse + specular));
+
+    // Ensure color is in [0,1]
+    color = saturate(color);
+
+    return float4(color, 1.0f);
 }

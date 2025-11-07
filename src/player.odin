@@ -70,7 +70,6 @@ update_player :: proc(state: ^AppState, dt: f32, vp: matrix[4,4]f32) #no_bounds_
     for &entity in entities {
         aabbs := entity_aabbs(entity); defer delete(aabbs)
         for aabb in aabbs {
-
             if aabbs_collide(bbox, aabb) {
                 found_collision = true
                 mtv := resolve_aabb_collision_mtv(bbox, aabb)

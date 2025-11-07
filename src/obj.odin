@@ -1,287 +1,261 @@
 package obj_viewer
 
-import "core:fmt"
 import "core:os"
 import "core:strings"
 import "core:strconv"
 import "core:log"
-import "core:slice"
-import stbi "vendor:stb/image"
+import "core:fmt"
+import sdl "vendor:sdl3"
 
-OBJObjectData :: struct {
-    name:           string,
-    vertex_groups:  [dynamic][]OBJVertex,
-    materials:      []OBJMaterial,
-    textures:       []Texture
+OBJModel :: struct {
+    name:               string,
+    vbo:                ^sdl.GPUBuffer,
+    material_buffer:    ^sdl.GPUBuffer,
+    aabbs:              []AABB,
+    aabb_vbos:          []^sdl.GPUBuffer,
+    textures:           []Texture,
+    primitives:         []OBJPrimitive,
+    materials:          []OBJMaterial
 }
 
 OBJMaterial :: struct {
-    Ka, Kd, Ks, Ke: vec3,
-    Ns, Ni, d: f32,
-    illum: uint,
+    name:               string,
+    diffuse_color:      vec3,
+    has_diff_map:       b32,
+    specular_color:     vec3,
+    has_spec_map:       b32,
+    specular_factor:    f32,
+    diffuse_map:        ^Texture,
+    specular_map:       ^Texture
+
+}
+
+MaterialUBO :: struct {
+    diffuse_color:      vec3,
+    has_diff_map:       b32,
+    specular_color:     vec3,
+    has_specular_map:   b32,
+    specular_factor:    f32,
 }
 
 OBJVertex :: struct {
     position: vec3,
     normal: vec3,
     uv: vec2,
-    material: u32 // Index: 0 ..< number of materials , in order they appear in .mtl file
 }
 
-Texture:: struct {
-    name:      string,
-    image:     []u8,
-    size:      [2]i32
+Texture :: struct {
+    path:    string,
+    texture: ^sdl.GPUTexture,
+    sampler: ^sdl.GPUSampler
 }
 
-material_matrix :: proc(m: OBJMaterial) -> [4]vec4 {
-    return {
-        to_vec4(m.Ka, m.Ns),
-        to_vec4(m.Kd, m.Ni),
-        to_vec4(m.Ks, m.d),
-        to_vec4(m.Ke, f32(m.illum))
-    }
+OBJPrimitive :: struct {
+    start, end, material: u32,
 }
 
-delete_obj :: proc(data: OBJObjectData) {
-    using data
-    for group in vertex_groups {
-        delete(group)
-    }
-    delete(vertex_groups)
-    delete(materials)
-    for texture in textures {
-        free_pixels(texture.image)
-        delete(texture.name)
-    }
+delete_obj :: proc(model: OBJModel) {
+    panic("Not implemented")
 }
 
-load_obj_object :: proc(dir_path: string) -> OBJObjectData {
+load_obj_model :: proc(dir_path: string, gpu: ^sdl.GPUDevice) -> OBJModel {
     fmt.println("Loading:", dir_path)
-    obj: OBJObjectData
+    defer free_all(context.temp_allocator)
     asset_handle, err := os.open(dir_path, 0, 0); assert(err == nil)
     dir_split: []string
     dir_split, err = strings.split(dir_path, "/", context.temp_allocator); assert(err == nil)
-    obj.name = strings.clone(dir_split[len(dir_split)-1])
     asset_dir: []os.File_Info
     asset_dir, err = os.read_dir(asset_handle, 0, context.temp_allocator); assert(err == nil)
-    vertex_groups: [dynamic]OBJVertex
 
     materials: []OBJMaterial
-    material_names: []string
-    textures: []Texture
+    textures:  []Texture
+    cmd_buf   := sdl.AcquireGPUCommandBuffer(gpu); assert(cmd_buf != nil)
+    defer {ok := sdl.SubmitGPUCommandBuffer(cmd_buf); assert(ok)}
+    copy_pass := sdl.BeginGPUCopyPass(cmd_buf); assert(copy_pass != nil)
+    defer sdl.EndGPUCopyPass(copy_pass)
     for file in asset_dir {
+        if len(file.name) < 5 do continue
         if file.name[len(file.name)-3:] == "mtl" { // If this crashes, add a check for name length
-            materials, material_names, textures = load_mtl(file.fullpath)
+            materials, textures = load_mtl(file.fullpath, gpu, copy_pass)
             break
         }
     }
-    obj.materials = materials
-    obj.textures = textures
 
+    vertices:   []OBJVertex; defer delete(vertices)
+    primitives: []OBJPrimitive
     for file in asset_dir {
         if line_len := len(file.name); line_len > 3 && file.name[line_len-3:] == "obj" {
-            positions: [dynamic]vec3;    defer delete(positions)
-            uvs: [dynamic]vec2;          defer delete(uvs)
-            normals: [dynamic]vec3;      defer delete(normals)
-            path := strings.concatenate({dir_path, "/", file.name[:line_len-4]}, context.temp_allocator)
-
-            // Load materials
-            obj_path := strings.concatenate({path, ".obj"}, context.temp_allocator)
-            file_content, read_err := os.read_entire_file_or_err(obj_path, context.temp_allocator)
-            assert(read_err == nil)
-            line_arr := strings.split_lines(string(file_content), context.temp_allocator)
-            start, i: int
-            for line in line_arr {
-                if len(line) < 2 do continue
-                defer i += 1
-                if line[0] == 'o' {
-                    if start != 0 {
-                        new_obj := load_obj(line_arr[start:i], material_names, &positions, &uvs, &normals)
-                        append(&obj.vertex_groups, new_obj)
-                    }
-                    start = i
-                }
-            }
-            new_obj := load_obj(line_arr[start:i], material_names, &positions, &uvs, &normals)
-            append(&obj.vertex_groups, new_obj)
-            break
+            vertices, primitives = load_obj(file.fullpath, materials)
         }
     }
-    free_all(context.temp_allocator)
-    return obj
+
+    material_ubos := make([]MaterialUBO, len(materials))
+    defer delete(material_ubos)
+    for material, i in materials {
+        material_ubos[i] = MaterialUBO {
+            diffuse_color = material.diffuse_color,
+            has_diff_map = material.has_diff_map,
+            specular_color = material.specular_color,
+            has_specular_map = material.has_spec_map,
+            specular_factor = material.specular_factor
+        }
+    }
+
+
+    len_bytes := u32(len(vertices) * size_of(OBJVertex) + len(materials) * size_of(MaterialUBO))
+    transfer_buffer := sdl.CreateGPUTransferBuffer(gpu, {
+        usage = .UPLOAD,
+        size  = len_bytes
+    }); assert(transfer_buffer != nil)
+    defer sdl.ReleaseGPUTransferBuffer(gpu, transfer_buffer)
+    vbo              := create_buffer_with_data(gpu, transfer_buffer, copy_pass, {.VERTEX}, vertices)
+    material_buffer  := create_buffer_with_data(gpu, transfer_buffer, copy_pass, {.GRAPHICS_STORAGE_READ}, material_ubos)
+    assert(vbo != nil); assert(material_buffer != nil)
+
+
+    model: OBJModel
+    model.name              = strings.clone(dir_split[len(dir_split)-1])
+    model.materials         = materials
+    model.primitives        = primitives
+    model.textures          = textures
+    model.vbo               = vbo
+    model.material_buffer   = material_buffer
+    return model
 }
 
-
-/* Loads materials from specified path along with their names.
-    returns: 
-        1. List of materials in the order they appear in file
-        2. List of material names as they appear in the file
-*/
-@(private = "file")
-load_mtl :: proc(mtl_path: string) -> ([]OBJMaterial, []string, []Texture) {
-    materials:      [dynamic]OBJMaterial
-    material_names: [dynamic]string;  defer assert(len(materials) == len(material_names))
-    textures:       [dynamic]Texture
-
-    defer { for tex, i in textures {
-        if tex.name != ""  do assert(textures[i].image != nil)
-        else        do assert(textures[i].image == nil)
-    }}
-
-    file, err := os.read_entire_file_or_err(mtl_path)
-    if err != nil { log.warnf("COULDN'T FIND MTL FILE {}", mtl_path); return nil, nil, {} }
-    file_data := string(file)
-    mat: OBJMaterial
-    mat_name: string
-    for line in strings.split_lines_iterator(&file_data) {
-        if len(line) == 0 do continue
-        if len(line) > 7  && line[:6] == "newmtl"{
-            new_name := strings.clone(line[7:])
-            if mat_name != "" {
-                append(&materials, mat)
-                name := mat_name
-                append(&material_names, name)
-
-            }
-            mat_name = new_name
-            mat = {}
-        }
-        switch line[0:2] {
-            case "Ka":
-                mat.Ka = parse_vec3(line, 3)
-            case "Kd":
-                mat.Kd = parse_vec3(line, 3)
-            case "Ks":
-                mat.Ks = parse_vec3(line, 3)
-            case "Ke":
-                mat.Ke = parse_vec3(line, 3)
-            case "Ns":
-                Ns, ok := strconv.parse_f32(line[3:]); assert(ok)
-                mat.Ns = Ns
-            case "Ni":
-                Ni, ok := strconv.parse_f32(line[3:]); assert(ok)
-                mat.Ni = Ni
-            case "d ":
-                d, ok := strconv.parse_f32(line[2:]); assert(ok)
-                mat.d = d
-            case "il":
-                illum, ok := strconv.parse_uint(line[6:]); assert(ok)
-                mat.illum = illum
-            case "ma":
-                path_split := strings.split_after(mtl_path, "\\");
-                extension_split := strings.split(line[7:], "\\")
-                tex_path_base := strings.concatenate(path_split[:len(path_split)-1])
-                tex_path_extension: string
-                for s in extension_split {
-                    if s != "" do tex_path_extension = strings.concatenate({tex_path_extension, "\\", s})
-                }
-                tex_path := strings.concatenate({tex_path_base, tex_path_extension[1:]})
-                tex_index := new_texture(tex_path, &textures)
-                switch line[4:6] {
-                    case "Ka":
-                        if tex_index >= 0 do mat.Ka.xy = {-1, tex_index}
-                    case "Kd":
-                        if tex_index >= 0 do mat.Kd.xy = {-1, tex_index}
-                    case "Ks":
-                        if tex_index >= 0 do mat.Ks.xy = {-1, tex_index}
-                    case "Ke":
-                        if tex_index >= 0 do mat.Ke.xy = {-1, tex_index}
-                }
-        }
-    }
-    append(&materials, mat)
-    append(&material_names, mat_name)
-    return materials[:], material_names[:], textures[:]
-}
-
-// returns: index to texture/sampler that should be bound to the material field. -1 if the there is no space for a new textures
-@(private="file")
-new_texture :: proc(tex_path: string, textures: ^[dynamic]Texture) -> f32 {
-    tex_path_cstring := strings.clone_to_cstring(tex_path, context.temp_allocator); 
-    path_split       := strings.split(tex_path, "/");
-    tex_name         := strings.clone(path_split[len(path_split)-1])
-    i: int
-
-    // If texture is loaded, we return the index of it
-    for texture, j in textures {
-        if texture.name == tex_name {
-            delete(tex_name)
-            return f32(j)
-        }
-    }
-
-    // At this point we know there is no space for new textures, and it doesn't exist in our texture collection
-    if i == 4 do return -1
-
-    pixels, size := load_pixels(tex_path)
-    if pixels == nil {
-        pixels, size = load_pixels("assets/err_tex.jpg")
-    }
-    texture: Texture = {
-        name = tex_name,
-        image = pixels,
-        size = size
-    }
-    append(textures, texture)
-
-    return f32(i)
-}
 
 
 @(private = "file")
-load_obj :: proc(obj_data: []string, mat_names: []string, 
-    positions: ^[dynamic]vec3, uvs: ^[dynamic]vec2, normals: ^[dynamic]vec3,
-) -> []OBJVertex {
-    vertex_count: u32
-    for line in obj_data {
-        assert(len(line)>=2)
-        if line[0] == 'f' do vertex_count += 3
-    }
-    vertices := make([]OBJVertex, vertex_count);
-    current_material: u32 = 0
-    vertex_index: uint
-    for line in obj_data {
+load_obj :: proc(obj_path: string, materials: []OBJMaterial) -> ([]OBJVertex, []OBJPrimitive) {
+    file_data_1 := read_file_to_string(obj_path)
+    vertices:   [dynamic]OBJVertex
+    primitives: [dynamic]OBJPrimitive
+
+    positions: [dynamic]vec3; defer delete(positions)
+    uvs:       [dynamic]vec2; defer delete(uvs)
+    normals:   [dynamic]vec3; defer delete(normals)
+    vertex_index: u32
+    start, end: u32
+    primitive: OBJPrimitive
+    first_primitive := true
+    aabb: AABB
+    for line in strings.split_lines_iterator(&file_data_1) {
+        if len(line) < 2 do continue
         switch line[0:2] {
             case "v ":
-                append(positions, parse_vec3(line, 2))
+                append(&positions, parse_vec3(line, 2))
             case "vt":
-                append(uvs, parse_vec2(line))
+                append(&uvs, parse_vec2(line))
             case "vn":
-                append(normals, parse_vec3(line, 3))
+                append(&normals, parse_vec3(line, 3))
             case "f ":
                 defer vertex_index += 3
                 face := parse_face_data(line)
-                vertices[vertex_index] = OBJVertex {
+                append(&vertices, OBJVertex {
                     position = positions[face[0]],
                     uv       = {uvs[face[1]].x, 1-uvs[face[1]].y},
                     normal   = normals[face[2]],
-                    material = current_material
-                }
-                vertices[vertex_index+1] = OBJVertex {
+                })
+                append(&vertices, OBJVertex {
                     position = positions[face[3]],
                     uv       = {uvs[face[4]].x, 1-uvs[face[4]].y},
                     normal   = normals[face[5]],
-                    material = current_material
-                }
-                vertices[vertex_index+2] = OBJVertex {
+                })
+                append(&vertices, OBJVertex {
                     position = positions[face[6]],
                     uv       = {uvs[face[7]].x, 1-uvs[face[7]].y},
                     normal   = normals[face[8]],
-                    material = current_material
-                }
-            case "us": // Switch material
-                for name, i in mat_names {
-                    if name == line[7:] {
-                        current_material = u32(i)
+                })
+            case "us":
+                if first_primitive {
+                    for &mat, i in materials {
+                        if mat.name == line[7:] do primitive.material = u32(i)
                         break
                     }
+                    first_primitive = false
+                } else {
+                    for &mat, i in materials {
+                        if mat.name == line[7:] {
+                            primitive.end = vertex_index
+                            append(&primitives, primitive)
+                            primitive.material = u32(i)
+                            primitive.start = vertex_index
+                            break
+                        }
+                    }
+
                 }
         }
     }
-    return vertices
+    primitive.end = vertex_index
+    append(&primitives, primitive)
+
+    return vertices[:], primitives[:]
 }
 
+@(private = "file")
+load_mtl :: proc(
+    mtl_path: string, 
+    gpu: ^sdl.GPUDevice, 
+    copy_pass: ^sdl.GPUCopyPass
+) -> ([]OBJMaterial, []Texture) {
+    materials: [dynamic]OBJMaterial
+    textures:  [dynamic]Texture
+    file_data := read_file_to_string(mtl_path)
+    material: OBJMaterial
+    started: bool
+    for line in strings.split_lines_iterator(&file_data) {
+        if line == "" {
+            if !started do continue
+            append(&materials, material)
+            material = {}
+            continue
+        }
+        switch line[0:2] {
+            case "Kd":
+                material.diffuse_color = parse_vec3(line, 3)
+            case "Ks":
+                material.specular_color = parse_vec3(line, 3)
+            case "ma":
+                tex_path := line[7:]
+                texture: ^Texture
+                found: bool
+                for &tex in textures {
+                    if tex.path == tex_path {
+                        texture = &tex
+                        found = true
+                    }
+                }
+                if !found {
+                    pixels, size := load_pixels(tex_path)
+                    tex := upload_texture(gpu, copy_pass, pixels, {u32(size.x), u32(size.y)})
+                    free_pixels(pixels)
+                    sampler := sdl.CreateGPUSampler(gpu, {}); assert(sampler != nil)
+                    append(&textures,  Texture {
+                        path = strings.clone(tex_path),
+                        texture = tex,
+                        sampler = sampler
+                    })
+                    texture = &textures[len(textures)-1]
+                }
+                switch line[4:6] {
+                    case "Kd":
+                        material.has_diff_map = true
+                        material.diffuse_map = texture
+                    case "Ks":
+                        material.has_spec_map = true
+                        material.specular_map = texture
+                    case:
+                        panic("Invalid texture binding")
+                }
+            case "ne":
+                started = true
+                material.name = line[7:]
+        }
+    }
+    append(&materials, material)
+    return materials[:], textures[:]
+}
 
 @(private = "file")
 parse_vec2 :: proc(line: string) -> vec2 {
@@ -337,4 +311,12 @@ parse_face_data :: proc(line: string) -> [9]u32 {
     num, ok := strconv.parse_int(line[start:]); assert(ok)
     data[n] = u32(num)-1
     return data
+}
+
+@(private = "file")
+read_file_to_string :: proc(path: string) -> string {
+    file, err := os.read_entire_file_or_err(path, context.temp_allocator)
+    if err != nil { log.warnf("COULDN'T FIND FILE {}", path); panic("") }
+    file_data := string(file)
+    return file_data
 }

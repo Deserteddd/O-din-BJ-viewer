@@ -167,8 +167,6 @@ draw_imgui :: proc(state: ^AppState, frame: Frame) {
                 // --- General Tab ---
                 if im.BeginTabItem("General") {
                     im.LabelText("", "General")
-                    im.DragFloat3("Player position", &player.position, 0.25, 0, 60)
-                    im.DragFloat("Draw distance", &renderer.draw_distance, 1, 10, 2000)
                     if height_map != nil do im.DragFloat3("Heightmap scale", &height_map.scale, 0.001, 0, 2)
                     im.EndTabItem()
                 }
@@ -182,14 +180,6 @@ draw_imgui :: proc(state: ^AppState, frame: Frame) {
                     im.Checkbox("Snap to player", &props.attatch_light_to_player)
                     im.DragFloat("intensity", &renderer.light.power, 10, 0, 10000)
                     im.ColorPicker3("color", &renderer.light.color, {.InputRGB})
-                    im.EndTabItem()
-                }
-
-                // --- Directional Light Tab ---
-                if im.BeginTabItem("Directional Light") {
-                    im.LabelText("", "Directional Light")
-                    im.DragFloat3("Direction", &renderer.dir_light.direction, 0.01, 0, 1)
-                    im.ColorPicker3("color", &renderer.dir_light.color, {.InputRGB})
                     im.EndTabItem()
                 }
 

@@ -5,6 +5,7 @@ import "core:log"
 import "core:fmt"
 import "core:math/linalg"
 import "core:time"
+import "core:math/rand"
 import sdl "vendor:sdl3"
 import im "shared:imgui"
 import im_sdl "shared:imgui/imgui_impl_sdl3"
@@ -28,25 +29,13 @@ main :: proc() {
     fmt.println("MAIN: Exiting")
 }
 
-
-Model :: struct {
-    name:            string,
-    textures:        []^sdl.GPUTexture,
-    vbo:             ^sdl.GPUBuffer,
-    material_buffer: ^sdl.GPUBuffer,
-    num_vertices:    u32,
-    aabbs:            []AABB,
-    bbox_vbos:        []^sdl.GPUBuffer
-}
-
 AppState :: struct {
     player:             Player,
     debug_info:         DebugInfo,
     renderer:           Renderer,
     ui_context:         ^im.Context,
-    models:             [dynamic]Model,
-    gltf_scenes:        [dynamic]GLTFScene,
-    entities:           #soa[dynamic]Entity,
+    models:             [dynamic]OBJModel,
+    entities:       #soa[dynamic]Entity,
     props:              Props,
     slabs:              u32,
     sprites:            [dynamic]Sprite,
@@ -78,11 +67,23 @@ init :: proc(state: ^AppState) {
         }, nil
     )
     
-    renderer = RND_Init({})
+    renderer = RND_Init()
     init_imgui(state)
     player = create_player()
 
     load_scene(state, "savefile")
+    // slab := load_obj_model("assets/slab", renderer.gpu)
+    // append(&state.models, slab)
+    // for i in 0..<1000 {
+    //     entity, ok := entity_from_model(state, "slab"); assert(ok)
+    //     pos: vec3 = {
+    //         rand.float32_range(-100, 100),
+    //         rand.float32_range(-100, 100),
+    //         rand.float32_range(-100, 100)
+    //     }
+        
+    //     set_entity_position(state, entity, pos)
+    // }
 
     state.props.attatch_light_to_player = true
     crosshair := load_sprite("assets/crosshair.png", renderer)
@@ -93,9 +94,8 @@ load_scene :: proc(state: ^AppState, save_file: string) {
     save_file := load_save_file("savefile")
     defer free_save_file(save_file)
     for asset in save_file.assets {
-        object := load_obj_object(save_file.assets[asset])
-        add_obj_model(object, state)
-        delete_obj(object)
+        model := load_obj_model(save_file.assets[asset], state.renderer.gpu)
+        append(&state.models, model)
         for instance in save_file.instances {
             if instance.asset == asset {
                 entity, ok := entity_from_model(state, asset); assert(ok)
@@ -178,7 +178,6 @@ run :: proc(state: ^AppState) {
 
         begin_3d(renderer, &frame)
         render_3D(state, &frame)
-        // render_gltf_scene(&renderer, state.gltf_scenes[0], &frame)
         submit_3d(&frame)
         assert(frame.render_pass == nil)
 

@@ -6,16 +6,15 @@ import "core:slice"
 import "core:path/filepath"
 import os "core:os/os2"
 
-BUILD_SHADERS :: false
-ODIN_PATH     :: "C:\\odin-windows-amd64-dev-2025-10-05"
+BUILD_SHADERS :: true
+ODIN_PATH     :: "C:\\odin-windows-amd64-dev-2025-03"
 main :: proc() {
     context.logger = log.create_console_logger()
-    EXE :: "Gaym"
-    OUT :: EXE + ".exe" when ODIN_OS == .Windows else EXE
-    run_str(ODIN_PATH+"\\odin build src -debug -out:"+OUT)
+    EXE :: "gaym.exe"
+    run_str(ODIN_PATH+"\\odin build src -debug -sanitize=address -out:"+EXE)
     if BUILD_SHADERS do build_shaders()
     log.info("Args:", os.args)
-    if slice.contains(os.args, "run") do run({OUT})
+    if slice.contains(os.args, "run") do run({EXE})
 }
 
 build_shaders :: proc() {
