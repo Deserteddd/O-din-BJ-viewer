@@ -191,14 +191,14 @@ draw_imgui :: proc(state: ^AppState, frame: Frame) {
     if im.Begin("info", nil, {.NoTitleBar, .NoMouseInputs}) {
         w, h: i32
         sdl.GetWindowSize(state.renderer.window, &w, &h)
-        im.SetWindowPos(vec2{f32(w-120), 0})
-        im.SetWindowSize(vec2{120, 0})
+        im.SetWindowPos(vec2{f32(w-140), 0})
+        im.SetWindowSize(vec2{140, 0})
         frame_time_float := i32(math.round(1/f32(time.duration_seconds(debug_info.frame_time))))
         im.SetNextItemWidth(50)
         im.DragInt("FPS", &frame_time_float)
-        rendered := i32(debug_info.objects_rendered)
+        rendered := i32(debug_info.draw_call_count)
         im.SetNextItemWidth(50)
-        im.DragInt("Drawn", &rendered)
+        im.DragInt("Draw calls", &rendered)
         im.SetNextItemWidth(50)
         im.LabelText("", "Player")
         im.DragFloat("Vel", &debug_info.player_speed)

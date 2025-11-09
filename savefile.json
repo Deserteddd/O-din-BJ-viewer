@@ -5,15 +5,23 @@
   "instances": [
     {
       "asset": "slab",
-      "position": [0, 0, 0]
-    },
-    {
-      "asset": "slab",
       "position": [10, 0, 0]
     },
     {
       "asset": "slab",
       "position": [-10, 0, 0]
+    },
+    {
+      "asset": "slab",
+      "position": [0, 0, 10]
+    },
+    {
+      "asset": "slab",
+      "position": [0, 0, 0]
+    },
+    {
+      "asset": "slab",
+      "position": [0, 0, -10]
     }
   ]
 }

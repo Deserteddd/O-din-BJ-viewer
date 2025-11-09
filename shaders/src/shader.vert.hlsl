@@ -4,6 +4,7 @@ struct Input {
     float3 position : TEXCOORD0;
     float3 normal : TEXCOORD1;
     float2 uv : TEXCOORD2;
+    uint material : TEXCOORD3;
 };
 
 struct Output {
@@ -11,6 +12,7 @@ struct Output {
     float3 position : texcoord0;
     float3 normal : texcoord1;
     float2 uv : texcoord2;
+    nointerpolation uint material : texcoord03;
 };
 
 cbuffer PROJ : register(b1, space1) {
@@ -24,6 +26,7 @@ Output main(Input input) {
     output.clipPosition = mul(vp, worldPosition);
     output.uv = input.uv;
     output.position = worldPosition.xyz;
-    output.normal = normalize(mul(model, float4(input.normal, 0)).xyz);
+    output.normal = normalize(mul(model, float4(input.normal, 0))).xyz;
+    output.material = input.material;
     return output;
 }

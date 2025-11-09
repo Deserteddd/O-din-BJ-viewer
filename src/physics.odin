@@ -10,7 +10,7 @@ AABB :: struct {
 
 entity_aabbs :: proc(entity: Entity) -> []AABB {
     using entity
-    aabbs := make([]AABB, len(entity.model.aabbs))
+    aabbs := make([]AABB, len(entity.model.aabbs), context.temp_allocator)
     for aabb, i in entity.model.aabbs {
         aabbs[i] = AABB {
             min = aabb.min + transform.translation,

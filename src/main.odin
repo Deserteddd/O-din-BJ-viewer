@@ -12,8 +12,8 @@ import im_sdl "shared:imgui/imgui_impl_sdl3"
 import im_sdlgpu "shared:imgui/imgui_impl_sdlgpu3"
 
 // Constants
-DEBUG_GPU :: true
-PRESENT_MODE: sdl.GPUPresentMode = .VSYNC
+DEBUG_GPU :: false
+PRESENT_MODE: sdl.GPUPresentMode = .IMMEDIATE
 
 // Globals
 default_context: runtime.Context
@@ -42,7 +42,6 @@ AppState :: struct {
     height_map:         ^HeightMap,
 }
 
-// Replace with bit set
 Props :: struct {
     ui_visible,
     attatch_light_to_player,
@@ -51,7 +50,7 @@ Props :: struct {
 
 DebugInfo :: struct {
     frame_time:         time.Duration,
-    objects_rendered:   u32,
+    draw_call_count:    u32,
     player_speed:       f32,
 }
 
@@ -74,12 +73,13 @@ init :: proc(state: ^AppState) {
     load_scene(state, "savefile")
     // slab := load_obj_model("assets/slab", renderer.gpu)
     // append(&state.models, slab)
+
     // for i in 0..<1000 {
     //     entity, ok := entity_from_model(state, "slab"); assert(ok)
     //     pos: vec3 = {
-    //         rand.float32_range(-100, 100),
-    //         rand.float32_range(-100, 100),
-    //         rand.float32_range(-100, 100)
+    //         rand.float32_range(-10, 10),
+    //         rand.float32_range(0, 100),
+    //         rand.float32_range(-10, 10)
     //     }
         
     //     set_entity_position(state, entity, pos)
@@ -225,7 +225,7 @@ reset_player_pos :: proc(player: ^Player, at_origin := false) {
 
 update :: proc(state: ^AppState, unpaused: bool, vp: matrix[4,4]f32) {
     using state
-    debug_info.objects_rendered = 0
+    debug_info.draw_call_count = 0
     new_ticks := sdl.GetTicks();
     dt := f32(new_ticks - last_ticks) / 1000
     if unpaused do dt = 0.01666

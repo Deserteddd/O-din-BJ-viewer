@@ -40,7 +40,7 @@ update_player :: proc(state: ^AppState, dt: f32, vp: matrix[4,4]f32) #no_bounds_
     airborne_at_start := airborne
     if noclip {
         speed = 0
-        delta_pos := wishveloc * dt * 100
+        delta_pos := wishveloc * dt * 10
         position += delta_pos
         bbox.min += delta_pos
         bbox.max += delta_pos
@@ -68,7 +68,7 @@ update_player :: proc(state: ^AppState, dt: f32, vp: matrix[4,4]f32) #no_bounds_
     closest_entity: i32
 
     for &entity in entities {
-        aabbs := entity_aabbs(entity); defer delete(aabbs)
+        aabbs := entity_aabbs(entity)
         for aabb in aabbs {
             if aabbs_collide(bbox, aabb) {
                 found_collision = true

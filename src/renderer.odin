@@ -20,7 +20,6 @@ Renderer :: struct {
     depth_texture:      ^sdl.GPUTexture,
     fallback_texture:   ^sdl.GPUTexture,
     skybox_texture:     ^sdl.GPUTexture,
-    samplers:           [4]^sdl.GPUSampler,
     default_sampler:    ^sdl.GPUSampler,
     fullscreen:         bool,
     light:              PointLight,
@@ -107,7 +106,7 @@ RND_Init :: proc() -> Renderer {
         "shader.vert",
         "shader.frag",
         OBJVertex,
-        {.FLOAT3, .FLOAT3, .FLOAT2},
+        {.FLOAT3, .FLOAT3, .FLOAT2, .UINT},
         true,
         swapchain_format
     )
@@ -134,10 +133,6 @@ RND_Init :: proc() -> Renderer {
     renderer.default_sampler = sdl.CreateGPUSampler(gpu, {})
     assert(renderer.default_sampler != nil)
 
-    for i in 0..<4 {
-        sampler := sdl.CreateGPUSampler(gpu, {}); assert(sampler != nil)
-        renderer.samplers[i] = sampler
-    }
     renderer.light = PointLight {
         position = vec3{0, 10, 25},
         color = 1,
@@ -154,9 +149,7 @@ RND_Destroy :: proc(renderer: ^Renderer) {
     sdl.ReleaseGPUGraphicsPipeline(gpu, r2d.ui_pipeline)
     sdl.ReleaseGPUTexture(gpu, depth_texture)
     sdl.ReleaseGPUTexture(gpu, fallback_texture)
-    for sampler in samplers {
-        sdl.ReleaseGPUSampler(gpu, sampler)
-    }
+    sdl.ReleaseGPUSampler(gpu, default_sampler)
     sdl.ReleaseWindowFromGPUDevice(gpu, window)
     sdl.DestroyWindow(window)
 }
@@ -331,8 +324,11 @@ render_3D :: proc(state: ^AppState, frame: ^Frame) {
     if height_map != nil {
         assert(renderer.heightmap_pipeline != nil)
         sdl.BindGPUGraphicsPipeline(render_pass, renderer.heightmap_pipeline)
+        debug_info.draw_call_count += 1
         render_heightmap(height_map^, frame^)
     }
+
+    // Entities
     fallback_binding := sdl.GPUTextureSamplerBinding {
         texture = renderer.fallback_texture,
         sampler = renderer.default_sampler
@@ -343,38 +339,43 @@ render_3D :: proc(state: ^AppState, frame: ^Frame) {
         bindings: [1]sdl.GPUBufferBinding = {{buffer = model.vbo}}
         sdl.BindGPUVertexBuffers(render_pass, 0, &bindings[0], 1)
         sdl.BindGPUFragmentStorageBuffers(render_pass, 0, &model.material_buffer, 1)
-        for &entity, i in entities {
-            if &model != entity.model do continue
-            
-            model_matrix := linalg.matrix4_translate_f32(entity.transform.translation)
-            sdl.PushGPUVertexUniformData(cmd_buff, 1, &model_matrix, size_of(matrix[4,4]f32))
-            for &primitive in model.primitives {
-                material := model.materials[primitive.material]
-
-                tex_bindings: [2]sdl.GPUTextureSamplerBinding
-
-                tex_bindings[0] = material.has_diff_map? sdl.GPUTextureSamplerBinding {
-                    texture = material.diffuse_map.texture,
-                    sampler = material.diffuse_map.sampler
-                } : fallback_binding
-
-                tex_bindings[1] = material.has_spec_map? sdl.GPUTextureSamplerBinding {
-                    texture = material.specular_map.texture,
-                    sampler = material.specular_map.sampler
-                } : fallback_binding
-
-                sdl.BindGPUFragmentSamplers(frame.render_pass, 0, raw_data(tex_bindings[:]), len(tex_bindings))
-                sdl.PushGPUFragmentUniformData(cmd_buff, 1, &primitive.material, size_of(vec4))
-                sdl.DrawGPUPrimitives(
-                    render_pass,
-                    primitive.end - primitive.start,
-                    1,
-                    primitive.start,
-                    0
-                )           
+        tex_bindings: [8]sdl.GPUTextureSamplerBinding
+        for tex, i in 0..<8 {
+            tex_bindings[i] = len(model.textures) > i ? {
+                texture = model.textures[i].texture, sampler = renderer.default_sampler
+            } : {
+                texture = renderer.fallback_texture, sampler = renderer.default_sampler
             }
         }
+        sdl.BindGPUFragmentSamplers(frame.render_pass, 0, raw_data(tex_bindings[:]), len(tex_bindings))
+        for entity in state.entities {
+            if &model != entity.model do continue
+            if !is_visible(entity, frustum_planes) do continue
+            model_matrix := linalg.matrix4_translate_f32(entity.transform.translation)
+            sdl.PushGPUVertexUniformData(cmd_buff, 1, &model_matrix, size_of(matrix[4,4]f32))
+            debug_info.draw_call_count += 1
+            sdl.DrawGPUPrimitives(render_pass, model.num_vertices, 1, 0, 0)           
+        }
     }
+
+    // Bounding Box
+    if DEBUG_GPU {
+        sdl.BindGPUGraphicsPipeline(render_pass, renderer.bbox_pipeline)
+        for &model in models {
+            bindings: [1]sdl.GPUBufferBinding = { sdl.GPUBufferBinding { buffer = model.aabb_vbo } } 
+            sdl.BindGPUVertexBuffers(render_pass, 0, &bindings[0], 1)
+            for entity in entities {
+                if entity.model != &model do continue
+                if !is_visible(entity, frustum_planes) do continue
+                model_matrix := linalg.matrix4_translate_f32(entity.transform.translation)
+                sdl.PushGPUVertexUniformData(cmd_buff, 1, &model_matrix, size_of(matrix[4,4]f32))
+                debug_info.draw_call_count += 1
+                sdl.DrawGPUPrimitives(render_pass, u32(24*len(model.aabbs)), 1, 0, 0)
+            }
+            // using model
+        }
+    }
+
     // Skybox
     {
         sdl.BindGPUGraphicsPipeline(render_pass, renderer.skybox_pipeline)
@@ -382,25 +383,9 @@ render_3D :: proc(state: ^AppState, frame: ^Frame) {
             texture = renderer.skybox_texture,
             sampler = renderer.default_sampler
         }), 1)
+        debug_info.draw_call_count += 1
         sdl.DrawGPUPrimitives(render_pass, 3, 1, 0, 0)
     }
-    // Bounding Box
-    // if DEBUG_GPU {
-    //     sdl.BindGPUGraphicsPipeline(render_pass, renderer.bbox_pipeline)
-    //     for &model in models {
-    //         for vbo in model.bbox_vbos {
-    //             bindings: [1]sdl.GPUBufferBinding = { sdl.GPUBufferBinding { buffer = vbo } } 
-    //             sdl.BindGPUVertexBuffers(render_pass, 0, &bindings[0], 1)
-    //             for entity in entities {
-    //                 if entity.model != &model do continue
-    //                 model_matrix := linalg.matrix4_translate_f32(entity.transform.translation)
-    //                 sdl.PushGPUVertexUniformData(cmd_buff, 1, &model_matrix, size_of(matrix[4,4]f32))
-    //                 sdl.DrawGPUPrimitives(render_pass, 24, 1, 0, 0)
-    //             }
-    //         }
-    //         // using model
-    //     }
-    // }
 
 }
 
@@ -619,6 +604,17 @@ create_skybox_pipeline :: proc(renderer: Renderer) -> ^sdl.GPUGraphicsPipeline {
         }
     }); assert(pipeline != nil)
     return pipeline
+}
+
+is_visible :: proc(entity: Entity, frustum_planes: [6]vec4) -> bool {
+    if entity.model == nil do return false
+    for aabb in entity.model.aabbs {
+        if aabb_intersects_frustum(frustum_planes, {
+            aabb.min + entity.transform.translation,
+            aabb.max + entity.transform.translation
+        }) { return true }
+    }
+    return false
 }
 
 create_render_pipeline :: proc(

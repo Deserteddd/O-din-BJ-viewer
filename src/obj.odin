@@ -2,6 +2,7 @@ package obj_viewer
 
 import "core:os"
 import "core:strings"
+import "core:slice"
 import "core:strconv"
 import "core:log"
 import "core:fmt"
@@ -11,47 +12,41 @@ OBJModel :: struct {
     name:               string,
     vbo:                ^sdl.GPUBuffer,
     material_buffer:    ^sdl.GPUBuffer,
+    aabb_vbo:           ^sdl.GPUBuffer,
     aabbs:              []AABB,
-    aabb_vbos:          []^sdl.GPUBuffer,
     textures:           []Texture,
-    primitives:         []OBJPrimitive,
-    materials:          []OBJMaterial
+    materials:          []OBJMaterial,
+    num_vertices:       u32
 }
 
 OBJMaterial :: struct {
     name:               string,
     diffuse_color:      vec3,
-    has_diff_map:       b32,
+    diffuse_map:        i32,
     specular_color:     vec3,
-    has_spec_map:       b32,
+    specular_map:       i32,
     specular_factor:    f32,
-    diffuse_map:        ^Texture,
-    specular_map:       ^Texture
-
 }
 
-MaterialUBO :: struct {
+GPUMaterial :: struct {
     diffuse_color:      vec3,
-    has_diff_map:       b32,
+    diffuse_map:        i32,
     specular_color:     vec3,
-    has_specular_map:   b32,
+    specular_map:       i32,
     specular_factor:    f32,
+    pad:                vec3,
 }
 
 OBJVertex :: struct {
     position: vec3,
     normal: vec3,
     uv: vec2,
+    material: u32,
 }
 
 Texture :: struct {
     path:    string,
     texture: ^sdl.GPUTexture,
-    sampler: ^sdl.GPUSampler
-}
-
-OBJPrimitive :: struct {
-    start, end, material: u32,
 }
 
 delete_obj :: proc(model: OBJModel) {
@@ -80,65 +75,77 @@ load_obj_model :: proc(dir_path: string, gpu: ^sdl.GPUDevice) -> OBJModel {
             break
         }
     }
-
     vertices:   []OBJVertex; defer delete(vertices)
-    primitives: []OBJPrimitive
+    aabbs:      []AABB
     for file in asset_dir {
         if line_len := len(file.name); line_len > 3 && file.name[line_len-3:] == "obj" {
-            vertices, primitives = load_obj(file.fullpath, materials)
+            vertices, aabbs = load_obj(file.fullpath, materials)
         }
     }
 
-    material_ubos := make([]MaterialUBO, len(materials))
-    defer delete(material_ubos)
+    material_buffer_gpu := make([]GPUMaterial, len(materials))
+    defer delete(material_buffer_gpu)
     for material, i in materials {
-        material_ubos[i] = MaterialUBO {
-            diffuse_color = material.diffuse_color,
-            has_diff_map = material.has_diff_map,
-            specular_color = material.specular_color,
-            has_specular_map = material.has_spec_map,
+        material_buffer_gpu[i] = GPUMaterial {
+            diffuse_color   = material.diffuse_color,
+            diffuse_map     = material.diffuse_map,
+            specular_color  = material.specular_color,
+            specular_map    = material.specular_map,
             specular_factor = material.specular_factor
         }
     }
 
+    aabb_verts: [dynamic]vec3; defer delete(aabb_verts)
+    for aabb in aabbs {
+        verts := get_bbox_vertices(aabb)
+        for v in verts do append(&aabb_verts, v)
+    }
 
-    len_bytes := u32(len(vertices) * size_of(OBJVertex) + len(materials) * size_of(MaterialUBO))
+    len_bytes := u32(
+        len(vertices) * size_of(OBJVertex) + 
+        len(materials) * size_of(GPUMaterial) +
+        len(aabbs) * 24 * size_of(vec3)
+    )
     transfer_buffer := sdl.CreateGPUTransferBuffer(gpu, {
         usage = .UPLOAD,
         size  = len_bytes
     }); assert(transfer_buffer != nil)
     defer sdl.ReleaseGPUTransferBuffer(gpu, transfer_buffer)
     vbo              := create_buffer_with_data(gpu, transfer_buffer, copy_pass, {.VERTEX}, vertices)
-    material_buffer  := create_buffer_with_data(gpu, transfer_buffer, copy_pass, {.GRAPHICS_STORAGE_READ}, material_ubos)
-    assert(vbo != nil); assert(material_buffer != nil)
+    material_buffer  := create_buffer_with_data(gpu, transfer_buffer, copy_pass, {.GRAPHICS_STORAGE_READ}, material_buffer_gpu)
+    aabb_vbo         := create_buffer_with_data(gpu, transfer_buffer, copy_pass, {.VERTEX}, aabb_verts[:])
+    assert(vbo != nil); assert(material_buffer != nil); assert(aabb_vbo != nil)
 
 
     model: OBJModel
     model.name              = strings.clone(dir_split[len(dir_split)-1])
-    model.materials         = materials
-    model.primitives        = primitives
-    model.textures          = textures
     model.vbo               = vbo
     model.material_buffer   = material_buffer
+    model.aabb_vbo          = aabb_vbo
+    model.aabbs             = aabbs
+    model.textures          = textures
+    model.materials         = materials
+    model.num_vertices      = u32(len(vertices))
     return model
 }
 
 
 
 @(private = "file")
-load_obj :: proc(obj_path: string, materials: []OBJMaterial) -> ([]OBJVertex, []OBJPrimitive) {
+load_obj :: proc(
+    obj_path: string, 
+    materials: []OBJMaterial
+) -> ([]OBJVertex, []AABB) {
     file_data_1 := read_file_to_string(obj_path)
     vertices:   [dynamic]OBJVertex
-    primitives: [dynamic]OBJPrimitive
+    aabbs:      [dynamic]AABB
 
     positions: [dynamic]vec3; defer delete(positions)
     uvs:       [dynamic]vec2; defer delete(uvs)
     normals:   [dynamic]vec3; defer delete(normals)
-    vertex_index: u32
-    start, end: u32
-    primitive: OBJPrimitive
-    first_primitive := true
-    aabb: AABB
+    current_material: u32
+    aabb := AABB {min = max(f32), max = min(f32)}
+    first_aabb := true
     for line in strings.split_lines_iterator(&file_data_1) {
         if len(line) < 2 do continue
         switch line[0:2] {
@@ -149,48 +156,53 @@ load_obj :: proc(obj_path: string, materials: []OBJMaterial) -> ([]OBJVertex, []
             case "vn":
                 append(&normals, parse_vec3(line, 3))
             case "f ":
-                defer vertex_index += 3
                 face := parse_face_data(line)
-                append(&vertices, OBJVertex {
-                    position = positions[face[0]],
-                    uv       = {uvs[face[1]].x, 1-uvs[face[1]].y},
-                    normal   = normals[face[2]],
-                })
-                append(&vertices, OBJVertex {
-                    position = positions[face[3]],
-                    uv       = {uvs[face[4]].x, 1-uvs[face[4]].y},
-                    normal   = normals[face[5]],
-                })
-                append(&vertices, OBJVertex {
-                    position = positions[face[6]],
-                    uv       = {uvs[face[7]].x, 1-uvs[face[7]].y},
-                    normal   = normals[face[8]],
-                })
-            case "us":
-                if first_primitive {
-                    for &mat, i in materials {
-                        if mat.name == line[7:] do primitive.material = u32(i)
-                        break
+                new_verts := [3]OBJVertex {
+                    OBJVertex {
+                        position = positions[face[0]],
+                        uv       = {uvs[face[1]].x, 1-uvs[face[1]].y},
+                        normal   = normals[face[2]],
+                        material = current_material
+                    },
+                    OBJVertex {
+                        position = positions[face[3]],
+                        uv       = {uvs[face[4]].x, 1-uvs[face[4]].y},
+                        normal   = normals[face[5]],
+                        material = current_material
+                    },
+                    OBJVertex {
+                        position = positions[face[6]],
+                        uv       = {uvs[face[7]].x, 1-uvs[face[7]].y},
+                        normal   = normals[face[8]],
+                        material = current_material
                     }
-                    first_primitive = false
-                } else {
-                    for &mat, i in materials {
-                        if mat.name == line[7:] {
-                            primitive.end = vertex_index
-                            append(&primitives, primitive)
-                            primitive.material = u32(i)
-                            primitive.start = vertex_index
-                            break
-                        }
-                    }
-
                 }
+                for vert in new_verts {
+                    using vert
+                    if (position.x < aabb.min.x) do aabb.min.x = position.x;
+                    if (position.y < aabb.min.y) do aabb.min.y = position.y;
+                    if (position.z < aabb.min.z) do aabb.min.z = position.z;
+                    if (position.x > aabb.max.x) do aabb.max.x = position.x;
+                    if (position.y > aabb.max.y) do aabb.max.y = position.y;
+                    if (position.z > aabb.max.z) do aabb.max.z = position.z;
+                    append(&vertices, vert)
+                }
+            case "us":
+                for mat, i in materials {
+                    if mat.name == line[7:] do current_material = u32(i)
+                }
+            case "o ":
+                if !first_aabb {
+                    append(&aabbs, aabb)
+                    aabb = AABB {min = max(f32), max = min(f32)}
+                } else do first_aabb = false
+
         }
     }
-    primitive.end = vertex_index
-    append(&primitives, primitive)
 
-    return vertices[:], primitives[:]
+    append(&aabbs, aabb)
+
+    return vertices[:], aabbs[:]
 }
 
 @(private = "file")
@@ -202,13 +214,13 @@ load_mtl :: proc(
     materials: [dynamic]OBJMaterial
     textures:  [dynamic]Texture
     file_data := read_file_to_string(mtl_path)
-    material: OBJMaterial
+    material: OBJMaterial = {specular_map = -1, diffuse_map = -1}
     started: bool
     for line in strings.split_lines_iterator(&file_data) {
         if line == "" {
             if !started do continue
             append(&materials, material)
-            material = {}
+            material = {specular_map = -1, diffuse_map = -1}
             continue
         }
         switch line[0:2] {
@@ -216,35 +228,48 @@ load_mtl :: proc(
                 material.diffuse_color = parse_vec3(line, 3)
             case "Ks":
                 material.specular_color = parse_vec3(line, 3)
+            case "Ns":
+                Ns, ok := strconv.parse_f32(line[3:]); assert(ok)
+                material.specular_factor = Ns
             case "ma":
                 tex_path := line[7:]
-                texture: ^Texture
+                tex_index: i32
                 found: bool
-                for &tex in textures {
+                for &tex, i in textures {
                     if tex.path == tex_path {
-                        texture = &tex
+                        tex_index = i32(i)
                         found = true
+                        break
                     }
                 }
                 if !found {
+                    if !strings.contains(tex_path, "\\") {
+                        path_builder: strings.Builder
+                        strings.builder_init(&path_builder, context.temp_allocator)
+                        path_iter := mtl_path
+                        i: int
+                        for str in strings.split_iterator(&path_iter, "\\") {
+                            if strings.contains(str, ".") do break
+                            strings.write_string(&path_builder, str)
+                            strings.write_rune(&path_builder, '\\')
+                        }
+                        strings.write_string(&path_builder, tex_path)
+                        tex_path = strings.to_string(path_builder)
+                    }
                     pixels, size := load_pixels(tex_path)
                     tex := upload_texture(gpu, copy_pass, pixels, {u32(size.x), u32(size.y)})
                     free_pixels(pixels)
-                    sampler := sdl.CreateGPUSampler(gpu, {}); assert(sampler != nil)
                     append(&textures,  Texture {
                         path = strings.clone(tex_path),
                         texture = tex,
-                        sampler = sampler
                     })
-                    texture = &textures[len(textures)-1]
+                    tex_index = i32(len(textures)-1)
                 }
                 switch line[4:6] {
                     case "Kd":
-                        material.has_diff_map = true
-                        material.diffuse_map = texture
+                        material.diffuse_map = tex_index
                     case "Ks":
-                        material.has_spec_map = true
-                        material.specular_map = texture
+                        material.specular_map = tex_index
                     case:
                         panic("Invalid texture binding")
                 }
