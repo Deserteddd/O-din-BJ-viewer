@@ -85,8 +85,10 @@ float3 blinnPhongBRDF(float3 dirToLight, float3 dirToView, float3 surfaceNormal,
     float specularDot = max(0, dot(halfWayDir, surfaceNormal));
     float3 specularColor = get_specular_color(input);
     float specularFactor = pow(specularDot, shininess);
+    float3 specularReflection = specularColor * specularFactor;
+    float3 diffuseReflection = get_diffuse_color(input);
 
-    return specularColor * specularFactor;
+    return specularReflection + diffuseReflection;
 
 }
 
@@ -97,19 +99,20 @@ float4 main(Input input) : SV_Target0 {
     float3 dirToView = normalize(viewPosition - input.position);
     float3 surfaceNormal = normalize(input.normal);
 
-    float incidenceAngleFactor = dot(dirToLight, surfaceNormal);
-    float3 ambientLight = 0.01;
     float3 diff_color = get_diffuse_color(input);
-    float3 reflectedRadiance;
+
+    float3 ambientLight = 0.01;
+
+    float3 reflectedRadiance = ambientLight * diff_color;
+
+    float incidenceAngleFactor = dot(dirToLight, surfaceNormal);
     if (incidenceAngleFactor > 0) {
         float attenuationFactor = 1 / (distToLight * distToLight);
 
         float3 incomingRadiance = lightColor * lightIntensity;
         float3 irradiance = incomingRadiance * incidenceAngleFactor * attenuationFactor;
         float3 brdf = blinnPhongBRDF(dirToLight, dirToView, surfaceNormal, input);
-        reflectedRadiance = irradiance * brdf + (ambientLight*diff_color);
-    } else {
-        reflectedRadiance = diff_color * ambientLight;
+        reflectedRadiance += irradiance * brdf;
     }
     float3 outRadiance = reflectedRadiance;
     return float4(outRadiance, 1);

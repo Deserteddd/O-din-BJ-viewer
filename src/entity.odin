@@ -10,8 +10,8 @@ Entity :: struct {
 
 Transform :: struct {
     translation:    vec3,
-    rotation:       vec3,
-    scale:          vec3
+    scale:          vec3,
+    rotation:       quaternion128,
 }
 
 entity_from_model :: proc(state: ^AppState, model_name: string) -> (id: i32, ok: bool) {

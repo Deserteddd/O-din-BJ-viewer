@@ -35,16 +35,15 @@ UBO2D :: struct {
     win_size: vec2
 }
 
-load_sprite :: proc(path: string, renderer: Renderer) -> Sprite {
-    using renderer
-    copy_commands := sdl.AcquireGPUCommandBuffer(gpu); assert(copy_commands != nil)
+load_sprite :: proc(path: string) -> Sprite {
+    copy_commands := sdl.AcquireGPUCommandBuffer(g.gpu); assert(copy_commands != nil)
     copy_pass := sdl.BeginGPUCopyPass(copy_commands); assert(copy_pass != nil)
     defer {ok := sdl.SubmitGPUCommandBuffer(copy_commands); assert(ok)}
     defer sdl.EndGPUCopyPass(copy_pass)
     
     pixels, size := load_pixels(path); assert(pixels != nil)
     size_u32: [2]u32 = {u32(size.x), u32(size.y)}
-    texture := upload_texture(gpu, copy_pass, pixels, size_u32)
+    texture := upload_texture(g.gpu, copy_pass, pixels, size_u32)
     assert(texture != nil)
     free_pixels(pixels)
 
@@ -52,7 +51,7 @@ load_sprite :: proc(path: string, renderer: Renderer) -> Sprite {
     name_split := strings.split(file_name[len(file_name)-1], ".", context.temp_allocator)
     name       := strings.clone(name_split[0])
 
-    sampler := sdl.CreateGPUSampler(gpu, {}); assert(sampler != nil)
+    sampler := sdl.CreateGPUSampler(g.gpu, {}); assert(sampler != nil)
     return Sprite {
         name,
         sampler,
@@ -62,9 +61,8 @@ load_sprite :: proc(path: string, renderer: Renderer) -> Sprite {
 }
 
 init_r2d :: proc(renderer: Renderer) {
-    using renderer
 
-    copy_commands := sdl.AcquireGPUCommandBuffer(gpu); assert(copy_commands != nil)
+    copy_commands := sdl.AcquireGPUCommandBuffer(g.gpu); assert(copy_commands != nil)
     defer {ok := sdl.SubmitGPUCommandBuffer(copy_commands); assert(ok)}
 
     copy_pass := sdl.BeginGPUCopyPass(copy_commands); assert(copy_pass != nil)
@@ -73,7 +71,6 @@ init_r2d :: proc(renderer: Renderer) {
     {
         using renderer.r2d
         ui_pipeline = create_render_pipeline(
-                renderer,
                 "ui.vert",
                 "ui.frag",
                 Vertex2D,
@@ -82,12 +79,11 @@ init_r2d :: proc(renderer: Renderer) {
                 num_vertex_buffers = 2,
                 alpha_blend = true
         )
-        quad = init_quad(gpu, copy_pass)
+        quad = init_quad(copy_pass)
     }
 }
 
 init_quad :: proc(
-    gpu:            ^sdl.GPUDevice,
     copy_pass:      ^sdl.GPUCopyPass
 ) -> Quad {
     verts := [4]Vertex2D {
@@ -102,7 +98,7 @@ init_quad :: proc(
     }
     len_bytes := u32(len(verts) * size_of(Vertex2D))
 
-    vbo, ibo := upload_polygon(gpu, copy_pass, verts[:], indices[:])
+    vbo, ibo := upload_polygon(g.gpu, copy_pass, verts[:], indices[:])
     return Quad {vbo, ibo}
 }
 
@@ -190,7 +186,7 @@ draw_imgui :: proc(state: ^AppState, frame: Frame) {
     }
     if im.Begin("info", nil, {.NoTitleBar, .NoMouseInputs}) {
         w, h: i32
-        sdl.GetWindowSize(state.renderer.window, &w, &h)
+        sdl.GetWindowSize(g.window, &w, &h)
         im.SetWindowPos(vec2{f32(w-140), 0})
         im.SetWindowSize(vec2{140, 0})
         frame_time_float := i32(math.round(1/f32(time.duration_seconds(debug_info.frame_time))))

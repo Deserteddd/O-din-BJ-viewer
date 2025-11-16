@@ -1,18 +1,23 @@
 package obj_viewer
 import "core:math"
-import "core:math/linalg"
 import "core:math/rand"
 import "core:strings"
 import "core:os"
 import "core:encoding/json"
-
-
 import sdl "vendor:sdl3"
 
 vec2 :: [2]f32
 vec3 :: [3]f32
 vec4 :: [4]f32
 mat4 :: matrix[4,4]f32
+
+Globals :: struct {
+    debug_draw: bool,
+    frames:     u64,
+    last_ticks: u64,
+    window:     ^sdl.Window,
+    gpu:        ^sdl.GPUDevice,
+}
 
 TRANSFORM_IDENTITY :: Transform {
     translation = 0,
@@ -63,7 +68,7 @@ free_save_file :: proc(savefile: SaveFile) {
     delete(savefile.instances)
 }
 
-load_height_map :: proc(path: string, renderer: Renderer) -> ^HeightMap {
+load_height_map :: proc(path: string) -> ^HeightMap {
     height_path  := strings.concatenate({path, "/height_map.png"})
     diffuse_path := strings.concatenate({path, "/diffuse.png"})
     pixels, size := load_height_map_pixels(height_path); defer free_pixels(pixels)
@@ -104,22 +109,20 @@ load_height_map :: proc(path: string, renderer: Renderer) -> ^HeightMap {
         rd_idx   := u32(i32(i)+size.x+1)
         append_elems(&indices, this_idx, r_idx, d_idx, d_idx, r_idx, rd_idx)
     }
-    using renderer
-    copy_commands := sdl.AcquireGPUCommandBuffer(gpu); assert(copy_commands != nil)
+    copy_commands := sdl.AcquireGPUCommandBuffer(g.gpu); assert(copy_commands != nil)
     copy_pass := sdl.BeginGPUCopyPass(copy_commands); assert(copy_pass != nil)
     len_bytes := u32(len(vertices) * size_of(HeightMapVertex))
-    transfer_buffer := sdl.CreateGPUTransferBuffer(gpu, {
+    transfer_buffer := sdl.CreateGPUTransferBuffer(g.gpu, {
         usage = sdl.GPUTransferBufferUsage.UPLOAD,
         size = len_bytes,
     }); assert(transfer_buffer != nil)
-    vbo := create_buffer_with_data(gpu, transfer_buffer, copy_pass, {.VERTEX}, vertices[:])
-    ibo := create_buffer_with_data(gpu, transfer_buffer, copy_pass, {.INDEX}, indices[:])
+    vbo := create_buffer_with_data(g.gpu, transfer_buffer, copy_pass, {.VERTEX}, vertices[:])
+    ibo := create_buffer_with_data(g.gpu, transfer_buffer, copy_pass, {.INDEX}, indices[:])
 
-    sdl.ReleaseGPUTransferBuffer(gpu, transfer_buffer)
+    sdl.ReleaseGPUTransferBuffer(g.gpu, transfer_buffer)
     sdl.EndGPUCopyPass(copy_pass)
     ok := sdl.SubmitGPUCommandBuffer(copy_commands); assert(ok)
     pipeline := create_render_pipeline(
-        renderer,
         "heightmap.vert",
         "heightmap.frag",
         HeightMapVertex,

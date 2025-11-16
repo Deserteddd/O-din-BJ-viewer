@@ -12,13 +12,13 @@ import im_sdl "shared:imgui/imgui_impl_sdl3"
 import im_sdlgpu "shared:imgui/imgui_impl_sdlgpu3"
 
 // Constants
-DEBUG_GPU :: false
 PRESENT_MODE: sdl.GPUPresentMode = .IMMEDIATE
 
 // Globals
 default_context: runtime.Context
-FRAMES: u64 = 0
-last_ticks := sdl.GetTicks();
+g: Globals = {
+    debug_draw = false,
+}
 
 main :: proc() {
     fmt.println("MAIN: initing")
@@ -33,7 +33,7 @@ AppState :: struct {
     player:             Player,
     debug_info:         DebugInfo,
     renderer:           Renderer,
-    ui_context:         ^im.Context,
+    ui_context:        ^im.Context,
     models:             [dynamic]OBJModel,
     entities:       #soa[dynamic]Entity,
     props:              Props,
@@ -45,6 +45,7 @@ AppState :: struct {
 Props :: struct {
     ui_visible,
     attatch_light_to_player,
+    draw_aabbs,
     lmb_pressed: bool
 }
 
@@ -65,28 +66,37 @@ init :: proc(state: ^AppState) {
             log.debugf("SDL {} [{}]", category, priority, message)
         }, nil
     )
-    
+    ok := sdl.Init({.VIDEO}); assert(ok)
+    window_flags: sdl.WindowFlags
+    g.window = sdl.CreateWindow("Demo window", 1280, 720, window_flags); assert(g.window != nil)
+    ok = sdl.HideCursor(); assert(ok)
+    ok = sdl.SetWindowRelativeMouseMode(g.window, true); assert(ok)
+
+    g.gpu = sdl.CreateGPUDevice({.SPIRV}, g.debug_draw, nil); assert(g.gpu != nil)
+    ok = sdl.ClaimWindowForGPUDevice(g.gpu, g.window); assert(ok)
+    ok = sdl.SetGPUSwapchainParameters(g.gpu, g.window, .SDR_LINEAR, PRESENT_MODE); assert(ok)
+
     renderer = RND_Init()
     init_imgui(state)
     player = create_player()
 
-    load_scene(state, "savefile")
-    // slab := load_obj_model("assets/slab", renderer.gpu)
-    // append(&state.models, slab)
+    // load_scene(state, "savefile")
+    slab := load_obj_model("assets/slab", g.gpu)
+    append(&state.models, slab)
 
-    // for i in 0..<1000 {
-    //     entity, ok := entity_from_model(state, "slab"); assert(ok)
-    //     pos: vec3 = {
-    //         rand.float32_range(-10, 10),
-    //         rand.float32_range(0, 100),
-    //         rand.float32_range(-10, 10)
-    //     }
+    for i in 0..<10000 {
+        entity, ok := entity_from_model(state, "slab"); assert(ok)
+        pos: vec3 = {
+            rand.float32_range(-50, 50),
+            rand.float32_range(0, 100),
+            rand.float32_range(-50, 50)
+        }
         
-    //     set_entity_position(state, entity, pos)
-    // }
+        set_entity_position(state, entity, pos)
+    }
 
     state.props.attatch_light_to_player = true
-    crosshair := load_sprite("assets/crosshair.png", renderer)
+    crosshair := load_sprite("assets/crosshair.png")
     append(&sprites, crosshair)
 }
 
@@ -94,7 +104,7 @@ load_scene :: proc(state: ^AppState, save_file: string) {
     save_file := load_save_file("savefile")
     defer free_save_file(save_file)
     for asset in save_file.assets {
-        model := load_obj_model(save_file.assets[asset], state.renderer.gpu)
+        model := load_obj_model(save_file.assets[asset], g.gpu)
         append(&state.models, model)
         for instance in save_file.instances {
             if instance.asset == asset {
@@ -106,7 +116,7 @@ load_scene :: proc(state: ^AppState, save_file: string) {
 }
 
 init_imgui :: proc(state: ^AppState) {
-    assert(state.renderer.window != nil)
+    assert(g.window != nil)
     if state.ui_context != nil {
         im_sdlgpu.Shutdown()
         im_sdl.Shutdown()
@@ -116,10 +126,10 @@ init_imgui :: proc(state: ^AppState) {
     im.CHECKVERSION()
     state.ui_context = im.CreateContext()
     using state.renderer
-    im_sdl.InitForSDLGPU(window)
+    im_sdl.InitForSDLGPU(g.window)
     im_sdlgpu.Init(&{
-        Device = state.renderer.gpu,
-        ColorTargetFormat = sdl.GetGPUSwapchainTextureFormat(gpu, window)
+        Device = g.gpu,
+        ColorTargetFormat = sdl.GetGPUSwapchainTextureFormat(g.gpu, g.window)
     })
     style := im.GetStyle()
     for &color in style.Colors {
@@ -134,7 +144,7 @@ run :: proc(state: ^AppState) {
 
     main_loop: for {
         defer free_all(context.temp_allocator)
-        defer FRAMES += 1
+        defer g.frames += 1
         now := time.now()
         ev: sdl.Event
         for sdl.PollEvent(&ev) {
@@ -174,7 +184,9 @@ run :: proc(state: ^AppState) {
             update(state, paused, vert_ubo.vp)
             paused = false
         }
-        frame := frame_begin(renderer, vert_ubo, frag_ubo)
+
+        frame := frame_begin(vert_ubo, frag_ubo)
+        defer frame_submit(frame)
 
         begin_3d(renderer, &frame)
         render_3D(state, &frame)
@@ -188,8 +200,6 @@ run :: proc(state: ^AppState) {
         submit_2d(&frame)
         draw_imgui(state, frame)
 
-
-        ok := frame_submit(state.renderer, frame); assert(ok)
         state.debug_info.frame_time = time.since(now)
     }
 }
@@ -199,11 +209,11 @@ toggle_ui :: proc(state: ^AppState) {
     ui_visible = !ui_visible
     if ui_visible {
         ok := sdl.ShowCursor(); assert(ok)
-        ok = sdl.SetWindowRelativeMouseMode(state.renderer.window, false); assert(ok)
-        sdl.WarpMouseInWindow(state.renderer.window, 700, 90)
+        ok = sdl.SetWindowRelativeMouseMode(g.window, false); assert(ok)
+        sdl.WarpMouseInWindow(g.window, 700, 90)
     } else {
         ok := sdl.HideCursor(); assert(ok)
-        ok = sdl.SetWindowRelativeMouseMode(state.renderer.window, true); assert(ok)
+        ok = sdl.SetWindowRelativeMouseMode(g.window, true); assert(ok)
     }
 }
 
@@ -227,9 +237,9 @@ update :: proc(state: ^AppState, unpaused: bool, vp: matrix[4,4]f32) {
     using state
     debug_info.draw_call_count = 0
     new_ticks := sdl.GetTicks();
-    dt := f32(new_ticks - last_ticks) / 1000
+    dt := f32(new_ticks - g.last_ticks) / 1000
     if unpaused do dt = 0.01666
-    last_ticks = new_ticks
+    g.last_ticks = new_ticks
     if !props.ui_visible {
         update_player(state, dt, vp)
     }
