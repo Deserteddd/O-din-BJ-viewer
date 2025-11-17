@@ -20,7 +20,6 @@ free_pixels_u16  :: proc (pixels: []u16)  {stbi.image_free(raw_data(pixels))}
 free_pixels :: proc {free_pixels_byte, free_pixels_u16}
 
 load_cubemap_texture :: proc(
-    gpu: ^sdl.GPUDevice,
     copy_pass: ^sdl.GPUCopyPass, 
     paths: [sdl.GPUCubeMapFace]string
 ) -> ^sdl.GPUTexture {
@@ -34,7 +33,7 @@ load_cubemap_texture :: proc(
         if size == 0 do size = u32(img_size.x) 
         else do assert(u32(img_size.x) == size)
     }
-    texture := upload_cubemap_texture_sides(gpu, copy_pass, pixels, size)
+    texture := upload_cubemap_texture_sides(copy_pass, pixels, size)
     for side_pixels in pixels do free_pixels(side_pixels)
     return texture
 }

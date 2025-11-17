@@ -44,14 +44,14 @@ FragUBOGlobal :: struct {
 }
 
 VertUBOGlobal :: struct {
-	vp: mat4,
-	inv_view_mat: mat4,
+	vp,
+	inv_view_mat,
 	inv_projection_mat: mat4,
 }
 
 VertUBOLocal :: struct {
     model_mat,
-    normal_mat: matrix[4,4]f32
+    normal_mat: mat4
 }
 
 Frame :: struct {
@@ -72,7 +72,7 @@ RND_Init :: proc() -> Renderer {
 
     copy_commands := sdl.AcquireGPUCommandBuffer(g.gpu); assert(copy_commands != nil)
     copy_pass := sdl.BeginGPUCopyPass(copy_commands); assert(copy_pass != nil)
-    renderer.skybox_texture = load_cubemap_texture(g.gpu, copy_pass, {
+    renderer.skybox_texture = load_cubemap_texture(copy_pass, {
         .POSITIVEX = "assets/skybox/right.png",
         .NEGATIVEX = "assets/skybox/left.png",
         .POSITIVEY = "assets/skybox/top.png",
@@ -80,7 +80,7 @@ RND_Init :: proc() -> Renderer {
         .POSITIVEZ = "assets/skybox/front.png",
         .NEGATIVEZ = "assets/skybox/back.png",
     })
-    renderer.fallback_texture = upload_texture(g.gpu, copy_pass, pixels, size_u32)
+    renderer.fallback_texture = upload_texture(copy_pass, pixels, size_u32)
 
     sdl.EndGPUCopyPass(copy_pass)
     ok := sdl.SubmitGPUCommandBuffer(copy_commands); assert(ok)
@@ -142,12 +142,14 @@ RND_Destroy :: proc(renderer: ^Renderer) {
     using renderer
     sdl.ReleaseGPUGraphicsPipeline(g.gpu, obj_pipeline)
     sdl.ReleaseGPUGraphicsPipeline(g.gpu, bbox_pipeline)
+    sdl.ReleaseGPUGraphicsPipeline(g.gpu, heightmap_pipeline)
     sdl.ReleaseGPUGraphicsPipeline(g.gpu, r2d.ui_pipeline)
     sdl.ReleaseGPUTexture(g.gpu, depth_texture)
     sdl.ReleaseGPUTexture(g.gpu, fallback_texture)
     sdl.ReleaseGPUSampler(g.gpu, default_sampler)
     sdl.ReleaseWindowFromGPUDevice(g.gpu, g.window)
     sdl.DestroyWindow(g.window)
+    sdl.DestroyGPUDevice(g.gpu)
 }
 
 RND_ToggleFullscreen :: proc(state: ^AppState) {
@@ -221,9 +223,8 @@ frame_begin :: proc(
     }
 }
 
-get_vertex_ubo_global :: proc(state: AppState) -> VertUBOGlobal {
-    using state
-    proj_matrix := create_proj_matrix(renderer)
+get_vertex_ubo_global :: proc(player: Player) -> VertUBOGlobal {
+    proj_matrix := create_proj_matrix(90)
     view_matrix := create_view_matrix(player)
     return VertUBOGlobal {
         vp = proj_matrix * view_matrix,
@@ -350,7 +351,7 @@ render_3D :: proc(state: ^AppState, frame: ^Frame) {
                 if entity.model != &model do continue
                 if !is_visible(entity, frustum_planes) do continue
                 model_matrix := linalg.matrix4_translate_f32(entity.transform.translation)
-                sdl.PushGPUVertexUniformData(cmd_buff, 1, &model_matrix, size_of(matrix[4,4]f32))
+                sdl.PushGPUVertexUniformData(cmd_buff, 1, &model_matrix, size_of(mat4))
                 debug_info.draw_call_count += 1
                 sdl.DrawGPUPrimitives(render_pass, u32(24*len(model.aabbs)), 1, 0, 0)
             }
@@ -385,12 +386,12 @@ create_view_matrix :: proc(player: Player) -> linalg.Matrix4f32 {
     return pitch_matrix * yaw_matrix * position_matrix
 }
 
-create_proj_matrix :: proc(renderer: Renderer) -> matrix[4,4]f32 {
+create_proj_matrix :: proc(fov: f32) -> mat4 {
     using linalg
     win_size := get_window_size()
     aspect := win_size.x / win_size.y
     return matrix4_perspective_f32(
-        90, 
+        to_radians(fov), 
         aspect, 
         0.01, 
         1000
@@ -407,7 +408,6 @@ get_window_size :: proc() -> vec2 {
 }
 
 create_buffer_with_data :: proc(
-    gpu: ^sdl.GPUDevice, 
     transfer_buffer: ^sdl.GPUTransferBuffer,
     copy_pass: ^sdl.GPUCopyPass,
     usage: sdl.GPUBufferUsageFlags,
@@ -415,14 +415,14 @@ create_buffer_with_data :: proc(
 ) -> ^sdl.GPUBuffer {
     len_bytes := len(data) * size_of(T)
 
-    buffer := sdl.CreateGPUBuffer(gpu, {
+    buffer := sdl.CreateGPUBuffer(g.gpu, {
         usage = usage,
         size = u32(len_bytes),
     });
 
-    transfer_mem := cast([^]byte) sdl.MapGPUTransferBuffer(gpu, transfer_buffer, true)
+    transfer_mem := cast([^]byte) sdl.MapGPUTransferBuffer(g.gpu, transfer_buffer, true)
     mem.copy(transfer_mem, raw_data(data), len_bytes)
-    sdl.UnmapGPUTransferBuffer(gpu, transfer_buffer)
+    sdl.UnmapGPUTransferBuffer(g.gpu, transfer_buffer)
     sdl.UploadToGPUBuffer(copy_pass, 
         sdl.GPUTransferBufferLocation {
             offset = 0,
@@ -439,13 +439,12 @@ create_buffer_with_data :: proc(
 }
 
 upload_texture :: proc(
-    gpu: ^sdl.GPUDevice,
     copy_pass: ^sdl.GPUCopyPass, 
     pixels: []byte, 
     size: [2]u32
 ) -> ^sdl.GPUTexture {
 
-    texture := sdl.CreateGPUTexture(gpu, {
+    texture := sdl.CreateGPUTexture(g.gpu, {
         type = .D2,
         format = .R8G8B8A8_UNORM_SRGB,
         usage = {.SAMPLER},
@@ -455,31 +454,30 @@ upload_texture :: proc(
         num_levels = 1
     })
 
-    tex_transfer_buffer := sdl.CreateGPUTransferBuffer(gpu, {
+    tex_transfer_buffer := sdl.CreateGPUTransferBuffer(g.gpu, {
         usage = .UPLOAD,
         size = u32(len(pixels)),
     }); assert(tex_transfer_buffer != nil)
 
-    tex_transfer_mem := sdl.MapGPUTransferBuffer(gpu, tex_transfer_buffer, false)
+    tex_transfer_mem := sdl.MapGPUTransferBuffer(g.gpu, tex_transfer_buffer, false)
     mem.copy(tex_transfer_mem, raw_data(pixels), len(pixels))
-    sdl.UnmapGPUTransferBuffer(gpu, tex_transfer_buffer)
+    sdl.UnmapGPUTransferBuffer(g.gpu, tex_transfer_buffer)
     sdl.UploadToGPUTexture(copy_pass, 
         {transfer_buffer = tex_transfer_buffer},
         {texture = texture, w = u32(size.x), h = u32(size.y), d = 1},
         false
     )
 
-    sdl.ReleaseGPUTransferBuffer(gpu, tex_transfer_buffer)
+    sdl.ReleaseGPUTransferBuffer(g.gpu, tex_transfer_buffer)
     return texture
 }
 
 upload_cubemap_texture_sides :: proc(
-    gpu: ^sdl.GPUDevice,
     copy_pass: ^sdl.GPUCopyPass,
     pixels: [sdl.GPUCubeMapFace][]byte,
     size: u32
 ) -> ^sdl.GPUTexture {
-	texture := sdl.CreateGPUTexture(gpu, {
+	texture := sdl.CreateGPUTexture(g.gpu, {
 		type = .CUBE,
 		format = .R8G8B8A8_UNORM_SRGB, // pixels are in sRGB, converted to linear in shaders
 		usage = {.SAMPLER},
@@ -492,11 +490,13 @@ upload_cubemap_texture_sides :: proc(
 	side_byte_size := int(size * size * 4) // 4 bytes per pixel
 	for side_pixels in pixels do assert(len(side_pixels) == side_byte_size)
 
-	tex_transfer_buf := sdl.CreateGPUTransferBuffer(gpu, {
+	tex_transfer_buf := sdl.CreateGPUTransferBuffer(g.gpu, {
 		usage = .UPLOAD,
 		size = u32(side_byte_size * 6)
 	})
-	tex_transfer_mem := cast([^]byte)sdl.MapGPUTransferBuffer(gpu, tex_transfer_buf, false)
+	defer sdl.ReleaseGPUTransferBuffer(g.gpu, tex_transfer_buf)
+
+	tex_transfer_mem := cast([^]byte)sdl.MapGPUTransferBuffer(g.gpu, tex_transfer_buf, false)
 
 	offset := 0
 	for side_pixels in pixels {
@@ -504,7 +504,7 @@ upload_cubemap_texture_sides :: proc(
 		offset += side_byte_size
 	}
 
-	sdl.UnmapGPUTransferBuffer(gpu, tex_transfer_buf)
+	sdl.UnmapGPUTransferBuffer(g.gpu, tex_transfer_buf)
 
 	offset = 0
 	for side in 0..<len(pixels) {
@@ -516,11 +516,10 @@ upload_cubemap_texture_sides :: proc(
 		offset += side_byte_size
 	}
 
-	sdl.ReleaseGPUTransferBuffer(gpu, tex_transfer_buf)
 	return texture
 }
 
-load_shader :: proc(device: ^sdl.GPUDevice, shaderfile: string) -> ^sdl.GPUShader {
+load_shader :: proc(shaderfile: string) -> ^sdl.GPUShader {
     stage: sdl.GPUShaderStage
     switch filepath.ext(shaderfile) {
         case ".vert":
@@ -533,7 +532,7 @@ load_shader :: proc(device: ^sdl.GPUDevice, shaderfile: string) -> ^sdl.GPUShade
     filename := strings.concatenate({shaderfile_path, ".spv"}, context.temp_allocator)
     code, ok := os.read_entire_file_from_filename(filename, context.temp_allocator); assert(ok)
     info := load_shader_info(shaderfile_path)
-    return sdl.CreateGPUShader(device, {
+    return sdl.CreateGPUShader(g.gpu, {
         code_size = len(code),
         code = raw_data(code),
         entrypoint = "main",
@@ -562,8 +561,8 @@ load_shader_info :: proc(shaderfile: string) -> Shader_Info {
 }
 
 create_skybox_pipeline :: proc() -> ^sdl.GPUGraphicsPipeline {
-    vert_shader := load_shader(g.gpu, "skybox.vert"); defer sdl.ReleaseGPUShader(g.gpu, vert_shader)
-    frag_shader := load_shader(g.gpu, "skybox.frag"); defer sdl.ReleaseGPUShader(g.gpu, frag_shader)
+    vert_shader := load_shader("skybox.vert"); defer sdl.ReleaseGPUShader(g.gpu, vert_shader)
+    frag_shader := load_shader("skybox.frag"); defer sdl.ReleaseGPUShader(g.gpu, frag_shader)
     format := sdl.GetGPUSwapchainTextureFormat(g.gpu, g.window)
     pipeline := sdl.CreateGPUGraphicsPipeline(g.gpu, {
         vertex_shader = vert_shader,
@@ -610,8 +609,8 @@ create_render_pipeline :: proc(
     num_vertex_buffers := 1,
     alpha_blend := false
 ) -> ^sdl.GPUGraphicsPipeline {
-    vert_shader := load_shader(g.gpu, vert_shader); defer sdl.ReleaseGPUShader(g.gpu, vert_shader)
-    frag_shader := load_shader(g.gpu, frag_shader); defer sdl.ReleaseGPUShader(g.gpu, frag_shader)
+    vert_shader := load_shader(vert_shader); defer sdl.ReleaseGPUShader(g.gpu, vert_shader)
+    frag_shader := load_shader(frag_shader); defer sdl.ReleaseGPUShader(g.gpu, frag_shader)
 
     vb_descriptions := make([]sdl.GPUVertexBufferDescription, num_vertex_buffers, context.temp_allocator)
     for i in 0..<num_vertex_buffers {

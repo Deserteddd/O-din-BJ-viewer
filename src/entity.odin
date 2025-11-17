@@ -1,7 +1,5 @@
 package obj_viewer
 
-import sdl "vendor:sdl3"
-
 Entity :: struct {
     id: i32,
     model: ^OBJModel,

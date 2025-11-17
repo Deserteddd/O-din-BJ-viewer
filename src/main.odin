@@ -81,7 +81,7 @@ init :: proc(state: ^AppState) {
     player = create_player()
 
     // load_scene(state, "savefile")
-    slab := load_obj_model("assets/slab", g.gpu)
+    slab := load_obj_model("assets/slab")
     append(&state.models, slab)
 
     for i in 0..<10000 {
@@ -104,7 +104,7 @@ load_scene :: proc(state: ^AppState, save_file: string) {
     save_file := load_save_file("savefile")
     defer free_save_file(save_file)
     for asset in save_file.assets {
-        model := load_obj_model(save_file.assets[asset], g.gpu)
+        model := load_obj_model(save_file.assets[asset])
         append(&state.models, model)
         for instance in save_file.instances {
             if instance.asset == asset {
@@ -177,7 +177,7 @@ run :: proc(state: ^AppState) {
                 }
             }
         }
-        vert_ubo := get_vertex_ubo_global(state^)
+        vert_ubo := get_vertex_ubo_global(player)
         frag_ubo := create_frag_ubo(state)
         if !props.ui_visible {
             update_camera(&player)
@@ -233,7 +233,7 @@ reset_player_pos :: proc(player: ^Player, at_origin := false) {
 }
 
 
-update :: proc(state: ^AppState, unpaused: bool, vp: matrix[4,4]f32) {
+update :: proc(state: ^AppState, unpaused: bool, vp: mat4) {
     using state
     debug_info.draw_call_count = 0
     new_ticks := sdl.GetTicks();

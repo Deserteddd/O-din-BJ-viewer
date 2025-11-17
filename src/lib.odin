@@ -11,6 +11,8 @@ vec3 :: [3]f32
 vec4 :: [4]f32
 mat4 :: matrix[4,4]f32
 
+to_radians :: math.to_radians_f32
+
 Globals :: struct {
     debug_draw: bool,
     frames:     u64,
@@ -116,8 +118,8 @@ load_height_map :: proc(path: string) -> ^HeightMap {
         usage = sdl.GPUTransferBufferUsage.UPLOAD,
         size = len_bytes,
     }); assert(transfer_buffer != nil)
-    vbo := create_buffer_with_data(g.gpu, transfer_buffer, copy_pass, {.VERTEX}, vertices[:])
-    ibo := create_buffer_with_data(g.gpu, transfer_buffer, copy_pass, {.INDEX}, indices[:])
+    vbo := create_buffer_with_data(transfer_buffer, copy_pass, {.VERTEX}, vertices[:])
+    ibo := create_buffer_with_data(transfer_buffer, copy_pass, {.INDEX}, indices[:])
 
     sdl.ReleaseGPUTransferBuffer(g.gpu, transfer_buffer)
     sdl.EndGPUCopyPass(copy_pass)

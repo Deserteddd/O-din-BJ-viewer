@@ -6,13 +6,13 @@ import "core:fmt"
 import sdl "vendor:sdl3"
 
 Player :: struct {
-    position: vec3,
-    speed: vec3,
-    rotation: vec3,
-    bbox: AABB,
-    airborne: bool,
-    noclip: bool,
-    checkpoint:         [2]vec3,                // Position, Rotation
+    position,
+    speed,
+    rotation:   vec3,
+    bbox:       AABB,
+    airborne,
+    noclip:     bool,
+    checkpoint: [2]vec3,                // Position, Rotation
 }
 
 create_player :: proc(pos: vec3 = 0) -> Player {

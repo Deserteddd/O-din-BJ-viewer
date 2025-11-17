@@ -8,7 +8,7 @@ import os "core:os/os2"
 
 BUILD_SHADERS :: false
 DEBUG         :: false
-ODIN_PATH     :: "C:\\odin-windows-amd64-dev-2025-03"
+ODIN_PATH     :: "C:\\odin-windows-amd64-dev-2025-02"
 main :: proc() {
     context.logger = log.create_console_logger()
     EXE :: "gaym.exe"

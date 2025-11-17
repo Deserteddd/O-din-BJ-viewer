@@ -53,7 +53,7 @@ delete_obj :: proc(model: OBJModel) {
     panic("Not implemented")
 }
 
-load_obj_model :: proc(dir_path: string, gpu: ^sdl.GPUDevice) -> OBJModel {
+load_obj_model :: proc(dir_path: string) -> OBJModel {
     fmt.println("Loading:", dir_path)
     defer free_all(context.temp_allocator)
     asset_handle, err := os.open(dir_path, 0, 0); assert(err == nil)
@@ -64,14 +64,14 @@ load_obj_model :: proc(dir_path: string, gpu: ^sdl.GPUDevice) -> OBJModel {
 
     materials: []OBJMaterial
     textures:  []Texture
-    cmd_buf   := sdl.AcquireGPUCommandBuffer(gpu); assert(cmd_buf != nil)
+    cmd_buf   := sdl.AcquireGPUCommandBuffer(g.gpu); assert(cmd_buf != nil)
     defer {ok := sdl.SubmitGPUCommandBuffer(cmd_buf); assert(ok)}
     copy_pass := sdl.BeginGPUCopyPass(cmd_buf); assert(copy_pass != nil)
     defer sdl.EndGPUCopyPass(copy_pass)
     for file in asset_dir {
         if len(file.name) < 5 do continue
         if file.name[len(file.name)-3:] == "mtl" { // If this crashes, add a check for name length
-            materials, textures = load_mtl(file.fullpath, gpu, copy_pass)
+            materials, textures = load_mtl(file.fullpath, copy_pass)
             break
         }
     }
@@ -106,14 +106,14 @@ load_obj_model :: proc(dir_path: string, gpu: ^sdl.GPUDevice) -> OBJModel {
         len(materials) * size_of(GPUMaterial) +
         len(aabbs) * 24 * size_of(vec3)
     )
-    transfer_buffer := sdl.CreateGPUTransferBuffer(gpu, {
+    transfer_buffer := sdl.CreateGPUTransferBuffer(g.gpu, {
         usage = .UPLOAD,
         size  = len_bytes
     }); assert(transfer_buffer != nil)
-    defer sdl.ReleaseGPUTransferBuffer(gpu, transfer_buffer)
-    vbo              := create_buffer_with_data(gpu, transfer_buffer, copy_pass, {.VERTEX}, vertices)
-    material_buffer  := create_buffer_with_data(gpu, transfer_buffer, copy_pass, {.GRAPHICS_STORAGE_READ}, material_buffer_gpu)
-    aabb_vbo         := create_buffer_with_data(gpu, transfer_buffer, copy_pass, {.VERTEX}, aabb_verts[:])
+    defer sdl.ReleaseGPUTransferBuffer(g.gpu, transfer_buffer)
+    vbo              := create_buffer_with_data(transfer_buffer, copy_pass, {.VERTEX}, vertices)
+    material_buffer  := create_buffer_with_data(transfer_buffer, copy_pass, {.GRAPHICS_STORAGE_READ}, material_buffer_gpu)
+    aabb_vbo         := create_buffer_with_data(transfer_buffer, copy_pass, {.VERTEX}, aabb_verts[:])
     assert(vbo != nil); assert(material_buffer != nil); assert(aabb_vbo != nil)
 
 
@@ -208,7 +208,6 @@ load_obj :: proc(
 @(private = "file")
 load_mtl :: proc(
     mtl_path: string, 
-    gpu: ^sdl.GPUDevice, 
     copy_pass: ^sdl.GPUCopyPass
 ) -> ([]OBJMaterial, []Texture) {
     materials: [dynamic]OBJMaterial
@@ -257,7 +256,7 @@ load_mtl :: proc(
                         tex_path = strings.to_string(path_builder)
                     }
                     pixels, size := load_pixels(tex_path)
-                    tex := upload_texture(gpu, copy_pass, pixels, {u32(size.x), u32(size.y)})
+                    tex := upload_texture(copy_pass, pixels, {u32(size.x), u32(size.y)})
                     free_pixels(pixels)
                     append(&textures,  Texture {
                         path = strings.clone(tex_path),

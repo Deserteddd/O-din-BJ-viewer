@@ -29,7 +29,7 @@ vector_normalize :: proc(v: ^vec3) -> f32 {
     return length
 }
 
-create_frustum_planes :: proc "contextless" (vp: matrix[4,4]f32) -> [6]vec4 {
+create_frustum_planes :: proc "contextless" (vp: mat4) -> [6]vec4 {
     t := linalg.transpose(vp)
     return {
         t[3]+t[0],

@@ -43,7 +43,7 @@ load_sprite :: proc(path: string) -> Sprite {
     
     pixels, size := load_pixels(path); assert(pixels != nil)
     size_u32: [2]u32 = {u32(size.x), u32(size.y)}
-    texture := upload_texture(g.gpu, copy_pass, pixels, size_u32)
+    texture := upload_texture(copy_pass, pixels, size_u32)
     assert(texture != nil)
     free_pixels(pixels)
 
@@ -98,7 +98,7 @@ init_quad :: proc(
     }
     len_bytes := u32(len(verts) * size_of(Vertex2D))
 
-    vbo, ibo := upload_polygon(g.gpu, copy_pass, verts[:], indices[:])
+    vbo, ibo := upload_polygon(copy_pass, verts[:], indices[:])
     return Quad {vbo, ibo}
 }
 
@@ -217,22 +217,21 @@ draw_imgui :: proc(state: ^AppState, frame: Frame) {
 }
 
 upload_polygon :: proc(
-    gpu:            ^sdl.GPUDevice,
     copy_pass:      ^sdl.GPUCopyPass,
     verts: []Vertex2D,
     indices: []u16
 ) -> (vbo, ibo: ^sdl.GPUBuffer){
     len_bytes := u32(len(verts) * size_of(Vertex2D))
 
-    transfer_buffer := sdl.CreateGPUTransferBuffer(gpu, {
+    transfer_buffer := sdl.CreateGPUTransferBuffer(g.gpu, {
         usage = sdl.GPUTransferBufferUsage.UPLOAD,
         size = len_bytes,
     }); assert(transfer_buffer != nil)
 
 
-    vbo = create_buffer_with_data(gpu, transfer_buffer, copy_pass, {.VERTEX}, verts[:]); assert(vbo != nil)
-    ibo = create_buffer_with_data(gpu, transfer_buffer, copy_pass, {.INDEX}, indices[:]); assert(ibo != nil)
+    vbo = create_buffer_with_data(transfer_buffer, copy_pass, {.VERTEX}, verts[:]); assert(vbo != nil)
+    ibo = create_buffer_with_data(transfer_buffer, copy_pass, {.INDEX}, indices[:]); assert(ibo != nil)
 
-    sdl.ReleaseGPUTransferBuffer(gpu, transfer_buffer)
+    sdl.ReleaseGPUTransferBuffer(g.gpu, transfer_buffer)
     return
 }
