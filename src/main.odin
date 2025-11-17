@@ -157,10 +157,8 @@ run :: proc(state: ^AppState) {
         submit_3d(&frame)
         assert(frame.render_pass == nil)
 
-        begin_2d(state.renderer, &frame)
-        for sprite in state.sprites {
-            draw_sprite(sprite, frame)
-        } 
+        begin_2d(renderer, &frame)
+        draw_crosshair(renderer, frame)
         submit_2d(&frame)
         draw_imgui(state, frame)
 
@@ -172,7 +170,6 @@ update :: proc(state: ^AppState) {
     using state
     switch g.mode {
         case .PLAY:
-
             update_game(state)
         case .EDIT:
             update_editor(state)

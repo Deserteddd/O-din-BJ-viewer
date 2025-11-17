@@ -36,12 +36,7 @@ UBO2D :: struct {
     win_size: vec2
 }
 
-load_sprite :: proc(path: string) -> Sprite {
-    copy_commands := sdl.AcquireGPUCommandBuffer(g.gpu); assert(copy_commands != nil)
-    copy_pass := sdl.BeginGPUCopyPass(copy_commands); assert(copy_pass != nil)
-    defer {ok := sdl.SubmitGPUCommandBuffer(copy_commands); assert(ok)}
-    defer sdl.EndGPUCopyPass(copy_pass)
-    
+upload_sprite :: proc(path: string, copy_pass: ^sdl.GPUCopyPass) -> Sprite {
     pixels, size := load_pixels(path); assert(pixels != nil)
     size_u32: [2]u32 = {u32(size.x), u32(size.y)}
     texture := upload_texture(copy_pass, pixels, size_u32)
@@ -69,7 +64,6 @@ init_r2d :: proc(renderer: Renderer) {
     copy_pass := sdl.BeginGPUCopyPass(copy_commands); assert(copy_pass != nil)
     defer sdl.EndGPUCopyPass(copy_pass)
 
-    crosshair := load_sprite("assets/crosshair.png")
     {
         using renderer.r2d
         ui_pipeline = create_render_pipeline(
@@ -81,7 +75,7 @@ init_r2d :: proc(renderer: Renderer) {
                 num_vertex_buffers = 2,
                 alpha_blend = true
         )
-        crosshair = crosshair
+        crosshair = upload_sprite("assets/crosshair.png", copy_pass)
         quad = init_quad(copy_pass)
     }
 }
@@ -130,13 +124,14 @@ begin_2d :: proc(renderer: Renderer, frame: ^Frame) {
 }
 
 draw_crosshair :: proc(renderer: Renderer, frame: Frame) {
+    assert(renderer.r2d.crosshair.sampler != nil)
     draw_sprite(renderer.r2d.crosshair, frame)
 }
 
 draw_sprite :: proc(sprite: Sprite, frame: Frame, pos: vec2 = 0, scale: f32 = 1) {
     using frame
     if render_pass == nil do panic("Render pass not in progress")
-    // Sprite will be centered if no position is provided
+
     x := pos == 0 ? win_size.x/2 - f32(sprite.size.x)/2 : pos.x
     y := pos == 0 ? win_size.y/2 - f32(sprite.size.y)/2 : pos.y
 
