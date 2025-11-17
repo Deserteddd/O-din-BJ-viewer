@@ -32,10 +32,9 @@ get_player_translation :: proc(p: Player) -> [2]vec3 {
     }
 }
 
-update_player :: proc(state: ^AppState, dt: f32, vp: matrix[4,4]f32) #no_bounds_check {
+update_player :: proc(state: ^AppState, dt: f32) {
     using state, player
-    defer props.lmb_pressed = false
-    g: f32 = 25
+    G: f32 = 25
     wishveloc := player_wish_speed(player)
     airborne_at_start := airborne
     if noclip {
@@ -54,7 +53,7 @@ update_player :: proc(state: ^AppState, dt: f32, vp: matrix[4,4]f32) #no_bounds_
         speed += wishveloc
     } else {
         air_accelerate(&wishveloc, &player, dt)
-        speed.y -= g * dt
+        speed.y -= G * dt
         speed.y = math.max(speed.y, -20)
     }
     delta_pos := speed * dt
@@ -63,7 +62,8 @@ update_player :: proc(state: ^AppState, dt: f32, vp: matrix[4,4]f32) #no_bounds_
     bbox.max += delta_pos
     found_collision: bool
     
-    ray_origin, ray_dir := ray_from_screen(vp)
+    win_size := get_window_size()
+    ray_origin, ray_dir := ray_from_screen(player, win_size/2, win_size)
     closest_hit: f32 = math.F32_MAX
     closest_entity: i32
 
@@ -87,10 +87,12 @@ update_player :: proc(state: ^AppState, dt: f32, vp: matrix[4,4]f32) #no_bounds_
                 bbox.min += mtv
                 bbox.max += mtv
             }
-            intersection := ray_intersect_aabb(ray_origin, ray_dir, aabb)
-            if intersection != -1 && intersection < closest_hit {
-                closest_hit = intersection
-                closest_entity = entity.id
+            if g.lmb_down {
+                intersection := ray_intersect_aabb(ray_origin, ray_dir, aabb)
+                if intersection != -1 && intersection < closest_hit {
+                    closest_hit = intersection
+                    closest_entity = entity.id
+                }
             }
 
         }
@@ -103,7 +105,7 @@ update_player :: proc(state: ^AppState, dt: f32, vp: matrix[4,4]f32) #no_bounds_
 
     if linalg.length(speed.xz) > 20 do speed.xz *= 0.9
 
-    if closest_entity != 0 && state.props.lmb_pressed == true {
+    if g.lmb_down {
         for &e, i in state.entities {
             if e.id == closest_entity {
                 unordered_remove_soa(&state.entities, i)
@@ -111,11 +113,6 @@ update_player :: proc(state: ^AppState, dt: f32, vp: matrix[4,4]f32) #no_bounds_
             }
         }
     }
-    
-    if position.y < -5 {
-        reset_player_pos(&state.player)
-    }
-
 }
 
 update_camera :: proc(player: ^Player) {

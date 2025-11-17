@@ -188,12 +188,13 @@ RND_ToggleFullscreen :: proc(state: ^AppState) {
     })
     sdl.ReleaseGPUTexture(g.gpu, depth_texture)
     depth_texture = depth
-    if state.props.ui_visible {
-        ok = sdl.ShowCursor(); assert(ok)
-        ok = sdl.SetWindowRelativeMouseMode(g.window, false); assert(ok)
-    } else {
-        ok = sdl.SetWindowRelativeMouseMode(g.window, true)
-        ok = sdl.HideCursor(); assert(ok)
+    switch g.mode {
+        case .EDIT:
+            ok = sdl.ShowCursor(); assert(ok)
+            ok = sdl.SetWindowRelativeMouseMode(g.window, false); assert(ok)
+        case .PLAY:
+            ok = sdl.SetWindowRelativeMouseMode(g.window, true)
+            ok = sdl.HideCursor(); assert(ok)
     }
     assert(ok)
     init_imgui(state)
@@ -224,7 +225,7 @@ frame_begin :: proc(
 }
 
 get_vertex_ubo_global :: proc(player: Player) -> VertUBOGlobal {
-    proj_matrix := create_proj_matrix(90)
+    proj_matrix := create_proj_matrix()
     view_matrix := create_view_matrix(player)
     return VertUBOGlobal {
         vp = proj_matrix * view_matrix,
@@ -292,30 +293,30 @@ submit_3d :: proc(frame: ^Frame) {
 }
 
 render_3D :: proc(state: ^AppState, frame: ^Frame) {
-    using state, frame
+    using state
 
-    assert(cmd_buff  != nil)
-    assert(swapchain != nil)
-    assert(render_pass != nil)
+    assert(frame.cmd_buff  != nil)
+    assert(frame.swapchain != nil)
+    assert(frame.render_pass != nil)
 
     // Heightmap
     if height_map != nil {
         assert(renderer.heightmap_pipeline != nil)
-        sdl.BindGPUGraphicsPipeline(render_pass, renderer.heightmap_pipeline)
+        sdl.BindGPUGraphicsPipeline(frame.render_pass, renderer.heightmap_pipeline)
         debug_info.draw_call_count += 1
-        render_heightmap(height_map^, frame^)
+        render_heightmap(state.height_map^, frame^)
     }
 
     // Entities
     fallback_binding := sdl.GPUTextureSamplerBinding {
-        texture = renderer.fallback_texture,
-        sampler = renderer.default_sampler
+        texture = state.renderer.fallback_texture,
+        sampler = state.renderer.default_sampler
     }
-    sdl.BindGPUGraphicsPipeline(render_pass, renderer.obj_pipeline)
+    sdl.BindGPUGraphicsPipeline(frame.render_pass, renderer.obj_pipeline)
     for &model in state.models {
         bindings: [1]sdl.GPUBufferBinding = {{buffer = model.vbo}}
-        sdl.BindGPUVertexBuffers(render_pass, 0, &bindings[0], 1)
-        sdl.BindGPUFragmentStorageBuffers(render_pass, 0, &model.material_buffer, 1)
+        sdl.BindGPUVertexBuffers(frame.render_pass, 0, &bindings[0], 1)
+        sdl.BindGPUFragmentStorageBuffers(frame.render_pass, 0, &model.material_buffer, 1)
         tex_bindings: [8]sdl.GPUTextureSamplerBinding
         for tex, i in 0..<8 {
             tex_bindings[i] = len(model.textures) > i ? {
@@ -327,7 +328,7 @@ render_3D :: proc(state: ^AppState, frame: ^Frame) {
         sdl.BindGPUFragmentSamplers(frame.render_pass, 0, raw_data(tex_bindings[:]), len(tex_bindings))
         for entity in state.entities {
             if &model != entity.model do continue
-            if !is_visible(entity, frustum_planes) do continue
+            if !is_visible(entity, frame.frustum_planes) do continue
 
             model_matrix := linalg.matrix4_from_trs_f32(entity.transform.translation, entity.transform.rotation, 1)
             normal_matrix := linalg.inverse_transpose(model_matrix)
@@ -335,25 +336,29 @@ render_3D :: proc(state: ^AppState, frame: ^Frame) {
                 model_mat = model_matrix,
                 normal_mat = normal_matrix
             }
-            sdl.PushGPUVertexUniformData(cmd_buff, 1, &vert_ubo_local, size_of(VertUBOLocal))
+            sdl.PushGPUVertexUniformData(frame.cmd_buff, 1, &vert_ubo_local, size_of(VertUBOLocal))
             debug_info.draw_call_count += 1
-            sdl.DrawGPUPrimitives(render_pass, model.num_vertices, 1, 0, 0)           
+            sdl.DrawGPUPrimitives(frame.render_pass, model.num_vertices, 1, 0, 0)           
         }
     }
 
     // Bounding Box
     if g.debug_draw {
-        sdl.BindGPUGraphicsPipeline(render_pass, renderer.bbox_pipeline)
+        sdl.BindGPUGraphicsPipeline(frame.render_pass, renderer.bbox_pipeline)
         for &model in models {
             bindings: [1]sdl.GPUBufferBinding = { sdl.GPUBufferBinding { buffer = model.aabb_vbo } } 
-            sdl.BindGPUVertexBuffers(render_pass, 0, &bindings[0], 1)
+            sdl.BindGPUVertexBuffers(frame.render_pass, 0, &bindings[0], 1)
             for entity in entities {
                 if entity.model != &model do continue
-                if !is_visible(entity, frustum_planes) do continue
-                model_matrix := linalg.matrix4_translate_f32(entity.transform.translation)
-                sdl.PushGPUVertexUniformData(cmd_buff, 1, &model_matrix, size_of(mat4))
+                if !is_visible(entity, frame.frustum_planes) do continue
+                model_matrix := linalg.matrix4_from_trs(
+                    entity.transform.translation,
+                    entity.transform.rotation,
+                    entity.transform.scale
+                )
+                sdl.PushGPUVertexUniformData(frame.cmd_buff, 1, &model_matrix, size_of(mat4))
                 debug_info.draw_call_count += 1
-                sdl.DrawGPUPrimitives(render_pass, u32(24*len(model.aabbs)), 1, 0, 0)
+                sdl.DrawGPUPrimitives(frame.render_pass, u32(24*len(model.aabbs)), 1, 0, 0)
             }
             // using model
         }
@@ -361,13 +366,13 @@ render_3D :: proc(state: ^AppState, frame: ^Frame) {
 
     // Skybox
     {
-        sdl.BindGPUGraphicsPipeline(render_pass, renderer.skybox_pipeline)
-        sdl.BindGPUFragmentSamplers(render_pass, 0, &(sdl.GPUTextureSamplerBinding  {
+        sdl.BindGPUGraphicsPipeline(frame.render_pass, renderer.skybox_pipeline)
+        sdl.BindGPUFragmentSamplers(frame.render_pass, 0, &(sdl.GPUTextureSamplerBinding  {
             texture = renderer.skybox_texture,
             sampler = renderer.default_sampler
         }), 1)
         debug_info.draw_call_count += 1
-        sdl.DrawGPUPrimitives(render_pass, 3, 1, 0, 0)
+        sdl.DrawGPUPrimitives(frame.render_pass, 3, 1, 0, 0)
     }
 
 }
@@ -386,12 +391,12 @@ create_view_matrix :: proc(player: Player) -> linalg.Matrix4f32 {
     return pitch_matrix * yaw_matrix * position_matrix
 }
 
-create_proj_matrix :: proc(fov: f32) -> mat4 {
+create_proj_matrix :: proc() -> mat4 {
     using linalg
     win_size := get_window_size()
     aspect := win_size.x / win_size.y
     return matrix4_perspective_f32(
-        to_radians(fov), 
+        to_radians(g.fov), 
         aspect, 
         0.01, 
         1000
@@ -400,11 +405,8 @@ create_proj_matrix :: proc(fov: f32) -> mat4 {
 
 get_window_size :: proc() -> vec2 {
     x, y: i32
-    ok := sdl.GetWindowSize(g.window, &x, &y)
-    if ok do return {f32(x), f32(y)}
-    sdl.ClearError()
-    log.logf(.Error, "SDL Error: {}", sdl.GetError())
-    panic("")
+    ok := sdl.GetWindowSize(g.window, &x, &y); assert(ok)
+    return {f32(x), f32(y)}
 }
 
 create_buffer_with_data :: proc(

@@ -1,5 +1,6 @@
 package obj_viewer
 import "core:math"
+import "vendor:windows/GameInput"
 import "core:math/rand"
 import "core:strings"
 import "core:os"
@@ -14,11 +15,19 @@ mat4 :: matrix[4,4]f32
 to_radians :: math.to_radians_f32
 
 Globals :: struct {
-    debug_draw: bool,
-    frames:     u64,
-    last_ticks: u64,
-    window:     ^sdl.Window,
+    mode:       Mode,
     gpu:        ^sdl.GPUDevice,
+    window:     ^sdl.Window,
+    last_ticks: u64,
+    fov:        f32,
+    lmb_down,
+    rmb_down,
+    debug_draw: bool,
+}
+
+Mode :: enum {
+    PLAY,
+    EDIT
 }
 
 TRANSFORM_IDENTITY :: Transform {

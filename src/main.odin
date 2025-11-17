@@ -18,6 +18,7 @@ PRESENT_MODE: sdl.GPUPresentMode = .IMMEDIATE
 default_context: runtime.Context
 g: Globals = {
     debug_draw = false,
+    fov        = 90
 }
 
 main :: proc() {
@@ -36,17 +37,9 @@ AppState :: struct {
     ui_context:        ^im.Context,
     models:             [dynamic]OBJModel,
     entities:       #soa[dynamic]Entity,
-    props:              Props,
     slabs:              u32,
     sprites:            [dynamic]Sprite,
     height_map:         ^HeightMap,
-}
-
-Props :: struct {
-    ui_visible,
-    attatch_light_to_player,
-    draw_aabbs,
-    lmb_pressed: bool
 }
 
 DebugInfo :: struct {
@@ -94,10 +87,6 @@ init :: proc(state: ^AppState) {
         
         set_entity_position(state, entity, pos)
     }
-
-    state.props.attatch_light_to_player = true
-    crosshair := load_sprite("assets/crosshair.png")
-    append(&sprites, crosshair)
 }
 
 load_scene :: proc(state: ^AppState, save_file: string) {
@@ -115,27 +104,7 @@ load_scene :: proc(state: ^AppState, save_file: string) {
     }
 }
 
-init_imgui :: proc(state: ^AppState) {
-    assert(g.window != nil)
-    if state.ui_context != nil {
-        im_sdlgpu.Shutdown()
-        im_sdl.Shutdown()
-        im.Shutdown()
-        im.DestroyContext(state.ui_context)
-    }
-    im.CHECKVERSION()
-    state.ui_context = im.CreateContext()
-    using state.renderer
-    im_sdl.InitForSDLGPU(g.window)
-    im_sdlgpu.Init(&{
-        Device = g.gpu,
-        ColorTargetFormat = sdl.GetGPUSwapchainTextureFormat(g.gpu, g.window)
-    })
-    style := im.GetStyle()
-    for &color in style.Colors {
-        color.rgb = linalg.pow(color.rgb, 2.2)
-    }
-}
+
 
 run :: proc(state: ^AppState) {
     paused: bool
@@ -143,8 +112,11 @@ run :: proc(state: ^AppState) {
     using state
 
     main_loop: for {
-        defer free_all(context.temp_allocator)
-        defer g.frames += 1
+        defer {
+            free_all(context.temp_allocator)
+            g.lmb_down = false
+            g.rmb_down = false
+        }
         now := time.now()
         ev: sdl.Event
         for sdl.PollEvent(&ev) {
@@ -155,7 +127,6 @@ run :: proc(state: ^AppState) {
                 case .KEY_DOWN: #partial switch ev.key.scancode {
                     case .ESCAPE:
                         toggle_ui(state)
-                        if props.ui_visible do paused = true
                     case .Q:
                         if !player.airborne do player.checkpoint = get_player_translation(player)
                     case .E:
@@ -166,25 +137,18 @@ run :: proc(state: ^AppState) {
                         if .LCTRL in ev.key.mod do break main_loop
                     case .N: player.noclip = !player.noclip
                 }
-                case .MOUSE_BUTTON_DOWN: if !state.props.ui_visible {
-                    switch ev.button.button {
-                        case 1:
-                            state.props.lmb_pressed = true
-                        case 3:
-                            new, ok := entity_from_model(state, "slab"); assert(ok)
-                            set_entity_position(state, new, player.position)
-                    }
+                case .MOUSE_BUTTON_DOWN: switch ev.button.button {
+                    case 1: g.lmb_down = true
+                    case 3: g.rmb_down = true
+
                 }
             }
         }
-        vert_ubo := get_vertex_ubo_global(player)
-        frag_ubo := create_frag_ubo(state)
-        if !props.ui_visible {
-            update_camera(&player)
-            update(state, paused, vert_ubo.vp)
-            paused = false
-        }
+        update(state)
 
+        vert_ubo := get_vertex_ubo_global(player)
+        debug_info.draw_call_count = 0
+        frag_ubo := create_frag_ubo(state)
         frame := frame_begin(vert_ubo, frag_ubo)
         defer frame_submit(frame)
 
@@ -204,16 +168,54 @@ run :: proc(state: ^AppState) {
     }
 }
 
+update :: proc(state: ^AppState) {
+    using state
+    switch g.mode {
+        case .PLAY:
+
+            update_game(state)
+        case .EDIT:
+            update_editor(state)
+    }
+}
+
+update_editor :: proc(state: ^AppState) {
+
+}
+
+update_game :: proc(state: ^AppState) {
+    using state
+    new_ticks := sdl.GetTicks();
+    dt := f32(new_ticks - g.last_ticks) / 1000
+    g.last_ticks = new_ticks
+    update_player(state, dt)
+    update_camera(&player)
+
+    if g.rmb_down {
+        new, ok := entity_from_model(state, "slab"); assert(ok)
+        set_entity_position(state, new, player.position)
+    }
+
+    debug_info.player_speed = linalg.length(player.speed)
+    renderer.light.position = {
+        player.position.x,
+        player.bbox.max.y,
+        player.position.z
+    }
+}
+
+
 toggle_ui :: proc(state: ^AppState) {
-    using state, state.props
-    ui_visible = !ui_visible
-    if ui_visible {
-        ok := sdl.ShowCursor(); assert(ok)
-        ok = sdl.SetWindowRelativeMouseMode(g.window, false); assert(ok)
-        sdl.WarpMouseInWindow(g.window, 700, 90)
-    } else {
-        ok := sdl.HideCursor(); assert(ok)
-        ok = sdl.SetWindowRelativeMouseMode(g.window, true); assert(ok)
+    switch g.mode {
+        case .PLAY:
+            g.mode = .EDIT
+            ok := sdl.ShowCursor(); assert(ok)
+            ok = sdl.SetWindowRelativeMouseMode(g.window, false); assert(ok)
+            sdl.WarpMouseInWindow(g.window, 700, 90)
+        case .EDIT:
+            g.mode = .PLAY
+            ok := sdl.HideCursor(); assert(ok)
+            ok = sdl.SetWindowRelativeMouseMode(g.window, true); assert(ok)
     }
 }
 
@@ -232,23 +234,3 @@ reset_player_pos :: proc(player: ^Player, at_origin := false) {
     }
 }
 
-
-update :: proc(state: ^AppState, unpaused: bool, vp: mat4) {
-    using state
-    debug_info.draw_call_count = 0
-    new_ticks := sdl.GetTicks();
-    dt := f32(new_ticks - g.last_ticks) / 1000
-    if unpaused do dt = 0.01666
-    g.last_ticks = new_ticks
-    if !props.ui_visible {
-        update_player(state, dt, vp)
-    }
-    debug_info.player_speed = linalg.length(player.speed)
-    if props.attatch_light_to_player {
-        renderer.light.position = {
-            player.position.x,
-            player.bbox.max.y,
-            player.position.z
-        }
-    }
-}

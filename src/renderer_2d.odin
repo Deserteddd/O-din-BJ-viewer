@@ -1,7 +1,7 @@
 package obj_viewer
 
 import "core:time"
-import "core:math"
+import "core:math/linalg"
 import "core:strings"
 import sdl "vendor:sdl3"
 import im "shared:imgui"
@@ -15,7 +15,8 @@ Vertex2D :: struct {
 
 R2D :: struct {
     ui_pipeline: ^sdl.GPUGraphicsPipeline,
-    quad: Quad,
+    crosshair:   Sprite,
+    quad:        Quad,
 }
 
 Sprite :: struct {
@@ -68,6 +69,7 @@ init_r2d :: proc(renderer: Renderer) {
     copy_pass := sdl.BeginGPUCopyPass(copy_commands); assert(copy_pass != nil)
     defer sdl.EndGPUCopyPass(copy_pass)
 
+    crosshair := load_sprite("assets/crosshair.png")
     {
         using renderer.r2d
         ui_pipeline = create_render_pipeline(
@@ -79,6 +81,7 @@ init_r2d :: proc(renderer: Renderer) {
                 num_vertex_buffers = 2,
                 alpha_blend = true
         )
+        crosshair = crosshair
         quad = init_quad(copy_pass)
     }
 }
@@ -126,6 +129,10 @@ begin_2d :: proc(renderer: Renderer, frame: ^Frame) {
     sdl.BindGPUIndexBuffer(render_pass, bindings[1], ._16BIT)
 }
 
+draw_crosshair :: proc(renderer: Renderer, frame: Frame) {
+    draw_sprite(renderer.r2d.crosshair, frame)
+}
+
 draw_sprite :: proc(sprite: Sprite, frame: Frame, pos: vec2 = 0, scale: f32 = 1) {
     using frame
     if render_pass == nil do panic("Render pass not in progress")
@@ -157,23 +164,20 @@ draw_imgui :: proc(state: ^AppState, frame: Frame) {
     im_sdlgpu.NewFrame()
     im_sdl.NewFrame()
     im.NewFrame()
-    if props.ui_visible {
+    if g.mode == .EDIT {
         if im.Begin("Properties") {
             if im.BeginTabBar("PropertiesTabs") {
                 // --- General Tab ---
                 if im.BeginTabItem("General") {
                     im.LabelText("", "General")
                     if height_map != nil do im.DragFloat3("Heightmap scale", &height_map.scale, 0.001, 0, 2)
+                    im.DragFloat("FOV", &g.fov, 1, 50, 140)
                     im.EndTabItem()
                 }
 
                 // --- Point Light Tab ---
                 if im.BeginTabItem("Point Light") {
                     im.LabelText("", "Point Light")
-                    if !props.attatch_light_to_player {
-                        im.DragFloat3("position", &renderer.light.position, 0.5, -200, 200)
-                    }
-                    im.Checkbox("Snap to player", &props.attatch_light_to_player)
                     im.DragFloat("intensity", &renderer.light.power, 10, 0, 10000)
                     im.ColorPicker3("color", &renderer.light.color, {.InputRGB})
                     im.EndTabItem()
@@ -189,7 +193,7 @@ draw_imgui :: proc(state: ^AppState, frame: Frame) {
         sdl.GetWindowSize(g.window, &w, &h)
         im.SetWindowPos(vec2{f32(w-140), 0})
         im.SetWindowSize(vec2{140, 0})
-        frame_time_float := i32(math.round(1/f32(time.duration_seconds(debug_info.frame_time))))
+        frame_time_float := i32(linalg.round(1/f32(time.duration_seconds(debug_info.frame_time))))
         im.SetNextItemWidth(50)
         im.DragInt("FPS", &frame_time_float)
         rendered := i32(debug_info.draw_call_count)
@@ -217,9 +221,9 @@ draw_imgui :: proc(state: ^AppState, frame: Frame) {
 }
 
 upload_polygon :: proc(
-    copy_pass:      ^sdl.GPUCopyPass,
-    verts: []Vertex2D,
-    indices: []u16
+    copy_pass:   ^sdl.GPUCopyPass,
+    verts:      []Vertex2D,
+    indices:    []u16
 ) -> (vbo, ibo: ^sdl.GPUBuffer){
     len_bytes := u32(len(verts) * size_of(Vertex2D))
 
@@ -234,4 +238,26 @@ upload_polygon :: proc(
 
     sdl.ReleaseGPUTransferBuffer(g.gpu, transfer_buffer)
     return
+}
+
+init_imgui :: proc(state: ^AppState) {
+    assert(g.window != nil)
+    if state.ui_context != nil {
+        im_sdlgpu.Shutdown()
+        im_sdl.Shutdown()
+        im.Shutdown()
+        im.DestroyContext(state.ui_context)
+    }
+    im.CHECKVERSION()
+    state.ui_context = im.CreateContext()
+    using state.renderer
+    im_sdl.InitForSDLGPU(g.window)
+    im_sdlgpu.Init(&{
+        Device = g.gpu,
+        ColorTargetFormat = sdl.GetGPUSwapchainTextureFormat(g.gpu, g.window)
+    })
+    style := im.GetStyle()
+    for &color in style.Colors {
+        color.rgb = linalg.pow(color.rgb, 2.2)
+    }
 }

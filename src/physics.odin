@@ -93,14 +93,17 @@ resolve_aabb_collision_mtv :: proc(moving: AABB, solid: AABB) -> vec3 {
 }
 
 ray_from_screen :: proc(
-    vp: matrix[4,4]f32,
-    // screen_pos: vec2,
-    // viewport_size: vec2
-) -> (origin: vec3, direction: vec3) {
+    player:        Player,
+    screen_pos:    vec2,
+    viewport_size: vec2
+) -> (origin, direction: vec3) {
+    proj_matrix := create_proj_matrix()
+    view_matrix := create_view_matrix(player)
+    vp := proj_matrix * view_matrix
     // normalize to NDC (-1..1)
-    // ndc_x := (2.0 * screen_pos.x) / viewport_size.x - 1.0
-    // ndc_y := 1.0 - (2.0 * screen_pos.y) / viewport_size.y // flip y if needed
-    ndc_x, ndc_y: f32 = 0, 0
+    ndc_x := (2.0 * screen_pos.x) / viewport_size.x - 1.0
+    ndc_y := 1.0 - (2.0 * screen_pos.y) / viewport_size.y // flip y if needed
+    // ndc_x, ndc_y: f32 = 0, 0
     near_point := vec4{ndc_x, ndc_y, -1.0, 1.0}
     far_point  := vec4{ndc_x, ndc_y,  1.0, 1.0}
 
