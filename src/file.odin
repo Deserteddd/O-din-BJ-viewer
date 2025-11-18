@@ -5,6 +5,7 @@ import "base:runtime"
 import "core:slice"
 import "core:os"
 import "core:encoding/json"
+import "core:log"
 import "core:fmt"
 import stbi "vendor:stb/image"
 import sdl "vendor:sdl3"
@@ -49,6 +50,7 @@ write_save_file :: proc(state: AppState) {
     assert(err == nil)
     ok := os.write_entire_file("savefile.json", json_data)
     assert(ok)
+    log.logf(.Info, "Saved successfully")
 }
 
 load_scene :: proc(state: ^AppState, save_file: string) {
@@ -85,7 +87,7 @@ free_save_file :: proc(savefile: SaveFile) {
     delete(savefile.instances)
 }
 
-load_height_map :: proc(path: string) -> ^HeightMap {
+load_height_map :: proc(path: string) -> HeightMap {
     height_path  := strings.concatenate({path, "/height_map.png"})
     diffuse_path := strings.concatenate({path, "/diffuse.png"})
     pixels, size := load_height_map_pixels(height_path); defer free_pixels(pixels)
@@ -146,7 +148,7 @@ load_height_map :: proc(path: string) -> ^HeightMap {
         {.FLOAT3, .FLOAT3},
         true,
     )
-    height_map := new(HeightMap)
+    height_map: HeightMap
     height_map.num_indices  = u32(len(indices))
     height_map.vbo = vbo
     height_map.ibo = ibo

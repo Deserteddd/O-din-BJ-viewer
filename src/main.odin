@@ -21,6 +21,7 @@ g: Globals = {
 }
 
 main :: proc() {
+    context.logger = log.create_console_logger()
     fmt.println("MAIN: initing")
     state: AppState = {}
     init(&state)
@@ -35,7 +36,6 @@ AppState :: struct {
     debug_info:         DebugInfo,
     renderer:           Renderer,
     ui_context:        ^im.Context,
-    height_map:        ^HeightMap,
     sprites:            [dynamic]Sprite,
     models:             [dynamic]OBJModel,
     entities:       #soa[dynamic]Entity,
@@ -57,7 +57,6 @@ DebugInfo :: struct {
 
 init :: proc(state: ^AppState) {
     using state
-    context.logger = log.create_console_logger()
     default_context = context
     sdl.SetLogPriorities(.VERBOSE)
     sdl.SetLogOutputFunction(
@@ -104,20 +103,7 @@ stop_dragging :: proc(editor: ^Editor) {
 }
 
 run :: proc(state: ^AppState) {
-    when ODIN_DEBUG {
-		track: mem.Tracking_Allocator
-		mem.tracking_allocator_init(&track, context.allocator)
-		context.allocator = mem.tracking_allocator(&track)
-
-		defer {
-			if len(track.allocation_map) > 0 {
-				for _, entry in track.allocation_map {
-					fmt.eprintf("%v leaked %v bytes\n", entry.location, entry.size)
-				}
-			}
-			mem.tracking_allocator_destroy(&track)
-		}
-	}
+    context.allocator = runtime.panic_allocator()
 
     free_all(context.temp_allocator)
     using state
@@ -156,6 +142,8 @@ run :: proc(state: ^AppState) {
                         if g.mode == .EDIT do remove_selected_entity(state)
                     case .RETURN:
                         if editor.dragging do stop_dragging(&editor)
+                    case .S:
+                        if .LCTRL in ev.key.mod do write_save_file(state^)
                 }
                 case .MOUSE_BUTTON_DOWN: switch ev.button.button {
                     case 1: g.lmb_down = true
@@ -167,7 +155,6 @@ run :: proc(state: ^AppState) {
             }
         }
         update(state)
-
         vert_ubo := get_vertex_ubo_global(player)
         debug_info.draw_call_count = 0
         frag_ubo := create_frag_ubo(state)
@@ -192,7 +179,6 @@ run :: proc(state: ^AppState) {
         if !dragging && editor.dragging do start_dragging(&state.editor)
         state.debug_info.frame_time = time.since(now)
     }
-    write_save_file(state^)
 }
 
 update :: proc(state: ^AppState) {

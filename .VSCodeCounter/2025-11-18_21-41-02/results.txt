@@ -1,0 +1,66 @@
+Date : 2025-11-18 21:41:02
+Directory : c:\Users\eelis\Koodaus\Projektit\O-din-BJ-viewer
+Total : 33 files,  2607 codes, 21 comments, 345 blanks, all 2973 lines
+
+Languages
++----------+------------+------------+------------+------------+------------+
+| language | files      | code       | comment    | blank      | total      |
++----------+------------+------------+------------+------------+------------+
+| odin     |         10 |      2,114 |         18 |        274 |      2,406 |
+| HLSL     |         11 |        270 |          3 |         57 |        330 |
+| JSON     |         11 |        211 |          0 |         10 |        221 |
+| Ini      |          1 |         12 |          0 |          4 |         16 |
++----------+------------+------------+------------+------------+------------+
+
+Directories
++----------------------------------------------------------------------------------+------------+------------+------------+------------+------------+
+| path                                                                             | files      | code       | comment    | blank      | total      |
++----------------------------------------------------------------------------------+------------+------------+------------+------------+------------+
+| .                                                                                |         33 |      2,607 |         21 |        345 |      2,973 |
+| . (Files)                                                                        |          3 |        272 |          0 |         12 |        284 |
+| shaders                                                                          |         21 |        280 |          3 |         67 |        350 |
+| shaders\include                                                                  |          1 |         14 |          0 |          4 |         18 |
+| shaders\out                                                                      |         10 |         10 |          0 |         10 |         20 |
+| shaders\src                                                                      |         10 |        256 |          3 |         53 |        312 |
+| src                                                                              |          9 |      2,055 |         18 |        266 |      2,339 |
++----------------------------------------------------------------------------------+------------+------------+------------+------------+------------+
+
+Files
++----------------------------------------------------------------------------------+----------+------------+------------+------------+------------+
+| filename                                                                         | language | code       | comment    | blank      | total      |
++----------------------------------------------------------------------------------+----------+------------+------------+------------+------------+
+| c:\Users\eelis\Koodaus\Projektit\O-din-BJ-viewer\build.odin                      | odin     |         59 |          0 |          8 |         67 |
+| c:\Users\eelis\Koodaus\Projektit\O-din-BJ-viewer\imgui.ini                       | Ini      |         12 |          0 |          4 |         16 |
+| c:\Users\eelis\Koodaus\Projektit\O-din-BJ-viewer\savefile.json                   | JSON     |        201 |          0 |          0 |        201 |
+| c:\Users\eelis\Koodaus\Projektit\O-din-BJ-viewer\shaders\include\common.hlsl     | HLSL     |         14 |          0 |          4 |         18 |
+| c:\Users\eelis\Koodaus\Projektit\O-din-BJ-viewer\shaders\out\bbox.frag.json      | JSON     |          1 |          0 |          1 |          2 |
+| c:\Users\eelis\Koodaus\Projektit\O-din-BJ-viewer\shaders\out\bbox.vert.json      | JSON     |          1 |          0 |          1 |          2 |
+| c:\Users\eelis\Koodaus\Projektit\O-din-BJ-viewer\shaders\out\heightmap.frag.json | JSON     |          1 |          0 |          1 |          2 |
+| c:\Users\eelis\Koodaus\Projektit\O-din-BJ-viewer\shaders\out\heightmap.vert.json | JSON     |          1 |          0 |          1 |          2 |
+| c:\Users\eelis\Koodaus\Projektit\O-din-BJ-viewer\shaders\out\shader.frag.json    | JSON     |          1 |          0 |          1 |          2 |
+| c:\Users\eelis\Koodaus\Projektit\O-din-BJ-viewer\shaders\out\shader.vert.json    | JSON     |          1 |          0 |          1 |          2 |
+| c:\Users\eelis\Koodaus\Projektit\O-din-BJ-viewer\shaders\out\skybox.frag.json    | JSON     |          1 |          0 |          1 |          2 |
+| c:\Users\eelis\Koodaus\Projektit\O-din-BJ-viewer\shaders\out\skybox.vert.json    | JSON     |          1 |          0 |          1 |          2 |
+| c:\Users\eelis\Koodaus\Projektit\O-din-BJ-viewer\shaders\out\ui.frag.json        | JSON     |          1 |          0 |          1 |          2 |
+| c:\Users\eelis\Koodaus\Projektit\O-din-BJ-viewer\shaders\out\ui.vert.json        | JSON     |          1 |          0 |          1 |          2 |
+| c:\Users\eelis\Koodaus\Projektit\O-din-BJ-viewer\shaders\src\bbox.frag.hlsl      | HLSL     |          6 |          0 |          1 |          7 |
+| c:\Users\eelis\Koodaus\Projektit\O-din-BJ-viewer\shaders\src\bbox.vert.hlsl      | HLSL     |         18 |          0 |          4 |         22 |
+| c:\Users\eelis\Koodaus\Projektit\O-din-BJ-viewer\shaders\src\heightmap.frag.hlsl | HLSL     |          6 |          0 |          1 |          7 |
+| c:\Users\eelis\Koodaus\Projektit\O-din-BJ-viewer\shaders\src\heightmap.vert.hlsl | HLSL     |         21 |          0 |          4 |         25 |
+| c:\Users\eelis\Koodaus\Projektit\O-din-BJ-viewer\shaders\src\shader.frag.hlsl    | HLSL     |        101 |          0 |         18 |        119 |
+| c:\Users\eelis\Koodaus\Projektit\O-din-BJ-viewer\shaders\src\shader.vert.hlsl    | HLSL     |         28 |          0 |          5 |         33 |
+| c:\Users\eelis\Koodaus\Projektit\O-din-BJ-viewer\shaders\src\skybox.frag.hlsl    | HLSL     |          9 |          0 |          3 |         12 |
+| c:\Users\eelis\Koodaus\Projektit\O-din-BJ-viewer\shaders\src\skybox.vert.hlsl    | HLSL     |         22 |          0 |          6 |         28 |
+| c:\Users\eelis\Koodaus\Projektit\O-din-BJ-viewer\shaders\src\ui.frag.hlsl        | HLSL     |         14 |          0 |          3 |         17 |
+| c:\Users\eelis\Koodaus\Projektit\O-din-BJ-viewer\shaders\src\ui.vert.hlsl        | HLSL     |         31 |          3 |          8 |         42 |
+| c:\Users\eelis\Koodaus\Projektit\O-din-BJ-viewer\src\entity.odin                 | odin     |         70 |          0 |         10 |         80 |
+| c:\Users\eelis\Koodaus\Projektit\O-din-BJ-viewer\src\file.odin                   | odin     |        173 |          2 |         21 |        196 |
+| c:\Users\eelis\Koodaus\Projektit\O-din-BJ-viewer\src\lib.odin                    | odin     |         84 |          1 |         27 |        112 |
+| c:\Users\eelis\Koodaus\Projektit\O-din-BJ-viewer\src\main.odin                   | odin     |        259 |          4 |         34 |        297 |
+| c:\Users\eelis\Koodaus\Projektit\O-din-BJ-viewer\src\obj.odin                    | odin     |        322 |          0 |         26 |        348 |
+| c:\Users\eelis\Koodaus\Projektit\O-din-BJ-viewer\src\physics.odin                | odin     |        118 |          4 |         24 |        146 |
+| c:\Users\eelis\Koodaus\Projektit\O-din-BJ-viewer\src\player.odin                 | odin     |        142 |          1 |         19 |        162 |
+| c:\Users\eelis\Koodaus\Projektit\O-din-BJ-viewer\src\renderer.odin               | odin     |        626 |          4 |         68 |        698 |
+| c:\Users\eelis\Koodaus\Projektit\O-din-BJ-viewer\src\renderer_2d.odin            | odin     |        261 |          2 |         37 |        300 |
+| Total                                                                            |          |      2,607 |         21 |        345 |      2,973 |
++----------------------------------------------------------------------------------+----------+------------+------------+------------+------------+

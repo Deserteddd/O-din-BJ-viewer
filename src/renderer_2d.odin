@@ -209,18 +209,11 @@ draw_imgui :: proc(state: ^AppState, frame: Frame) {
                 if im.BeginTabItem("General") {
                     defer im.EndTabItem()
                     im.LabelText("", "General")
-                    if height_map != nil do im.DragFloat3("Heightmap scale", &height_map.scale, 0.001, 0, 2)
                     if im.DragFloat("FOV", &g.fov, 1, 50, 140) do editor.dragging = true
-                }
-
-                // --- Point Light Tab ---
-                if im.BeginTabItem("Point Light") {
-                    defer im.EndTabItem()
                     im.LabelText("", "Point Light")
                     if im.DragFloat("intensity", &renderer.light.power, 1, 0, 10000) do editor.dragging = true
                     im.ColorPicker3("color", &renderer.light.color, {.InputRGB})
                 }
-
             }
             im.End()
         }

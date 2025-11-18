@@ -249,8 +249,9 @@ create_frag_ubo :: proc(state: ^AppState) -> FragUBOGlobal {
     }
 }
 
-render_heightmap :: proc (height_map: HeightMap, frame: Frame) {
+render_heightmap :: proc (height_map: HeightMap, renderer: Renderer, frame: Frame) {
     scale := height_map.scale
+    sdl.BindGPUGraphicsPipeline(frame.render_pass, renderer.heightmap_pipeline)
     sdl.PushGPUVertexUniformData(frame.cmd_buff, 1, &scale, size_of(vec3))
     bindings: [2]sdl.GPUBufferBinding = {
         sdl.GPUBufferBinding{buffer = height_map.vbo},
@@ -298,14 +299,6 @@ render_3D :: proc(state: ^AppState, frame: ^Frame) {
     assert(frame.cmd_buff  != nil)
     assert(frame.swapchain != nil)
     assert(frame.render_pass != nil)
-
-    // Heightmap
-    if height_map != nil {
-        assert(renderer.heightmap_pipeline != nil)
-        sdl.BindGPUGraphicsPipeline(frame.render_pass, renderer.heightmap_pipeline)
-        debug_info.draw_call_count += 1
-        render_heightmap(state.height_map^, frame^)
-    }
 
     // Entities
     fallback_binding := sdl.GPUTextureSamplerBinding {
