@@ -9,7 +9,8 @@ import "core:fmt"
 import sdl "vendor:sdl3"
 
 OBJModel :: struct {
-    name:               string,
+    name,
+    path:               string,
     vbo:                ^sdl.GPUBuffer,
     material_buffer:    ^sdl.GPUBuffer,
     aabb_vbo:           ^sdl.GPUBuffer,
@@ -119,6 +120,7 @@ load_obj_model :: proc(dir_path: string) -> OBJModel {
 
     model: OBJModel
     model.name              = strings.clone(dir_split[len(dir_split)-1])
+    model.path              = strings.clone(dir_path)
     model.vbo               = vbo
     model.material_buffer   = material_buffer
     model.aabb_vbo          = aabb_vbo
@@ -136,7 +138,7 @@ load_obj :: proc(
     obj_path: string, 
     materials: []OBJMaterial
 ) -> ([]OBJVertex, []AABB) {
-    file_data_1 := read_file_to_string(obj_path)
+    file_data := read_file_to_string(obj_path)
     vertices:   [dynamic]OBJVertex
     aabbs:      [dynamic]AABB
 
@@ -146,7 +148,7 @@ load_obj :: proc(
     current_material: u32
     aabb := AABB {min = max(f32), max = min(f32)}
     first_aabb := true
-    for line in strings.split_lines_iterator(&file_data_1) {
+    for line in strings.split_lines_iterator(&file_data) {
         if len(line) < 2 do continue
         switch line[0:2] {
             case "v ":

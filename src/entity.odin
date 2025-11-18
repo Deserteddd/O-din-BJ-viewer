@@ -29,14 +29,17 @@ entity_from_model :: proc(state: ^AppState, model_name: string) -> (id: i32, ok:
     return
 }
 
-set_entity_position :: proc(state: ^AppState, id: i32, pos: vec3) {
+set_entity_transform :: proc(state: ^AppState, id: i32, pos: vec3, scale: vec3 = 1) {
     for &e in state.entities {
         if e.id == id {
             e.transform.translation = pos
+            e.transform.scale       = scale
             break
         }
     }
 }
+
+
 remove_selected_entity :: proc(state: ^AppState) -> bool {
     if state.editor.selected_entity == -1 do return false
     for e, i in state.entities {

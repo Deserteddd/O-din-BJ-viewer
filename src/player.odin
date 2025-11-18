@@ -39,7 +39,7 @@ update_player :: proc(state: ^AppState, dt: f32) {
     airborne_at_start := airborne
     if noclip {
         speed = 0
-        delta_pos := wishveloc * dt * 10
+        delta_pos := wishveloc * dt * 20
         position += delta_pos
         bbox.min += delta_pos
         bbox.max += delta_pos
@@ -110,7 +110,7 @@ update_player :: proc(state: ^AppState, dt: f32) {
     if g.lmb_down {
         for &e, i in state.entities {
             if e.id == closest_entity {
-                unordered_remove_soa(&state.entities, i)
+                editor.selected_entity = e.id
                 break
             }
         }

@@ -190,15 +190,14 @@ RND_ToggleFullscreen :: proc(state: ^AppState) {
     depth_texture = depth
     switch g.mode {
         case .EDIT:
-            ok = sdl.ShowCursor(); assert(ok)
             ok = sdl.SetWindowRelativeMouseMode(g.window, false); assert(ok)
         case .PLAY:
             ok = sdl.SetWindowRelativeMouseMode(g.window, true)
-            ok = sdl.HideCursor(); assert(ok)
     }
     assert(ok)
     init_imgui(state)
     state.editor.sidebar.height = f32(height)
+    _ = sdl.GetTicks()
 }
 
 

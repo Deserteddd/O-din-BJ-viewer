@@ -1,5 +1,6 @@
 package obj_viewer
 
+import "core:simd"
 import "core:time"
 import "core:math/linalg"
 import "core:strings"
@@ -180,7 +181,7 @@ submit_2d :: proc(frame: ^Frame) {
     sdl.EndGPURenderPass(frame.render_pass)
     frame.render_pass = nil
 }
-import "core:fmt"
+
 draw_imgui :: proc(state: ^AppState, frame: Frame) {
     using state, frame
     im_sdlgpu.NewFrame()
@@ -191,12 +192,14 @@ draw_imgui :: proc(state: ^AppState, frame: Frame) {
             im.SetWindowPos(0)
             im.SetWindowSize({editor.sidebar.width, editor.sidebar.height})
             if im.BeginTabBar("PropertiesTabs") {
+                defer im.EndTabBar()
                 if im.BeginTabItem("Entity") {
                     defer im.EndTabItem()
                     for &e in entities {
                         if e.id == editor.selected_entity {
                             if im.DragFloat3("Position", &e.transform.translation, 0.01) do editor.dragging = true
                             if im.DragFloat3("Scale",    &e.transform.scale, 0.01) do editor.dragging = true
+                            for &axis in e.transform.scale do axis = max(0.01, axis)
                             break
                         }
                     }
@@ -207,18 +210,17 @@ draw_imgui :: proc(state: ^AppState, frame: Frame) {
                     defer im.EndTabItem()
                     im.LabelText("", "General")
                     if height_map != nil do im.DragFloat3("Heightmap scale", &height_map.scale, 0.001, 0, 2)
-                    im.DragFloat("FOV", &g.fov, 1, 50, 140)
+                    if im.DragFloat("FOV", &g.fov, 1, 50, 140) do editor.dragging = true
                 }
 
                 // --- Point Light Tab ---
                 if im.BeginTabItem("Point Light") {
                     defer im.EndTabItem()
                     im.LabelText("", "Point Light")
-                    im.DragFloat("intensity", &renderer.light.power, 10, 0, 10000)
+                    if im.DragFloat("intensity", &renderer.light.power, 1, 0, 10000) do editor.dragging = true
                     im.ColorPicker3("color", &renderer.light.color, {.InputRGB})
                 }
 
-                im.EndTabBar()
             }
             im.End()
         }

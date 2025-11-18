@@ -5,12 +5,11 @@ import "core:log"
 import "core:fmt"
 import "core:math/linalg"
 import "core:time"
-import "core:math/rand"
 import "core:mem"
+import "core:math"
 import sdl "vendor:sdl3"
 import im "shared:imgui"
 import im_sdl "shared:imgui/imgui_impl_sdl3"
-import "core:math"
 
 // Constants
 PRESENT_MODE: sdl.GPUPresentMode = .IMMEDIATE
@@ -18,12 +17,10 @@ PRESENT_MODE: sdl.GPUPresentMode = .IMMEDIATE
 // Globals
 default_context: runtime.Context
 g: Globals = {
-    debug_draw = false,
-    fov        = 90
+    fov = 90
 }
 
 main :: proc() {
-
     fmt.println("MAIN: initing")
     state: AppState = {}
     init(&state)
@@ -48,6 +45,8 @@ Editor :: struct {
     selected_entity: i32,
     sidebar:         Rect,
     dragging:        bool,
+    drag_position:   vec2,
+    drag_start:      vec2
 }
 
 DebugInfo :: struct {
@@ -70,7 +69,6 @@ init :: proc(state: ^AppState) {
     ok := sdl.Init({.VIDEO}); assert(ok)
     window_flags: sdl.WindowFlags
     g.window = sdl.CreateWindow("Demo window", 1280, 720, window_flags); assert(g.window != nil)
-    ok = sdl.HideCursor(); assert(ok)
     ok = sdl.SetWindowRelativeMouseMode(g.window, true); assert(ok)
 
     g.gpu = sdl.CreateGPUDevice({.SPIRV}, ODIN_DEBUG, nil); assert(g.gpu != nil)
@@ -79,41 +77,31 @@ init :: proc(state: ^AppState) {
 
     renderer = RND_Init()
     init_imgui(state)
-    editor.sidebar = {0, 0, 360, 720}
+    editor.sidebar = {0, 0, 300, 720}
     player = create_player()
 
-    // load_scene(state, "savefile")
-    slab := load_obj_model("assets/slab")
-    append(&state.models, slab)
-
-    for i in 0..<10000 {
-        entity, ok := entity_from_model(state, "slab"); assert(ok)
-        pos: vec3 = {
-            rand.float32_range(-50, 50),
-            rand.float32_range(0, 50),
-            rand.float32_range(-50, 50)
-        }
-        
-        set_entity_position(state, entity, pos)
-    }
-}
-
-load_scene :: proc(state: ^AppState, save_file: string) {
-    save_file := load_save_file("savefile")
-    defer free_save_file(save_file)
-    for asset in save_file.assets {
-        model := load_obj_model(save_file.assets[asset])
-        append(&state.models, model)
-        for instance in save_file.instances {
-            if instance.asset == asset {
-                entity, ok := entity_from_model(state, asset); assert(ok)
-                set_entity_position(state, entity, instance.position)
-            }
-        }
-    }
+    load_scene(state, "savefile")
 }
 
 
+
+start_dragging :: proc(editor: ^Editor) {
+    editor.dragging = true
+    x, y: f32
+    _ = sdl.GetMouseState(&x, &y)
+    editor.drag_position = {x, y}
+    editor.drag_start    = {x, y}
+    ok := sdl.SetWindowRelativeMouseMode(g.window, true); assert(ok)
+    _ = sdl.GetRelativeMouseState(nil, nil)
+}
+
+stop_dragging :: proc(editor: ^Editor) {
+    if editor.dragging == false do return
+    editor.dragging = false
+    editor.drag_position = 0
+    ok := sdl.SetWindowRelativeMouseMode(g.window, false); assert(ok)
+    sdl.WarpMouseInWindow(g.window, editor.drag_start.x, editor.drag_start.y)
+}
 
 run :: proc(state: ^AppState) {
     when ODIN_DEBUG {
@@ -131,10 +119,8 @@ run :: proc(state: ^AppState) {
 		}
 	}
 
-    paused: bool
     free_all(context.temp_allocator)
     using state
-
     main_loop: for {
         defer {
             free_all(context.temp_allocator)
@@ -151,11 +137,16 @@ run :: proc(state: ^AppState) {
                     break main_loop
                 case .KEY_DOWN: #partial switch ev.key.scancode {
                     case .ESCAPE:
-                        toggle_ui(state)
+                        if editor.dragging {
+                            stop_dragging(&editor) 
+                        } else {
+                            toggle_ui(state)
+                        }
                     case .Q:
                         if !player.airborne do player.checkpoint = get_player_translation(player)
                     case .E:
                         reset_player_pos(&player)
+                        player.noclip = false
                     case .F:
                         RND_ToggleFullscreen(state)
                     case .C:
@@ -163,15 +154,15 @@ run :: proc(state: ^AppState) {
                     case .N: player.noclip = !player.noclip
                     case .DELETE:
                         if g.mode == .EDIT do remove_selected_entity(state)
-                    case .BACKSPACE:
-                        if g.mode == .EDIT do remove_selected_entity(state)
+                    case .RETURN:
+                        if editor.dragging do stop_dragging(&editor)
                 }
                 case .MOUSE_BUTTON_DOWN: switch ev.button.button {
                     case 1: g.lmb_down = true
                     case 3: g.rmb_down = true
                 }
                 case .MOUSE_BUTTON_UP: switch ev.button.button {
-                    case 1: editor.dragging = false
+                    case 1: stop_dragging(&state.editor)
                 }
             }
         }
@@ -197,8 +188,11 @@ run :: proc(state: ^AppState) {
         submit_2d(&frame)
 
         draw_imgui(state, frame)
+
+        if !dragging && editor.dragging do start_dragging(&state.editor)
         state.debug_info.frame_time = time.since(now)
     }
+    write_save_file(state^)
 }
 
 update :: proc(state: ^AppState) {
@@ -213,9 +207,9 @@ update :: proc(state: ^AppState) {
 
 update_editor :: proc(state: ^AppState) {
     using state
+    m_pos: vec2
     if g.lmb_down {
         win_size := get_window_size()
-        m_pos: vec2
         _ = sdl.GetMouseState(&m_pos.x, &m_pos.y)
         if m_pos.x > editor.sidebar.width {
             ray_origin, ray_dir := ray_from_screen(player, m_pos, win_size)
@@ -232,13 +226,15 @@ update_editor :: proc(state: ^AppState) {
 
                 }
             }
-            for &e, i in state.entities {
-                if e.id == closest_entity {
-                    editor.selected_entity = e.id
-                    break
-                }
-            }
+            editor.selected_entity = closest_entity
         }
+    }
+    if editor.dragging {
+        m_pos: vec2
+        _ = sdl.GetRelativeMouseState(&m_pos.x, &m_pos.y)
+        editor.drag_position += m_pos
+        io := im.GetIO()
+        im.IO_AddMousePosEvent(io, editor.drag_position.x, editor.drag_position.y)
     }
 }
 
@@ -252,7 +248,7 @@ update_game :: proc(state: ^AppState) {
 
     if g.rmb_down {
         new, ok := entity_from_model(state, "slab"); assert(ok)
-        set_entity_position(state, new, player.position)
+        set_entity_transform(state, new, player.position)
     }
 
     debug_info.player_speed = linalg.length(player.speed)
@@ -267,17 +263,20 @@ update_game :: proc(state: ^AppState) {
 toggle_ui :: proc(state: ^AppState) {
     switch g.mode {
         case .PLAY:
+            assert(state.editor.dragging == false)
             g.mode = .EDIT
             ok := sdl.SetWindowRelativeMouseMode(g.window, false); assert(ok)
             win_size := get_window_size() / 2
             sdl.WarpMouseInWindow(g.window, win_size.x, win_size.y)
         case .EDIT:
             g.mode = .PLAY
-            state.editor.selected_entity = -1
-            state.editor.dragging = false
+            if state.editor.dragging do stop_dragging(&state.editor)
             ok := sdl.SetWindowRelativeMouseMode(g.window, true); assert(ok)
+
             // Update ticks so next call to update doesn't have a massive dt
             g.last_ticks = sdl.GetTicks()
+
+            // Poll mouse state to prevent stutters after exiting edit mode
             _ = sdl.GetRelativeMouseState(nil, nil)
     }
 }
@@ -296,4 +295,3 @@ reset_player_pos :: proc(player: ^Player, at_origin := false) {
         max = player.position + {0.3, 2, 0.3}
     }
 }
-
