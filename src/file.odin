@@ -88,10 +88,10 @@ free_save_file :: proc(savefile: SaveFile) {
 }
 
 load_height_map :: proc(path: string) -> HeightMap {
-    height_path  := strings.concatenate({path, "/height_map.png"})
-    diffuse_path := strings.concatenate({path, "/diffuse.png"})
-    pixels, size := load_height_map_pixels(height_path); defer free_pixels(pixels)
-    colors, dsize := load_pixels(diffuse_path);          defer free_pixels(colors)
+    height_path   := strings.concatenate({path, "/height_map.png"})
+    diffuse_path  := strings.concatenate({path, "/diffuse.png"})
+    pixels, size  :=  load_pixels_u16(height_path); defer free_pixels(pixels)
+    colors, dsize := load_pixels_byte(diffuse_path);          defer free_pixels(colors)
     assert(size == dsize)
 
     min: u16 = 1 << 15;
@@ -156,7 +156,7 @@ load_height_map :: proc(path: string) -> HeightMap {
 }
 
 
-load_pixels :: proc(path: string) -> (pixels: []byte, size: [2]i32) {
+load_pixels_byte :: proc(path: string) -> (pixels: []byte, size: [2]i32) {
     path_cstr := strings.clone_to_cstring(path, context.temp_allocator);
     pixel_data := stbi.load(path_cstr, &size.x, &size.y, nil, 4)
     assert(pixel_data != nil)
@@ -176,7 +176,7 @@ load_cubemap_texture :: proc(
     pixels: [sdl.GPUCubeMapFace][]byte
     size: u32
     for path, side in paths {
-        side_pixels, img_size := load_pixels(path)
+        side_pixels, img_size := load_pixels_byte(path)
         assert(side_pixels != nil)
         pixels[side] = side_pixels
         assert(img_size.x == img_size.y)
@@ -189,7 +189,7 @@ load_cubemap_texture :: proc(
 }
 
 
-load_height_map_pixels :: proc(path: string) -> (pixels: []u16, size: [2]i32) {
+load_pixels_u16 :: proc(path: string) -> (pixels: []u16, size: [2]i32) {
     path_cstr := strings.clone_to_cstring(path, context.temp_allocator);
     pixel_data := stbi.load_16(path_cstr, &size.x, &size.y, nil, 1); assert(pixel_data != nil)
     pixels = slice.from_ptr(pixel_data, int(size.x * size.y))

@@ -47,7 +47,7 @@ UBO2D :: struct {
 }
 
 upload_sprite :: proc(path: string, copy_pass: ^sdl.GPUCopyPass) -> Sprite {
-    pixels, size := load_pixels(path); assert(pixels != nil)
+    pixels, size := load_pixels_byte(path); assert(pixels != nil)
     size_u32: [2]u32 = {u32(size.x), u32(size.y)}
     texture := upload_texture(copy_pass, pixels, size_u32)
     assert(texture != nil)

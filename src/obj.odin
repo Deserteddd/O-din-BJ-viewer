@@ -257,7 +257,7 @@ load_mtl :: proc(
                         strings.write_string(&path_builder, tex_path)
                         tex_path = strings.to_string(path_builder)
                     }
-                    pixels, size := load_pixels(tex_path)
+                    pixels, size := load_pixels_byte(tex_path)
                     tex := upload_texture(copy_pass, pixels, {u32(size.x), u32(size.y)})
                     free_pixels(pixels)
                     append(&textures,  Texture {

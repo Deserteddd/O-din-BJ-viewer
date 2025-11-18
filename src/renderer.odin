@@ -66,7 +66,7 @@ Frame :: struct {
 
 RND_Init :: proc() -> Renderer {
     renderer: Renderer
-    pixels, size := load_pixels("assets/err_tex.jpg")
+    pixels, size := load_pixels_byte("assets/err_tex.jpg")
     size_u32: [2]u32 = {u32(size.x), u32(size.y)}
     defer free_pixels(pixels)
 
