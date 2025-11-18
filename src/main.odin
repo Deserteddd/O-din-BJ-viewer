@@ -9,7 +9,8 @@ import "core:math/rand"
 import sdl "vendor:sdl3"
 import im "shared:imgui"
 import im_sdl "shared:imgui/imgui_impl_sdl3"
-import im_sdlgpu "shared:imgui/imgui_impl_sdlgpu3"
+// import im_sdlgpu "shared:imgui/imgui_impl_sdlgpu3"
+import "core:math"
 
 // Constants
 PRESENT_MODE: sdl.GPUPresentMode = .IMMEDIATE
@@ -31,15 +32,21 @@ main :: proc() {
 }
 
 AppState :: struct {
+    editor:             Editor,
     player:             Player,
     debug_info:         DebugInfo,
     renderer:           Renderer,
     ui_context:        ^im.Context,
+    height_map:        ^HeightMap,
+    sprites:            [dynamic]Sprite,
     models:             [dynamic]OBJModel,
     entities:       #soa[dynamic]Entity,
-    slabs:              u32,
-    sprites:            [dynamic]Sprite,
-    height_map:         ^HeightMap,
+}
+
+Editor :: struct {
+    selected_entity: i32,
+    sidebar:         Rect,
+    dragging:        bool,
 }
 
 DebugInfo :: struct {
@@ -65,23 +72,24 @@ init :: proc(state: ^AppState) {
     ok = sdl.HideCursor(); assert(ok)
     ok = sdl.SetWindowRelativeMouseMode(g.window, true); assert(ok)
 
-    g.gpu = sdl.CreateGPUDevice({.SPIRV}, g.debug_draw, nil); assert(g.gpu != nil)
+    g.gpu = sdl.CreateGPUDevice({.SPIRV}, true, nil); assert(g.gpu != nil)
     ok = sdl.ClaimWindowForGPUDevice(g.gpu, g.window); assert(ok)
     ok = sdl.SetGPUSwapchainParameters(g.gpu, g.window, .SDR_LINEAR, PRESENT_MODE); assert(ok)
 
     renderer = RND_Init()
     init_imgui(state)
+    editor.sidebar = {0, 0, 360, 720}
     player = create_player()
 
     // load_scene(state, "savefile")
     slab := load_obj_model("assets/slab")
     append(&state.models, slab)
 
-    for i in 0..<10000 {
+    for i in 0..<1000 {
         entity, ok := entity_from_model(state, "slab"); assert(ok)
         pos: vec3 = {
             rand.float32_range(-50, 50),
-            rand.float32_range(0, 100),
+            rand.float32_range(0, 50),
             rand.float32_range(-50, 50)
         }
         
@@ -118,6 +126,7 @@ run :: proc(state: ^AppState) {
             g.rmb_down = false
         }
         now := time.now()
+        dragging := editor.dragging
         ev: sdl.Event
         for sdl.PollEvent(&ev) {
             im_sdl.ProcessEvent(&ev)
@@ -140,7 +149,9 @@ run :: proc(state: ^AppState) {
                 case .MOUSE_BUTTON_DOWN: switch ev.button.button {
                     case 1: g.lmb_down = true
                     case 3: g.rmb_down = true
-
+                }
+                case .MOUSE_BUTTON_UP: switch ev.button.button {
+                    case 1: editor.dragging = false
                 }
             }
         }
@@ -149,6 +160,7 @@ run :: proc(state: ^AppState) {
         vert_ubo := get_vertex_ubo_global(player)
         debug_info.draw_call_count = 0
         frag_ubo := create_frag_ubo(state)
+
         frame := frame_begin(vert_ubo, frag_ubo)
         defer frame_submit(frame)
 
@@ -158,9 +170,15 @@ run :: proc(state: ^AppState) {
         assert(frame.render_pass == nil)
 
         begin_2d(renderer, &frame)
-        draw_crosshair(renderer, frame)
+        if g.mode == .EDIT {
+            draw_rect(editor.sidebar, frame)
+        } else {
+            draw_crosshair(renderer, frame)
+        }
         submit_2d(&frame)
+
         draw_imgui(state, frame)
+        win_size := get_window_size()
 
         state.debug_info.frame_time = time.since(now)
     }
@@ -177,7 +195,34 @@ update :: proc(state: ^AppState) {
 }
 
 update_editor :: proc(state: ^AppState) {
+    using state
+    if g.lmb_down {
+        win_size := get_window_size()
+        m_pos: vec2
+        _ = sdl.GetMouseState(&m_pos.x, &m_pos.y)
+        if m_pos.x > editor.sidebar.width {
+            ray_origin, ray_dir := ray_from_screen(player, m_pos, win_size)
+            closest_hit: f32 = math.F32_MAX
+            closest_entity: i32 = -1
+            for &entity in entities {
+                aabbs := entity_aabbs(entity)
+                for aabb in aabbs {
+                    intersection := ray_intersect_aabb(ray_origin, ray_dir, aabb)
+                    if intersection != -1 && intersection < closest_hit {
+                        closest_hit = intersection
+                        closest_entity = entity.id
+                    }
 
+                }
+            }
+            for &e, i in state.entities {
+                if e.id == closest_entity {
+                    editor.selected_entity = e.id
+                    break
+                }
+            }
+        }
+    }
 }
 
 update_game :: proc(state: ^AppState) {
@@ -206,13 +251,16 @@ toggle_ui :: proc(state: ^AppState) {
     switch g.mode {
         case .PLAY:
             g.mode = .EDIT
-            ok := sdl.ShowCursor(); assert(ok)
-            ok = sdl.SetWindowRelativeMouseMode(g.window, false); assert(ok)
-            sdl.WarpMouseInWindow(g.window, 700, 90)
+            ok := sdl.SetWindowRelativeMouseMode(g.window, false); assert(ok)
+            win_size := get_window_size() / 2
+            sdl.WarpMouseInWindow(g.window, win_size.x, win_size.y)
         case .EDIT:
             g.mode = .PLAY
-            ok := sdl.HideCursor(); assert(ok)
-            ok = sdl.SetWindowRelativeMouseMode(g.window, true); assert(ok)
+            state.editor.dragging = false
+            ok := sdl.SetWindowRelativeMouseMode(g.window, true); assert(ok)
+            // Update ticks so next call to update doesn't have a massive dt
+            g.last_ticks = sdl.GetTicks()
+            _ = sdl.GetRelativeMouseState(nil, nil)
     }
 }
 

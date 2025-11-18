@@ -1,6 +1,5 @@
 package obj_viewer
 import "core:math"
-import "vendor:windows/GameInput"
 import "core:math/rand"
 import "core:strings"
 import "core:os"

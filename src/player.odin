@@ -43,34 +43,34 @@ update_player :: proc(state: ^AppState, dt: f32) {
         position += delta_pos
         bbox.min += delta_pos
         bbox.max += delta_pos
-        return
+    } else {
+        if wishveloc.y > 0 && !airborne {
+            speed.y = 9
+            airborne = true
+        } else if !airborne {
+            speed += wishveloc
+        } else {
+            air_accelerate(&wishveloc, &player, dt)
+            speed.y -= G * dt
+            speed.y = math.max(speed.y, -20)
+        }
+        delta_pos := speed * dt
+        position += delta_pos
+        bbox.min += delta_pos
+        bbox.max += delta_pos
     }
 
-    if wishveloc.y > 0 && !airborne {
-        speed.y = 9
-        airborne = true
-    } else if !airborne {
-        speed += wishveloc
-    } else {
-        air_accelerate(&wishveloc, &player, dt)
-        speed.y -= G * dt
-        speed.y = math.max(speed.y, -20)
-    }
-    delta_pos := speed * dt
-    position += delta_pos
-    bbox.min += delta_pos
-    bbox.max += delta_pos
     found_collision: bool
     
     win_size := get_window_size()
     ray_origin, ray_dir := ray_from_screen(player, win_size/2, win_size)
     closest_hit: f32 = math.F32_MAX
-    closest_entity: i32
+    closest_entity: i32 = -1
 
     for &entity in entities {
         aabbs := entity_aabbs(entity)
         for aabb in aabbs {
-            if aabbs_collide(bbox, aabb) {
+            if aabbs_collide(bbox, aabb) && !noclip {
                 found_collision = true
                 mtv := resolve_aabb_collision_mtv(bbox, aabb)
                 for axis, j in mtv do if axis != 0 {
@@ -97,13 +97,15 @@ update_player :: proc(state: ^AppState, dt: f32) {
 
         }
     }
-    if !found_collision do airborne = true
+    if !noclip {
+        if !found_collision do airborne = true
 
-    if !airborne_at_start && !airborne {
-        speed *= 0.8
+        if !airborne_at_start && !airborne {
+            speed *= 0.8
+        }
+
+        if linalg.length(speed.xz) > 20 do speed.xz *= 0.9
     }
-
-    if linalg.length(speed.xz) > 20 do speed.xz *= 0.9
 
     if g.lmb_down {
         for &e, i in state.entities {

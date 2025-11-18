@@ -13,6 +13,13 @@ Vertex2D :: struct {
     uv:       vec2,
 }
 
+
+Rect :: struct {
+    x, y,
+    width,
+    height: f32
+}
+
 R2D :: struct {
     ui_pipeline: ^sdl.GPUGraphicsPipeline,
     crosshair:   Sprite,
@@ -33,7 +40,9 @@ Quad :: struct {
 
 UBO2D :: struct {
     xywh:     vec4,
-    win_size: vec2
+    win_size: vec2,
+    use_tex:  b32,
+    _pad:     b32
 }
 
 upload_sprite :: proc(path: string, copy_pass: ^sdl.GPUCopyPass) -> Sprite {
@@ -118,13 +127,15 @@ begin_2d :: proc(renderer: Renderer, frame: ^Frame) {
         sdl.GPUBufferBinding {buffer = r2d.quad.vbo},
         sdl.GPUBufferBinding {buffer = r2d.quad.ibo},
     }
-
+    sdl.BindGPUFragmentSamplers(frame.render_pass, 0, &(sdl.GPUTextureSamplerBinding  {
+        texture = renderer.fallback_texture,
+        sampler = renderer.default_sampler
+    }), 1)
     sdl.BindGPUVertexBuffers(render_pass, 0, &bindings[0], 1)
     sdl.BindGPUIndexBuffer(render_pass, bindings[1], ._16BIT)
 }
 
 draw_crosshair :: proc(renderer: Renderer, frame: Frame) {
-    assert(renderer.r2d.crosshair.sampler != nil)
     draw_sprite(renderer.r2d.crosshair, frame)
 }
 
@@ -137,7 +148,9 @@ draw_sprite :: proc(sprite: Sprite, frame: Frame, pos: vec2 = 0, scale: f32 = 1)
 
     ubo := UBO2D {
         {x, y, f32(sprite.size.x)*scale, f32(sprite.size.y)*scale},
-        win_size
+        win_size,
+        true,
+        false
     }
     sdl.PushGPUVertexUniformData(cmd_buff, 0, &ubo, size_of(UBO2D))
     sdl.BindGPUFragmentSamplers(render_pass, 0, 
@@ -149,33 +162,59 @@ draw_sprite :: proc(sprite: Sprite, frame: Frame, pos: vec2 = 0, scale: f32 = 1)
     sdl.DrawGPUIndexedPrimitives(render_pass, 6, 1, 0, 0, 0)
 }
 
+draw_rect :: proc(rect: Rect, frame: Frame) {
+    using frame
+    if render_pass == nil do panic("Render pass not in progress")
+
+    ubo := UBO2D {
+        {rect.x, rect.y, rect.width, rect.height},
+        win_size,
+        false,
+        false
+    }
+    sdl.PushGPUVertexUniformData(cmd_buff, 0, &ubo, size_of(UBO2D))
+    sdl.DrawGPUIndexedPrimitives(render_pass, 6, 1, 0, 0, 0)
+}
+
 submit_2d :: proc(frame: ^Frame) {
     sdl.EndGPURenderPass(frame.render_pass)
     frame.render_pass = nil
 }
-
+import "core:fmt"
 draw_imgui :: proc(state: ^AppState, frame: Frame) {
     using state, frame
     im_sdlgpu.NewFrame()
     im_sdl.NewFrame()
     im.NewFrame()
     if g.mode == .EDIT {
-        if im.Begin("Properties") {
+        if im.Begin("Properties", nil, {.NoTitleBar, .NoResize, .NoMove}) {
+            im.SetWindowPos(0)
+            im.SetWindowSize({editor.sidebar.width, editor.sidebar.height})
             if im.BeginTabBar("PropertiesTabs") {
+                if im.BeginTabItem("Entity") {
+                    defer im.EndTabItem()
+                    for &e in entities {
+                        if e.id == editor.selected_entity {
+                            if im.DragFloat3("Pos", &e.transform.translation, 0.01) do editor.dragging = true
+                            break
+                        }
+                    }
+                }
+
                 // --- General Tab ---
                 if im.BeginTabItem("General") {
+                    defer im.EndTabItem()
                     im.LabelText("", "General")
                     if height_map != nil do im.DragFloat3("Heightmap scale", &height_map.scale, 0.001, 0, 2)
                     im.DragFloat("FOV", &g.fov, 1, 50, 140)
-                    im.EndTabItem()
                 }
 
                 // --- Point Light Tab ---
                 if im.BeginTabItem("Point Light") {
+                    defer im.EndTabItem()
                     im.LabelText("", "Point Light")
                     im.DragFloat("intensity", &renderer.light.power, 10, 0, 10000)
                     im.ColorPicker3("color", &renderer.light.color, {.InputRGB})
-                    im.EndTabItem()
                 }
 
                 im.EndTabBar()

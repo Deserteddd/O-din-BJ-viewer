@@ -198,6 +198,7 @@ RND_ToggleFullscreen :: proc(state: ^AppState) {
     }
     assert(ok)
     init_imgui(state)
+    state.editor.sidebar.height = f32(height)
 }
 
 
@@ -330,7 +331,11 @@ render_3D :: proc(state: ^AppState, frame: ^Frame) {
             if &model != entity.model do continue
             if !is_visible(entity, frame.frustum_planes) do continue
 
-            model_matrix := linalg.matrix4_from_trs_f32(entity.transform.translation, entity.transform.rotation, 1)
+            model_matrix := linalg.matrix4_from_trs_f32(
+                entity.transform.translation, 
+                entity.transform.rotation,
+                entity.transform.scale
+            )
             normal_matrix := linalg.inverse_transpose(model_matrix)
             vert_ubo_local := VertUBOLocal {
                 model_mat = model_matrix,
@@ -343,24 +348,23 @@ render_3D :: proc(state: ^AppState, frame: ^Frame) {
     }
 
     // Bounding Box
-    if g.debug_draw {
-        sdl.BindGPUGraphicsPipeline(frame.render_pass, renderer.bbox_pipeline)
-        for &model in models {
-            bindings: [1]sdl.GPUBufferBinding = { sdl.GPUBufferBinding { buffer = model.aabb_vbo } } 
+    if g.mode == .EDIT {
+        for entity in entities {
+            if entity.model == nil do continue
+            if entity.id != state.editor.selected_entity do continue
+            if !is_visible(entity, frame.frustum_planes) do continue
+            sdl.BindGPUGraphicsPipeline(frame.render_pass, renderer.bbox_pipeline)
+            bindings: [1]sdl.GPUBufferBinding = { sdl.GPUBufferBinding { buffer = entity.model.aabb_vbo } } 
             sdl.BindGPUVertexBuffers(frame.render_pass, 0, &bindings[0], 1)
-            for entity in entities {
-                if entity.model != &model do continue
-                if !is_visible(entity, frame.frustum_planes) do continue
-                model_matrix := linalg.matrix4_from_trs(
-                    entity.transform.translation,
-                    entity.transform.rotation,
-                    entity.transform.scale
-                )
-                sdl.PushGPUVertexUniformData(frame.cmd_buff, 1, &model_matrix, size_of(mat4))
-                debug_info.draw_call_count += 1
-                sdl.DrawGPUPrimitives(frame.render_pass, u32(24*len(model.aabbs)), 1, 0, 0)
-            }
-            // using model
+            model_matrix := linalg.matrix4_from_trs(
+                entity.transform.translation,
+                entity.transform.rotation,
+                entity.transform.scale
+            )
+            sdl.PushGPUVertexUniformData(frame.cmd_buff, 1, &model_matrix, size_of(mat4))
+            debug_info.draw_call_count += 1
+            sdl.DrawGPUPrimitives(frame.render_pass, u32(24*len(entity.model.aabbs)), 1, 0, 0)
+            break
         }
     }
 

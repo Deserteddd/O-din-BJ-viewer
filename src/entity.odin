@@ -23,6 +23,7 @@ entity_from_model :: proc(state: ^AppState, model_name: string) -> (id: i32, ok:
     if entity.model == nil do return
     id = lowest_free_id(state.entities.id, len(state.entities))
     entity.id = id
+    entity.transform.scale = 1
     append_soa(&state.entities, entity)
     ok = true
     return

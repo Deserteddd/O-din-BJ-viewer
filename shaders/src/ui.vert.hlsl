@@ -7,11 +7,13 @@ struct Output {
     float4 clip_position : SV_Position;
     float2 position : TEXCOORD0;
     float2 uv : TEXCOORD1;
+    float4 color : TEXCOORD2;
 };
 
 cbuffer UBO : register(b0, space1) {
     float4 xywh;         // x, y, width, height in pixels
     float2 screen_size;  // screen width, height in pixels
+    bool textured;
 };
 
 Output main(Input input) {
@@ -30,6 +32,11 @@ Output main(Input input) {
     output.clip_position = float4(clip_pos, 0.0f, 1.0f);
     output.position = input.position;
     output.uv = input.uv;
+    if (textured) {
+        output.color.r = -1;
+    } else {
+        output.color = float4(0, 0, 0, 0.8);
+    }
 
     return output;
 }

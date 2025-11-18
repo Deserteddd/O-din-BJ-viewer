@@ -7,17 +7,21 @@ import "core:path/filepath"
 import os "core:os/os2"
 
 BUILD_SHADERS :: false
-DEBUG         :: false
+DEBUG         :: true
+SANITIZE      :: false
 ODIN_PATH     :: "C:\\odin-windows-amd64-dev-2025-02"
+
 main :: proc() {
     context.logger = log.create_console_logger()
     EXE :: "gaym.exe"
     if BUILD_SHADERS do build_shaders()
-    if DEBUG {
-        run_str(ODIN_PATH+"\\odin build src -debug -sanitize=address -out:"+EXE)
-    } else {
-        run_str(ODIN_PATH+"\\odin build src -out:"+EXE)
-    }
+    b: strings.Builder
+    strings.builder_init(&b)
+    strings.write_string(&b, ODIN_PATH+"\\odin build src")
+    if DEBUG    do strings.write_string(&b, " -debug")
+    if SANITIZE do strings.write_string(&b, " -sanitize=address")
+    strings.write_string(&b, " -out:"+EXE)
+    run_str(strings.to_string(b))
     log.info("Args:", os.args)
     if slice.contains(os.args, "run") do run({EXE})
 }
