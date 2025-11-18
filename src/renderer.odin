@@ -596,8 +596,8 @@ is_visible :: proc(entity: Entity, frustum_planes: [6]vec4) -> bool {
     if entity.model == nil do return false
     for aabb in entity.model.aabbs {
         if aabb_intersects_frustum(frustum_planes, {
-            aabb.min + entity.transform.translation,
-            aabb.max + entity.transform.translation
+            aabb.min * entity.transform.scale + entity.transform.translation,
+            aabb.max * entity.transform.scale + entity.transform.translation
         }) { return true }
     }
     return false

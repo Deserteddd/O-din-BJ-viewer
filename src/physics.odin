@@ -13,8 +13,8 @@ entity_aabbs :: proc(entity: Entity) -> []AABB {
     aabbs := make([]AABB, len(entity.model.aabbs), context.temp_allocator)
     for aabb, i in entity.model.aabbs {
         aabbs[i] = AABB {
-            min = aabb.min + transform.translation,
-            max = aabb.max + transform.translation
+            min = aabb.min * transform.scale + transform.translation,
+            max = aabb.max * transform.scale + transform.translation
         }
     }
     return aabbs

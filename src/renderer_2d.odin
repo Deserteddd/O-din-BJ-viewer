@@ -195,7 +195,8 @@ draw_imgui :: proc(state: ^AppState, frame: Frame) {
                     defer im.EndTabItem()
                     for &e in entities {
                         if e.id == editor.selected_entity {
-                            if im.DragFloat3("Pos", &e.transform.translation, 0.01) do editor.dragging = true
+                            if im.DragFloat3("Position", &e.transform.translation, 0.01) do editor.dragging = true
+                            if im.DragFloat3("Scale",    &e.transform.scale, 0.01) do editor.dragging = true
                             break
                         }
                     }

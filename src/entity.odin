@@ -37,6 +37,15 @@ set_entity_position :: proc(state: ^AppState, id: i32, pos: vec3) {
         }
     }
 }
+remove_selected_entity :: proc(state: ^AppState) -> bool {
+    if state.editor.selected_entity == -1 do return false
+    for e, i in state.entities {
+        if e.id == state.editor.selected_entity {
+            unordered_remove_soa(&state.entities, i)
+        }
+    }
+    return true
+}
 
 lowest_free_id :: proc(ids: [^]i32, len: int) -> i32 {
     ids := new_clone(ids, context.temp_allocator)

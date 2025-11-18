@@ -6,10 +6,10 @@ import "core:fmt"
 import "core:math/linalg"
 import "core:time"
 import "core:math/rand"
+import "core:mem"
 import sdl "vendor:sdl3"
 import im "shared:imgui"
 import im_sdl "shared:imgui/imgui_impl_sdl3"
-// import im_sdlgpu "shared:imgui/imgui_impl_sdlgpu3"
 import "core:math"
 
 // Constants
@@ -23,6 +23,7 @@ g: Globals = {
 }
 
 main :: proc() {
+
     fmt.println("MAIN: initing")
     state: AppState = {}
     init(&state)
@@ -72,7 +73,7 @@ init :: proc(state: ^AppState) {
     ok = sdl.HideCursor(); assert(ok)
     ok = sdl.SetWindowRelativeMouseMode(g.window, true); assert(ok)
 
-    g.gpu = sdl.CreateGPUDevice({.SPIRV}, true, nil); assert(g.gpu != nil)
+    g.gpu = sdl.CreateGPUDevice({.SPIRV}, ODIN_DEBUG, nil); assert(g.gpu != nil)
     ok = sdl.ClaimWindowForGPUDevice(g.gpu, g.window); assert(ok)
     ok = sdl.SetGPUSwapchainParameters(g.gpu, g.window, .SDR_LINEAR, PRESENT_MODE); assert(ok)
 
@@ -85,7 +86,7 @@ init :: proc(state: ^AppState) {
     slab := load_obj_model("assets/slab")
     append(&state.models, slab)
 
-    for i in 0..<1000 {
+    for i in 0..<10000 {
         entity, ok := entity_from_model(state, "slab"); assert(ok)
         pos: vec3 = {
             rand.float32_range(-50, 50),
@@ -115,6 +116,21 @@ load_scene :: proc(state: ^AppState, save_file: string) {
 
 
 run :: proc(state: ^AppState) {
+    when ODIN_DEBUG {
+		track: mem.Tracking_Allocator
+		mem.tracking_allocator_init(&track, context.allocator)
+		context.allocator = mem.tracking_allocator(&track)
+
+		defer {
+			if len(track.allocation_map) > 0 {
+				for _, entry in track.allocation_map {
+					fmt.eprintf("%v leaked %v bytes\n", entry.location, entry.size)
+				}
+			}
+			mem.tracking_allocator_destroy(&track)
+		}
+	}
+
     paused: bool
     free_all(context.temp_allocator)
     using state
@@ -145,6 +161,10 @@ run :: proc(state: ^AppState) {
                     case .C:
                         if .LCTRL in ev.key.mod do break main_loop
                     case .N: player.noclip = !player.noclip
+                    case .DELETE:
+                        if g.mode == .EDIT do remove_selected_entity(state)
+                    case .BACKSPACE:
+                        if g.mode == .EDIT do remove_selected_entity(state)
                 }
                 case .MOUSE_BUTTON_DOWN: switch ev.button.button {
                     case 1: g.lmb_down = true
@@ -160,7 +180,6 @@ run :: proc(state: ^AppState) {
         vert_ubo := get_vertex_ubo_global(player)
         debug_info.draw_call_count = 0
         frag_ubo := create_frag_ubo(state)
-
         frame := frame_begin(vert_ubo, frag_ubo)
         defer frame_submit(frame)
 
@@ -178,8 +197,6 @@ run :: proc(state: ^AppState) {
         submit_2d(&frame)
 
         draw_imgui(state, frame)
-        win_size := get_window_size()
-
         state.debug_info.frame_time = time.since(now)
     }
 }
@@ -256,6 +273,7 @@ toggle_ui :: proc(state: ^AppState) {
             sdl.WarpMouseInWindow(g.window, win_size.x, win_size.y)
         case .EDIT:
             g.mode = .PLAY
+            state.editor.selected_entity = -1
             state.editor.dragging = false
             ok := sdl.SetWindowRelativeMouseMode(g.window, true); assert(ok)
             // Update ticks so next call to update doesn't have a massive dt
