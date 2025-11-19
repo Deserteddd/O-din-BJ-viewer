@@ -5,8 +5,9 @@ import "core:log"
 import "core:fmt"
 import "core:math/linalg"
 import "core:time"
-import "core:mem"
 import "core:math"
+import "core:slice"
+import sa "core:container/small_array"
 import sdl "vendor:sdl3"
 import im "shared:imgui"
 import im_sdl "shared:imgui/imgui_impl_sdl3"
@@ -20,15 +21,12 @@ g: Globals = {
     fov = 90
 }
 
-main :: proc() {
-    context.logger = log.create_console_logger()
-    fmt.println("MAIN: initing")
-    state: AppState = {}
-    init(&state)
-    fmt.println("MAIN: init done")
-    run(&state)
-    fmt.println("MAIN: Exiting")
+KeyEvent :: struct {
+    key: sdl.Scancode,
+    mod: sdl.Keymod
 }
+
+KeyboardEvents :: sa.Small_Array(64, KeyEvent)
 
 AppState :: struct {
     editor:             Editor,
@@ -53,6 +51,16 @@ DebugInfo :: struct {
     frame_time:         time.Duration,
     draw_call_count:    u32,
     player_speed:       f32,
+}
+
+main :: proc() {
+    context.logger = log.create_console_logger()
+    fmt.println("MAIN: initing")
+    state: AppState = {}
+    init(&state)
+    fmt.println("MAIN: init done")
+    run(&state)
+    fmt.println("MAIN: Exiting")
 }
 
 init :: proc(state: ^AppState) {
@@ -95,7 +103,7 @@ start_dragging :: proc(editor: ^Editor) {
 }
 
 stop_dragging :: proc(editor: ^Editor) {
-    if editor.dragging == false do return
+    if !editor.dragging do return
     editor.dragging = false
     editor.drag_position = 0
     ok := sdl.SetWindowRelativeMouseMode(g.window, false); assert(ok)
@@ -104,7 +112,6 @@ stop_dragging :: proc(editor: ^Editor) {
 
 run :: proc(state: ^AppState) {
     context.allocator = runtime.panic_allocator()
-
     free_all(context.temp_allocator)
     using state
     main_loop: for {
@@ -115,36 +122,15 @@ run :: proc(state: ^AppState) {
         }
         now := time.now()
         dragging := editor.dragging
+        key_presses: KeyboardEvents
         ev: sdl.Event
         for sdl.PollEvent(&ev) {
             im_sdl.ProcessEvent(&ev)
             #partial switch ev.type {
                 case .QUIT: 
                     break main_loop
-                case .KEY_DOWN: #partial switch ev.key.scancode {
-                    case .ESCAPE:
-                        if editor.dragging {
-                            stop_dragging(&editor) 
-                        } else {
-                            toggle_ui(state)
-                        }
-                    case .Q:
-                        if !player.airborne do player.checkpoint = get_player_translation(player)
-                    case .E:
-                        reset_player_pos(&player)
-                        player.noclip = false
-                    case .F:
-                        RND_ToggleFullscreen(state)
-                    case .C:
-                        if .LCTRL in ev.key.mod do break main_loop
-                    case .N: player.noclip = !player.noclip
-                    case .DELETE:
-                        if g.mode == .EDIT do remove_selected_entity(state)
-                    case .RETURN:
-                        if editor.dragging do stop_dragging(&editor)
-                    case .S:
-                        if .LCTRL in ev.key.mod do write_save_file(state^)
-                }
+                case .KEY_DOWN: 
+                    sa.append(&key_presses, KeyEvent{ev.key.scancode, ev.key.mod})
                 case .MOUSE_BUTTON_DOWN: switch ev.button.button {
                     case 1: g.lmb_down = true
                     case 3: g.rmb_down = true
@@ -154,7 +140,7 @@ run :: proc(state: ^AppState) {
                 }
             }
         }
-        update(state)
+        if update(state, key_presses) do break main_loop
         vert_ubo := get_vertex_ubo_global(player)
         debug_info.draw_call_count = 0
         frag_ubo := create_frag_ubo(state)
@@ -181,18 +167,41 @@ run :: proc(state: ^AppState) {
     }
 }
 
-update :: proc(state: ^AppState) {
+update :: proc(state: ^AppState, keys: KeyboardEvents) -> bool {
     using state
+    exit: bool
     switch g.mode {
         case .PLAY:
-            update_game(state)
+            exit = update_game(state, keys)
         case .EDIT:
-            update_editor(state)
+            exit = update_editor(state, keys)
     }
+    return exit
 }
 
-update_editor :: proc(state: ^AppState) {
+update_editor :: proc(state: ^AppState, keys: KeyboardEvents) -> (exit: bool) {
     using state
+    for elem in 0..<keys.len {
+        key := keys.data[elem].key
+        mod := keys.data[elem].mod
+        #partial switch key {
+            case .S:
+                if .LCTRL in mod do write_save_file(state^)
+            case .C:
+                if .LCTRL in mod do return false
+            case .ESCAPE:
+                if editor.dragging {
+                    stop_dragging(&editor) 
+                } else {
+                    toggle_mode(state)
+                }
+            case .DELETE:
+                remove_selected_entity(state)
+            case .RETURN:
+                stop_dragging(&editor)
+        }
+    } 
+
     m_pos: vec2
     if g.lmb_down {
         win_size := get_window_size()
@@ -222,20 +231,34 @@ update_editor :: proc(state: ^AppState) {
         io := im.GetIO()
         im.IO_AddMousePosEvent(io, editor.drag_position.x, editor.drag_position.y)
     }
+    return
 }
 
-update_game :: proc(state: ^AppState) {
+update_game :: proc(state: ^AppState, keys: KeyboardEvents) -> (exit: bool) {
     using state
+    for elem in 0..<keys.len {
+        key := keys.data[elem].key
+        mod := keys.data[elem].mod
+        #partial switch key {
+            case .ESCAPE:
+                toggle_mode(state)
+            case .C:
+                if .LCTRL in mod do return true
+            case .F:
+                RND_ToggleFullscreen(state)
+            case .Q:
+                if !player.airborne do player.checkpoint = get_player_translation(player)
+            case .E:
+                reset_player_pos(&player)
+                player.noclip = false
+            case .N: player.noclip = !player.noclip
+        }
+    }
     new_ticks := sdl.GetTicks();
     dt := f32(new_ticks - g.last_ticks) / 1000
     g.last_ticks = new_ticks
     update_player(state, dt)
     update_camera(&player)
-
-    if g.rmb_down {
-        new, ok := entity_from_model(state, "slab"); assert(ok)
-        set_entity_transform(state, new, player.position)
-    }
 
     debug_info.player_speed = linalg.length(player.speed)
     renderer.light.position = {
@@ -243,10 +266,11 @@ update_game :: proc(state: ^AppState) {
         player.bbox.max.y,
         player.position.z
     }
+    return
 }
 
 
-toggle_ui :: proc(state: ^AppState) {
+toggle_mode :: proc(state: ^AppState) {
     switch g.mode {
         case .PLAY:
             assert(state.editor.dragging == false)
