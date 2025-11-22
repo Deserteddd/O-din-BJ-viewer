@@ -1,13 +1,8 @@
 package obj_viewer
 
-import "core:simd"
-import "core:time"
-import "core:math/linalg"
 import "core:strings"
 import sdl "vendor:sdl3"
-import im "shared:imgui"
-import im_sdl "shared:imgui/imgui_impl_sdl3"
-import im_sdlgpu "shared:imgui/imgui_impl_sdlgpu3"
+
 
 Vertex2D :: struct {
     position: vec2,
@@ -15,16 +10,13 @@ Vertex2D :: struct {
 }
 
 
-Rect :: struct {
-    x, y,
-    width,
-    height: f32
-}
+Rect :: sdl.FRect
 
 R2D :: struct {
     ui_pipeline: ^sdl.GPUGraphicsPipeline,
     crosshair:   Sprite,
     quad:        Quad,
+    color:       vec4
 }
 
 Sprite :: struct {
@@ -40,10 +32,11 @@ Quad :: struct {
 }
 
 UBO2D :: struct {
-    xywh:     vec4,
+    rect:     Rect,
     win_size: vec2,
     use_tex:  b32,
-    _pad:     b32
+    _pad:     b32,
+    color:    vec4
 }
 
 upload_sprite :: proc(path: string, copy_pass: ^sdl.GPUCopyPass) -> Sprite {
@@ -77,13 +70,11 @@ init_r2d :: proc(renderer: Renderer) {
     {
         using renderer.r2d
         ui_pipeline = create_render_pipeline(
-                "ui.vert",
-                "ui.frag",
-                Vertex2D,
-                {.FLOAT2, .FLOAT2},
-                false,
-                num_vertex_buffers = 2,
-                alpha_blend = true
+            "ui.vert",
+            "ui.frag",
+            Vertex2D,
+            {.FLOAT2, .FLOAT2},
+            false,
         )
         crosshair = upload_sprite("assets/crosshair.png", copy_pass)
         quad = init_quad(copy_pass)
@@ -148,10 +139,9 @@ draw_sprite :: proc(sprite: Sprite, frame: Frame, pos: vec2 = 0, scale: f32 = 1)
     y := pos == 0 ? win_size.y/2 - f32(sprite.size.y)/2 : pos.y
 
     ubo := UBO2D {
-        {x, y, f32(sprite.size.x)*scale, f32(sprite.size.y)*scale},
-        win_size,
-        true,
-        false
+        rect = {x, y, f32(sprite.size.x)*scale, f32(sprite.size.y)*scale},
+        win_size = win_size,
+        use_tex = true,
     }
     sdl.PushGPUVertexUniformData(cmd_buff, 0, &ubo, size_of(UBO2D))
     sdl.BindGPUFragmentSamplers(render_pass, 0, 
@@ -163,15 +153,15 @@ draw_sprite :: proc(sprite: Sprite, frame: Frame, pos: vec2 = 0, scale: f32 = 1)
     sdl.DrawGPUIndexedPrimitives(render_pass, 6, 1, 0, 0, 0)
 }
 
-draw_rect :: proc(rect: Rect, frame: Frame) {
+draw_rect :: proc(rect: Rect, frame: Frame, color: vec4 = 0.2) {
     using frame
     if render_pass == nil do panic("Render pass not in progress")
 
     ubo := UBO2D {
-        {rect.x, rect.y, rect.width, rect.height},
-        win_size,
-        false,
-        false
+        rect = rect,
+        win_size = win_size,
+        use_tex = false,
+        color = color
     }
     sdl.PushGPUVertexUniformData(cmd_buff, 0, &ubo, size_of(UBO2D))
     sdl.DrawGPUIndexedPrimitives(render_pass, 6, 1, 0, 0, 0)
@@ -182,73 +172,7 @@ submit_2d :: proc(frame: ^Frame) {
     frame.render_pass = nil
 }
 
-draw_imgui :: proc(state: ^AppState, frame: Frame) {
-    using state, frame
-    im_sdlgpu.NewFrame()
-    im_sdl.NewFrame()
-    im.NewFrame()
-    if g.mode == .EDIT {
-        if im.Begin("Properties", nil, {.NoTitleBar, .NoResize, .NoMove}) {
-            im.SetWindowPos(0)
-            im.SetWindowSize({editor.sidebar.width, editor.sidebar.height})
-            if im.BeginTabBar("PropertiesTabs") {
-                defer im.EndTabBar()
-                if im.BeginTabItem("Entity") {
-                    defer im.EndTabItem()
-                    for &e in entities {
-                        if e.id == editor.selected_entity {
-                            if im.DragFloat3("Position", &e.transform.translation, 0.01) do editor.dragging = true
-                            if im.DragFloat3("Scale",    &e.transform.scale, 0.01) do editor.dragging = true
-                            for &axis in e.transform.scale do axis = max(0.01, axis)
-                            break
-                        }
-                    }
-                }
 
-                // --- General Tab ---
-                if im.BeginTabItem("General") {
-                    defer im.EndTabItem()
-                    im.LabelText("", "General")
-                    if im.DragFloat("FOV", &g.fov, 1, 50, 140) do editor.dragging = true
-                    im.LabelText("", "Point Light")
-                    if im.DragFloat("intensity", &renderer.light.power, 1, 0, 10000) do editor.dragging = true
-                    im.ColorPicker3("color", &renderer.light.color, {.InputRGB})
-                }
-            }
-            im.End()
-        }
-    }
-    if im.Begin("info", nil, {.NoTitleBar, .NoMouseInputs}) {
-        w, h: i32
-        sdl.GetWindowSize(g.window, &w, &h)
-        im.SetWindowPos(vec2{f32(w-140), 0})
-        im.SetWindowSize(vec2{140, 0})
-        frame_time_float := i32(linalg.round(1/f32(time.duration_seconds(debug_info.frame_time))))
-        im.SetNextItemWidth(50)
-        im.DragInt("FPS", &frame_time_float)
-        rendered := i32(debug_info.draw_call_count)
-        im.SetNextItemWidth(50)
-        im.DragInt("Draw calls", &rendered)
-        im.SetNextItemWidth(50)
-        im.LabelText("", "Player")
-        im.DragFloat("Vel", &debug_info.player_speed)
-        im.DragFloat("X", &player.position.x)
-        im.DragFloat("Y", &player.position.y)
-        im.DragFloat("Z", &player.position.z)
-    }
-    im.End()
-    im.Render()
-    im_draw_data := im.GetDrawData()
-    im_sdlgpu.PrepareDrawData(im_draw_data, cmd_buff)
-    im_color_target := sdl.GPUColorTargetInfo {
-        texture = swapchain,
-        load_op = .LOAD,
-        store_op = .STORE
-    }
-    im_render_pass := sdl.BeginGPURenderPass(cmd_buff, &im_color_target, 1, nil); assert(im_render_pass != nil)
-    im_sdlgpu.RenderDrawData(im_draw_data, cmd_buff, im_render_pass)
-    sdl.EndGPURenderPass(im_render_pass)
-}
 
 upload_polygon :: proc(
     copy_pass:   ^sdl.GPUCopyPass,
@@ -270,24 +194,3 @@ upload_polygon :: proc(
     return
 }
 
-init_imgui :: proc(state: ^AppState) {
-    assert(g.window != nil)
-    if state.ui_context != nil {
-        im_sdlgpu.Shutdown()
-        im_sdl.Shutdown()
-        im.Shutdown()
-        im.DestroyContext(state.ui_context)
-    }
-    im.CHECKVERSION()
-    state.ui_context = im.CreateContext()
-    using state.renderer
-    im_sdl.InitForSDLGPU(g.window)
-    im_sdlgpu.Init(&{
-        Device = g.gpu,
-        ColorTargetFormat = sdl.GetGPUSwapchainTextureFormat(g.gpu, g.window)
-    })
-    style := im.GetStyle()
-    for &color in style.Colors {
-        color.rgb = linalg.pow(color.rgb, 2.2)
-    }
-}

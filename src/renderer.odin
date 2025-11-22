@@ -11,7 +11,6 @@ import "core:encoding/json"
 import sdl "vendor:sdl3"
 
 Renderer :: struct {
-
     obj_pipeline:       ^sdl.GPUGraphicsPipeline,
     bbox_pipeline:      ^sdl.GPUGraphicsPipeline,
     skybox_pipeline:    ^sdl.GPUGraphicsPipeline,
@@ -98,22 +97,17 @@ RND_Init :: proc() -> Renderer {
     })
     renderer.depth_texture = depth_texture
 
-    swapchain_format := sdl.GetGPUSwapchainTextureFormat(g.gpu, g.window)
     renderer.obj_pipeline = create_render_pipeline(
         "shader.vert",
         "shader.frag",
         OBJVertex,
         {.FLOAT3, .FLOAT3, .FLOAT2, .UINT},
-        true,
-        swapchain_format
     )
     renderer.bbox_pipeline = create_render_pipeline(
         "bbox.vert",
         "bbox.frag",
         vec3,
         {.FLOAT3},
-        true,
-        swapchain_format,
         primitive_type = sdl.GPUPrimitiveType.LINELIST
     )
     renderer.heightmap_pipeline = create_render_pipeline(
@@ -121,8 +115,6 @@ RND_Init :: proc() -> Renderer {
         "heightmap.frag",
         HeightMapVertex,
         {.FLOAT3, .FLOAT3},
-        true,
-        swapchain_format
     )
     renderer.skybox_pipeline = create_skybox_pipeline()
 
@@ -152,9 +144,9 @@ RND_Destroy :: proc(renderer: ^Renderer) {
     sdl.DestroyGPUDevice(g.gpu)
 }
 
-RND_ToggleFullscreen :: proc(state: ^AppState) {
-    using state.renderer
-    fullscreen = !fullscreen
+toggle_fullscreen :: proc(state: ^AppState) {
+    using state
+    renderer.fullscreen = !renderer.fullscreen
     ok: bool
     window_bounds: sdl.Rect
     if !sdl.GetDisplayBounds(1, &window_bounds) {
@@ -163,7 +155,7 @@ RND_ToggleFullscreen :: proc(state: ^AppState) {
     sdl.ReleaseWindowFromGPUDevice(g.gpu, g.window)
     sdl.DestroyWindow(g.window)
     width, height: i32
-    if fullscreen {
+    if renderer.fullscreen {
         width = window_bounds.w
         height = window_bounds.h
         g.window = sdl.CreateWindow("Demo window", width, height, {.FULLSCREEN})
@@ -175,8 +167,8 @@ RND_ToggleFullscreen :: proc(state: ^AppState) {
         g.window = sdl.CreateWindow("Demo window", width, height, {}); assert(g.window != nil)
         ok = sdl.ClaimWindowForGPUDevice(g.gpu, g.window); assert(ok)
     }
-
-    ok = sdl.SetGPUSwapchainParameters(g.gpu, g.window, .SDR_LINEAR, PRESENT_MODE); assert(ok)
+    present_mode: sdl.GPUPresentMode = VSYNC? .VSYNC : .IMMEDIATE
+    ok = sdl.SetGPUSwapchainParameters(g.gpu, g.window, .SDR_LINEAR, present_mode); assert(ok)
     depth := sdl.CreateGPUTexture(g.gpu, {
         type = .D2,
         width = u32(width),
@@ -186,8 +178,8 @@ RND_ToggleFullscreen :: proc(state: ^AppState) {
         format = .D32_FLOAT,
         usage = {.SAMPLER, .DEPTH_STENCIL_TARGET}
     })
-    sdl.ReleaseGPUTexture(g.gpu, depth_texture)
-    depth_texture = depth
+    sdl.ReleaseGPUTexture(g.gpu, renderer.depth_texture)
+    renderer.depth_texture = depth
     switch g.mode {
         case .EDIT:
             ok = sdl.SetWindowRelativeMouseMode(g.window, false); assert(ok)
@@ -196,7 +188,9 @@ RND_ToggleFullscreen :: proc(state: ^AppState) {
     }
     assert(ok)
     init_imgui(state)
-    state.editor.sidebar.height = f32(height)
+    state.editor.sidebar_left.rect.h  = f32(height)
+    state.editor.sidebar_right.rect.h = f32(height)
+    state.editor.sidebar_right.rect.x = f32(width-300)
     _ = sdl.GetTicks()
 }
 
@@ -600,25 +594,18 @@ create_render_pipeline :: proc(
     frag_shader: string,
     $vertex_type: typeid,
     vb_attribute_formats: []sdl.GPUVertexElementFormat,
-    use_depth_buffer: bool,
-    swapchain_format := sdl.GPUTextureFormat.INVALID,
-    cull_mode := sdl.GPUCullMode.BACK,
+    use_depth_buffer := true,
     primitive_type := sdl.GPUPrimitiveType.TRIANGLELIST,
-    num_vertex_buffers := 1,
-    alpha_blend := false
 ) -> ^sdl.GPUGraphicsPipeline {
     vert_shader := load_shader(vert_shader); defer sdl.ReleaseGPUShader(g.gpu, vert_shader)
     frag_shader := load_shader(frag_shader); defer sdl.ReleaseGPUShader(g.gpu, frag_shader)
 
-    vb_descriptions := make([]sdl.GPUVertexBufferDescription, num_vertex_buffers, context.temp_allocator)
-    for i in 0..<num_vertex_buffers {
-        vb_descriptions[i] = sdl.GPUVertexBufferDescription {
-            slot = u32(i),
-            pitch = u32(size_of(vertex_type)),
-            input_rate = .VERTEX,
-            instance_step_rate = 0
-        }
-    }
+    vb_descriptions: []sdl.GPUVertexBufferDescription = {sdl.GPUVertexBufferDescription {
+        slot = 0,
+        pitch = u32(size_of(vertex_type)),
+        input_rate = .VERTEX,
+        instance_step_rate = 0
+    }}
 
     vb_attributes := make([]sdl.GPUVertexAttribute, len(vb_attribute_formats), context.temp_allocator)
     offset: u32
@@ -631,10 +618,7 @@ create_render_pipeline :: proc(
         }
         offset += attribute_size(format)
     }
-    swapchain_format := swapchain_format
-    if swapchain_format == .INVALID {
-        swapchain_format = sdl.GetGPUSwapchainTextureFormat(g.gpu, g.window)
-    }
+    swapchain_format := sdl.GetGPUSwapchainTextureFormat(g.gpu, g.window)
     pipeline := sdl.CreateGPUGraphicsPipeline(g.gpu, {
         vertex_shader = vert_shader,
         fragment_shader = frag_shader,
@@ -650,7 +634,7 @@ create_render_pipeline :: proc(
                     src_alpha_blendfactor = .ONE,
                     dst_alpha_blendfactor = .ONE_MINUS_SRC_ALPHA,
                     alpha_blend_op = .ADD,
-                    enable_blend = alpha_blend
+                    enable_blend = true
                 }
             }),
             has_depth_stencil_target = use_depth_buffer,
@@ -664,7 +648,7 @@ create_render_pipeline :: proc(
         },
         rasterizer_state = {
             fill_mode = primitive_type == .TRIANGLELIST ? .FILL : .LINE,
-            cull_mode = cull_mode
+            cull_mode = .BACK
         },
         depth_stencil_state = {
             enable_depth_test = use_depth_buffer,

@@ -98,7 +98,7 @@ load_obj_model :: proc(dir_path: string) -> OBJModel {
 
     aabb_verts: [dynamic]vec3; defer delete(aabb_verts)
     for aabb in aabbs {
-        verts := get_bbox_vertices(aabb)
+        verts := aabb_vertices(aabb)
         for v in verts do append(&aabb_verts, v)
     }
 
@@ -346,3 +346,46 @@ read_file_to_string :: proc(path: string) -> string {
     file_data := string(file)
     return file_data
 }
+
+aabb_vertices :: proc(bbox: AABB) -> [24]vec3 {
+    using bbox
+    return {
+        vec3{min.x, min.y, min.z},
+        vec3{max.x, min.y, min.z},
+
+        vec3{max.x, max.y, min.z},
+        vec3{min.x, max.y, min.z},
+
+        vec3{min.x, min.y, min.z},
+        vec3{min.x, min.y, max.z},
+
+        vec3{max.x, min.y, max.z},
+        vec3{min.x, min.y, max.z},
+
+        vec3{max.x, max.y, max.z},
+        vec3{min.x, max.y, max.z},
+
+        vec3{max.x, min.y, max.z},
+        vec3{max.x, min.y, min.z},
+
+        vec3{max.x, max.y, min.z},
+        vec3{max.x, max.y, max.z},
+
+        vec3{min.x, max.y, min.z},
+        vec3{min.x, max.y, max.z},
+        
+        // Vertical bars
+        vec3{min.x, min.y, min.z},
+        vec3{min.x, max.y, min.z},
+
+        vec3{max.x, min.y, min.z},
+        vec3{max.x, max.y, min.z},
+
+        vec3{min.x, min.y, max.z},
+        vec3{min.x, max.y, max.z},
+
+        vec3{max.x, min.y, max.z},
+        vec3{max.x, max.y, max.z},
+    }
+}
+

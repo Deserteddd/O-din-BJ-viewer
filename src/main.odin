@@ -5,17 +5,13 @@ import "core:log"
 import "core:fmt"
 import "core:math/linalg"
 import "core:time"
-import "core:math"
-import "core:slice"
 import sa "core:container/small_array"
 import sdl "vendor:sdl3"
 import im "shared:imgui"
 import im_sdl "shared:imgui/imgui_impl_sdl3"
 
-// Constants
-PRESENT_MODE: sdl.GPUPresentMode = .IMMEDIATE
-
 // Globals
+VSYNC :: true
 default_context: runtime.Context
 g: Globals = {
     fov = 90
@@ -28,6 +24,12 @@ KeyEvent :: struct {
 
 KeyboardEvents :: sa.Small_Array(64, KeyEvent)
 
+DebugInfo :: struct {
+    frame_time:         time.Duration,
+    draw_call_count:    u32,
+    player_speed:       f32,
+}
+
 AppState :: struct {
     editor:             Editor,
     player:             Player,
@@ -37,20 +39,6 @@ AppState :: struct {
     sprites:            [dynamic]Sprite,
     models:             [dynamic]OBJModel,
     entities:       #soa[dynamic]Entity,
-}
-
-Editor :: struct {
-    selected_entity: i32,
-    sidebar:         Rect,
-    dragging:        bool,
-    drag_position:   vec2,
-    drag_start:      vec2
-}
-
-DebugInfo :: struct {
-    frame_time:         time.Duration,
-    draw_call_count:    u32,
-    player_speed:       f32,
 }
 
 main :: proc() {
@@ -80,34 +68,18 @@ init :: proc(state: ^AppState) {
 
     g.gpu = sdl.CreateGPUDevice({.SPIRV}, ODIN_DEBUG, nil); assert(g.gpu != nil)
     ok = sdl.ClaimWindowForGPUDevice(g.gpu, g.window); assert(ok)
-    ok = sdl.SetGPUSwapchainParameters(g.gpu, g.window, .SDR_LINEAR, PRESENT_MODE); assert(ok)
+    present_mode: sdl.GPUPresentMode = VSYNC? .VSYNC : .IMMEDIATE
+    ok = sdl.SetGPUSwapchainParameters(g.gpu, g.window, .SDR_LINEAR, present_mode); assert(ok)
 
     renderer = RND_Init()
     init_imgui(state)
-    editor.sidebar = {0, 0, 300, 720}
+    editor = {
+        sidebar_left  = {{0, 0, 300, 720}},
+        sidebar_right = {{1280-300, 0, 300, 720}}
+    }
     player = create_player()
 
     load_scene(state, "savefile")
-}
-
-
-
-start_dragging :: proc(editor: ^Editor) {
-    editor.dragging = true
-    x, y: f32
-    _ = sdl.GetMouseState(&x, &y)
-    editor.drag_position = {x, y}
-    editor.drag_start    = {x, y}
-    ok := sdl.SetWindowRelativeMouseMode(g.window, true); assert(ok)
-    _ = sdl.GetRelativeMouseState(nil, nil)
-}
-
-stop_dragging :: proc(editor: ^Editor) {
-    if !editor.dragging do return
-    editor.dragging = false
-    editor.drag_position = 0
-    ok := sdl.SetWindowRelativeMouseMode(g.window, false); assert(ok)
-    sdl.WarpMouseInWindow(g.window, editor.drag_start.x, editor.drag_start.y)
 }
 
 run :: proc(state: ^AppState) {
@@ -121,7 +93,6 @@ run :: proc(state: ^AppState) {
             g.rmb_down = false
         }
         now := time.now()
-        dragging := editor.dragging
         key_presses: KeyboardEvents
         ev: sdl.Event
         for sdl.PollEvent(&ev) {
@@ -130,6 +101,9 @@ run :: proc(state: ^AppState) {
                 case .QUIT: 
                     break main_loop
                 case .KEY_DOWN: 
+                    #partial switch ev.key.scancode {
+                        case .F11: toggle_fullscreen(state)
+                    }
                     sa.append(&key_presses, KeyEvent{ev.key.scancode, ev.key.mod})
                 case .MOUSE_BUTTON_DOWN: switch ev.button.button {
                     case 1: g.lmb_down = true
@@ -154,15 +128,14 @@ run :: proc(state: ^AppState) {
 
         begin_2d(renderer, &frame)
         if g.mode == .EDIT {
-            draw_rect(editor.sidebar, frame)
+            draw_editor(&state.editor, frame)
         } else {
             draw_crosshair(renderer, frame)
         }
         submit_2d(&frame)
-
+        dragging := editor.dragging
         draw_imgui(state, frame)
-
-        if !dragging && editor.dragging do start_dragging(&state.editor)
+        if !dragging && editor.dragging do start_dragging(&editor)
         state.debug_info.frame_time = time.since(now)
     }
 }
@@ -179,61 +152,6 @@ update :: proc(state: ^AppState, keys: KeyboardEvents) -> bool {
     return exit
 }
 
-update_editor :: proc(state: ^AppState, keys: KeyboardEvents) -> (exit: bool) {
-    using state
-    for elem in 0..<keys.len {
-        key := keys.data[elem].key
-        mod := keys.data[elem].mod
-        #partial switch key {
-            case .S:
-                if .LCTRL in mod do write_save_file(state^)
-            case .C:
-                if .LCTRL in mod do return false
-            case .ESCAPE:
-                if editor.dragging {
-                    stop_dragging(&editor) 
-                } else {
-                    toggle_mode(state)
-                }
-            case .DELETE:
-                remove_selected_entity(state)
-            case .RETURN:
-                stop_dragging(&editor)
-        }
-    } 
-
-    m_pos: vec2
-    if g.lmb_down {
-        win_size := get_window_size()
-        _ = sdl.GetMouseState(&m_pos.x, &m_pos.y)
-        if m_pos.x > editor.sidebar.width {
-            ray_origin, ray_dir := ray_from_screen(player, m_pos, win_size)
-            closest_hit: f32 = math.F32_MAX
-            closest_entity: i32 = -1
-            for &entity in entities {
-                aabbs := entity_aabbs(entity)
-                for aabb in aabbs {
-                    intersection := ray_intersect_aabb(ray_origin, ray_dir, aabb)
-                    if intersection != -1 && intersection < closest_hit {
-                        closest_hit = intersection
-                        closest_entity = entity.id
-                    }
-
-                }
-            }
-            editor.selected_entity = closest_entity
-        }
-    }
-    if editor.dragging {
-        m_pos: vec2
-        _ = sdl.GetRelativeMouseState(&m_pos.x, &m_pos.y)
-        editor.drag_position += m_pos
-        io := im.GetIO()
-        im.IO_AddMousePosEvent(io, editor.drag_position.x, editor.drag_position.y)
-    }
-    return
-}
-
 update_game :: proc(state: ^AppState, keys: KeyboardEvents) -> (exit: bool) {
     using state
     for elem in 0..<keys.len {
@@ -244,8 +162,6 @@ update_game :: proc(state: ^AppState, keys: KeyboardEvents) -> (exit: bool) {
                 toggle_mode(state)
             case .C:
                 if .LCTRL in mod do return true
-            case .F:
-                RND_ToggleFullscreen(state)
             case .Q:
                 if !player.airborne do player.checkpoint = get_player_translation(player)
             case .E:

@@ -90,8 +90,8 @@ free_save_file :: proc(savefile: SaveFile) {
 load_height_map :: proc(path: string) -> HeightMap {
     height_path   := strings.concatenate({path, "/height_map.png"})
     diffuse_path  := strings.concatenate({path, "/diffuse.png"})
-    pixels, size  :=  load_pixels_u16(height_path); defer free_pixels(pixels)
-    colors, dsize := load_pixels_byte(diffuse_path);          defer free_pixels(colors)
+    pixels, size  := load_pixels_u16(height_path);   defer free_pixels(pixels)
+    colors, dsize := load_pixels_byte(diffuse_path); defer free_pixels(colors)
     assert(size == dsize)
 
     min: u16 = 1 << 15;
@@ -146,7 +146,6 @@ load_height_map :: proc(path: string) -> HeightMap {
         "heightmap.frag",
         HeightMapVertex,
         {.FLOAT3, .FLOAT3},
-        true,
     )
     height_map: HeightMap
     height_map.num_indices  = u32(len(indices))
@@ -195,4 +194,15 @@ load_pixels_u16 :: proc(path: string) -> (pixels: []u16, size: [2]i32) {
     pixels = slice.from_ptr(pixel_data, int(size.x * size.y))
     assert(pixels != nil)
     return
+}
+
+@(private = "file")
+get_pixel_color :: proc(pixels: []byte, row, col: i32, width: i32) -> vec3 {
+    index := (row * width + col) * 4
+
+    r := f32(pixels[index + 0]) / 255.0
+    g := f32(pixels[index + 1]) / 255.0
+    b := f32(pixels[index + 2]) / 255.0
+
+    return vec3{r, g, b}
 }
