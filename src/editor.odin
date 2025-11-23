@@ -43,7 +43,6 @@ update_editor :: proc(state: ^AppState, keys: KeyboardEvents) -> (exit: bool) {
         }
     } 
     if g.lmb_down {
-        fmt.println("Yess")
         m_pos: vec2
         win_size := get_window_size()
         _ = sdl.GetMouseState(&m_pos.x, &m_pos.y)
@@ -75,8 +74,6 @@ update_editor :: proc(state: ^AppState, keys: KeyboardEvents) -> (exit: bool) {
     return
 }
 
-editor_init :: proc()
-
 start_dragging :: proc(editor: ^Editor) {
     editor.dragging = true
     x, y: f32
@@ -95,9 +92,13 @@ stop_dragging :: proc(editor: ^Editor) {
     sdl.WarpMouseInWindow(g.window, editor.drag_start.x, editor.drag_start.y)
 }
 
-draw_editor :: proc(editor: ^Editor, frame: Frame) {
+draw_editor :: proc(editor: ^Editor, renderer: Renderer, frame: Frame) {
+    sdl.BindGPUGraphicsPipeline(frame.render_pass, renderer.r2.ui_pipeline)
     draw_rect(editor.sidebar_left.rect, frame)
     draw_rect(editor.sidebar_right.rect, frame)
+
+    sdl.BindGPUGraphicsPipeline(frame.render_pass, renderer.r2.sprite_sheet_pipeline)
+    draw_text("GRANDIOOSAAA123a!  ¤¤¤", 400, 1, renderer, frame)
 }
 
 draw_imgui :: proc(state: ^AppState, frame: Frame) {
@@ -129,8 +130,8 @@ draw_imgui :: proc(state: ^AppState, frame: Frame) {
                     im.LabelText("", "General")
                     if im.DragFloat("FOV", &g.fov, 1, 50, 140) do editor.dragging = true
                     im.LabelText("", "Point Light")
-                    if im.DragFloat("intensity", &renderer.light.power, 1, 0, 10000) do editor.dragging = true
-                    im.ColorPicker3("color", &renderer.light.color, {.InputRGB})
+                    if im.DragFloat("intensity", &renderer.r3.light.power, 1, 0, 10000) do editor.dragging = true
+                    im.ColorPicker3("color", &renderer.r3.light.color, {.InputRGB})
                 }
             }
         }
@@ -176,7 +177,6 @@ init_imgui :: proc(state: ^AppState) {
     }
     im.CHECKVERSION()
     state.ui_context = im.CreateContext()
-    using state.renderer
     im_sdl.InitForSDLGPU(g.window)
     im_sdlgpu.Init(&{
         Device = g.gpu,

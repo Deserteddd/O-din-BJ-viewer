@@ -6,7 +6,6 @@ import "core:slice"
 import "core:os"
 import "core:encoding/json"
 import "core:log"
-import "core:fmt"
 import stbi "vendor:stb/image"
 import sdl "vendor:sdl3"
 
@@ -51,6 +50,106 @@ write_save_file :: proc(state: AppState) {
     ok := os.write_entire_file("savefile.json", json_data)
     assert(ok)
     log.logf(.Info, "Saved successfully")
+}
+
+load_sprite :: proc(path: string, copy_pass: ^sdl.GPUCopyPass) -> Sprite {
+    pixels, size := load_pixels_byte(path); assert(pixels != nil)
+    size_u32: [2]u32 = {u32(size.x), u32(size.y)}
+    texture := upload_texture(copy_pass, pixels, size_u32)
+    assert(texture != nil)
+    free_pixels(pixels)
+
+    file_name  := strings.split(path, "/", context.temp_allocator)
+    name_split := strings.split(file_name[len(file_name)-1], ".", context.temp_allocator)
+    name       := strings.clone(name_split[0])
+
+    sampler := sdl.CreateGPUSampler(g.gpu, {}); assert(sampler != nil)
+    return Sprite {
+        name,
+        sampler,
+        texture,
+        size
+    }
+}
+
+load_sprite_sheet :: proc(path: string, copy_pass: ^sdl.GPUCopyPass) -> SpriteSheet {
+    pixels, size := load_pixels_byte(path)
+    defer stbi.image_free(raw_data(pixels))
+    width  := size.x
+    height := size.y
+
+    horizontal_segments,
+    vertical_segments: [dynamic][2]i32
+    defer delete(horizontal_segments)
+    defer delete(vertical_segments)
+    {
+        non_empty_streak: i32
+        start: i32
+        for row: i32 = 0; row < height; row += 1 {
+            row_is_empty := true
+            row_start := row * width * 4
+            for col: i32 = 0; col < width; col += 1 {
+                alpha := pixels[row_start + col*4 + 3]
+                if alpha > 2 {
+                    row_is_empty = false
+                    break
+                }
+            }
+            if !row_is_empty {
+                if non_empty_streak == 0 do start = row
+                non_empty_streak += 1
+            } else {
+                if non_empty_streak > 10 {
+                    segment: [2]i32 = {start, row}
+                    append(&horizontal_segments, segment)
+                }
+                non_empty_streak = 0
+            }
+        }
+    }
+    {
+        non_empty_streak: i32
+        start: i32
+        for col: i32 = 0; col < width; col += 1 {
+            col_is_empty := true
+            for row: i32 = 0; row < height; row += 1 {
+                pixel_index := row * width * 4 + col * 4
+                alpha := pixels[pixel_index + 3]
+                if alpha > 2 {
+                    col_is_empty = false
+                    break
+                }
+            }
+            if !col_is_empty {
+                if non_empty_streak == 0 do start = col
+                non_empty_streak += 1
+            } else {
+                if non_empty_streak > 10 {
+                    segment: [2]i32 = {start, col}
+                    append(&vertical_segments, segment)
+                }
+                non_empty_streak = 0
+            }
+        }
+    }
+    rects: [dynamic]Rect
+    for horizontal in horizontal_segments {
+        for vertical in vertical_segments {
+            rect := Rect {
+                f32(vertical.x),
+                f32(horizontal.x), 
+                f32(vertical.y - vertical.x),
+                f32(horizontal.y - horizontal.x),
+            }
+            append(&rects, rect)
+        }
+    }
+    sheet: SpriteSheet
+    sheet.texture = upload_texture(copy_pass, pixels, {u32(size.x), u32(size.y)})
+    assert(sheet.texture != nil)
+    sheet.rects = rects[:]
+    sheet.size = {width, height}
+    return sheet
 }
 
 load_scene :: proc(state: ^AppState, save_file: string) {

@@ -30,6 +30,13 @@ DebugInfo :: struct {
     player_speed:       f32,
 }
 
+Renderer :: struct {
+    r2: Renderer2,
+    r3: Renderer3,
+    fallback_texture:   ^sdl.GPUTexture,
+    default_sampler:    ^sdl.GPUSampler,
+}
+
 AppState :: struct {
     editor:             Editor,
     player:             Player,
@@ -77,8 +84,8 @@ init :: proc(state: ^AppState) {
         sidebar_left  = {{0, 0, 300, 720}},
         sidebar_right = {{1280-300, 0, 300, 720}}
     }
-    player = create_player()
 
+    player = create_player()
     load_scene(state, "savefile")
 }
 
@@ -91,6 +98,7 @@ run :: proc(state: ^AppState) {
             free_all(context.temp_allocator)
             g.lmb_down = false
             g.rmb_down = false
+            g.frame += 1
         }
         now := time.now()
         key_presses: KeyboardEvents
@@ -128,9 +136,9 @@ run :: proc(state: ^AppState) {
 
         begin_2d(renderer, &frame)
         if g.mode == .EDIT {
-            draw_editor(&state.editor, frame)
+            draw_editor(&state.editor, renderer, frame)
         } else {
-            draw_crosshair(renderer, frame)
+            draw_crosshair(renderer.r2, frame)
         }
         submit_2d(&frame)
         dragging := editor.dragging
@@ -140,16 +148,15 @@ run :: proc(state: ^AppState) {
     }
 }
 
-update :: proc(state: ^AppState, keys: KeyboardEvents) -> bool {
+update :: proc(state: ^AppState, keys: KeyboardEvents) -> (exit: bool) {
     using state
-    exit: bool
     switch g.mode {
         case .PLAY:
             exit = update_game(state, keys)
         case .EDIT:
             exit = update_editor(state, keys)
     }
-    return exit
+    return
 }
 
 update_game :: proc(state: ^AppState, keys: KeyboardEvents) -> (exit: bool) {
@@ -177,7 +184,7 @@ update_game :: proc(state: ^AppState, keys: KeyboardEvents) -> (exit: bool) {
     update_camera(&player)
 
     debug_info.player_speed = linalg.length(player.speed)
-    renderer.light.position = {
+    renderer.r3.light.position = {
         player.position.x,
         player.bbox.max.y,
         player.position.z

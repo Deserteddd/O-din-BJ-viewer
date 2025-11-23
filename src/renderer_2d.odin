@@ -1,5 +1,6 @@
 package obj_viewer
 
+import "core:log"
 import "core:strings"
 import sdl "vendor:sdl3"
 
@@ -9,21 +10,34 @@ Vertex2D :: struct {
     uv:       vec2,
 }
 
-
 Rect :: sdl.FRect
 
-R2D :: struct {
-    ui_pipeline: ^sdl.GPUGraphicsPipeline,
-    crosshair:   Sprite,
-    quad:        Quad,
-    color:       vec4
+Renderer2 :: struct {
+    ui_pipeline:           ^sdl.GPUGraphicsPipeline,
+    sprite_sheet_pipeline: ^sdl.GPUGraphicsPipeline,
+    font_sheet:             SpriteSheet,
+    crosshair:              Sprite,
+    quad:                   Quad,
 }
 
 Sprite :: struct {
     name: string,
     sampler: ^sdl.GPUSampler,
     texture: ^sdl.GPUTexture,
-    size: [2]i32
+    size:    [2]i32
+}
+
+SpriteSheet :: struct {
+    texture: ^sdl.GPUTexture,
+    rects:   []Rect,
+    size:    [2]i32
+}
+
+SpriteSheetUBO :: struct {
+    dst_rect,
+    src_rect,
+    tex_size:    Rect,
+    screen_size: vec2
 }
 
 Quad :: struct {
@@ -39,46 +53,27 @@ UBO2D :: struct {
     color:    vec4
 }
 
-upload_sprite :: proc(path: string, copy_pass: ^sdl.GPUCopyPass) -> Sprite {
-    pixels, size := load_pixels_byte(path); assert(pixels != nil)
-    size_u32: [2]u32 = {u32(size.x), u32(size.y)}
-    texture := upload_texture(copy_pass, pixels, size_u32)
-    assert(texture != nil)
-    free_pixels(pixels)
 
-    file_name  := strings.split(path, "/", context.temp_allocator)
-    name_split := strings.split(file_name[len(file_name)-1], ".", context.temp_allocator)
-    name       := strings.clone(name_split[0])
-
-    sampler := sdl.CreateGPUSampler(g.gpu, {}); assert(sampler != nil)
-    return Sprite {
-        name,
-        sampler,
-        texture,
-        size
-    }
-}
-
-init_r2d :: proc(renderer: Renderer) {
-
-    copy_commands := sdl.AcquireGPUCommandBuffer(g.gpu); assert(copy_commands != nil)
-    defer {ok := sdl.SubmitGPUCommandBuffer(copy_commands); assert(ok)}
-
-    copy_pass := sdl.BeginGPUCopyPass(copy_commands); assert(copy_pass != nil)
-    defer sdl.EndGPUCopyPass(copy_pass)
-
-    {
-        using renderer.r2d
-        ui_pipeline = create_render_pipeline(
-            "ui.vert",
-            "ui.frag",
-            Vertex2D,
-            {.FLOAT2, .FLOAT2},
-            false,
-        )
-        crosshair = upload_sprite("assets/crosshair.png", copy_pass)
-        quad = init_quad(copy_pass)
-    }
+init_r2 :: proc(copy_pass: ^sdl.GPUCopyPass) -> Renderer2 {
+    r2: Renderer2
+    r2.ui_pipeline = create_render_pipeline(
+        "ui.vert",
+        "ui.frag",
+        Vertex2D,
+        {.FLOAT2, .FLOAT2},
+        false,
+    )
+    r2.sprite_sheet_pipeline = create_render_pipeline(
+        "spritesheet.vert",
+        "spritesheet.frag",
+        Vertex2D,
+        {.FLOAT2, .FLOAT2},
+        false,
+    )
+    r2.crosshair = load_sprite("assets/crosshair.png", copy_pass)
+    r2.quad = init_quad(copy_pass)
+    r2.font_sheet = load_sprite_sheet("assets/font.png", copy_pass)
+    return r2
 }
 
 init_quad :: proc(
@@ -104,7 +99,7 @@ begin_2d :: proc(renderer: Renderer, frame: ^Frame) {
     using renderer, frame
     assert(cmd_buff != nil)
     assert(swapchain != nil)
-    assert(r2d.ui_pipeline != nil)
+    assert(r2.ui_pipeline != nil)
 
 
     color_target := sdl.GPUColorTargetInfo {
@@ -113,11 +108,10 @@ begin_2d :: proc(renderer: Renderer, frame: ^Frame) {
         store_op = .STORE,
     }
     render_pass = sdl.BeginGPURenderPass(cmd_buff, &color_target, 1, nil); assert(render_pass != nil)
-    sdl.BindGPUGraphicsPipeline(render_pass, r2d.ui_pipeline)
-    assert(r2d.quad.vbo != nil)
+    assert(r2.quad.vbo != nil)
     bindings: [2]sdl.GPUBufferBinding = {
-        sdl.GPUBufferBinding {buffer = r2d.quad.vbo},
-        sdl.GPUBufferBinding {buffer = r2d.quad.ibo},
+        sdl.GPUBufferBinding {buffer = r2.quad.vbo},
+        sdl.GPUBufferBinding {buffer = r2.quad.ibo},
     }
     sdl.BindGPUFragmentSamplers(frame.render_pass, 0, &(sdl.GPUTextureSamplerBinding  {
         texture = renderer.fallback_texture,
@@ -127,8 +121,9 @@ begin_2d :: proc(renderer: Renderer, frame: ^Frame) {
     sdl.BindGPUIndexBuffer(render_pass, bindings[1], ._16BIT)
 }
 
-draw_crosshair :: proc(renderer: Renderer, frame: Frame) {
-    draw_sprite(renderer.r2d.crosshair, frame)
+draw_crosshair :: proc(renderer: Renderer2, frame: Frame) {
+    sdl.BindGPUGraphicsPipeline(frame.render_pass, renderer.ui_pipeline)
+    draw_sprite(renderer.crosshair, frame)
 }
 
 draw_sprite :: proc(sprite: Sprite, frame: Frame, pos: vec2 = 0, scale: f32 = 1) {
@@ -148,6 +143,55 @@ draw_sprite :: proc(sprite: Sprite, frame: Frame, pos: vec2 = 0, scale: f32 = 1)
         &(sdl.GPUTextureSamplerBinding {
             texture = sprite.texture,
             sampler = sprite.sampler
+        }), 1
+    )
+    sdl.DrawGPUIndexedPrimitives(render_pass, 6, 1, 0, 0, 0)
+}
+
+draw_text :: proc(s: string, pos: vec2, size: f32 = 1, renderer: Renderer, frame: Frame) {
+    s := s
+    pos := pos
+    for char in strings.split_iterator(&s, "") {
+        rect_idx := len(char) == 1 ? int(char[0]-32) : 10
+        src := renderer.r2.font_sheet.rects[rect_idx]
+        draw_sprite_from_sheet(
+            renderer, 
+            renderer.r2.font_sheet, 
+            {pos.x, pos.y, src.w*size, src.h*size}, 
+            rect_idx, 
+            frame
+        )
+        pos.x += src.w*size
+    }
+}
+
+draw_sprite_from_sheet :: proc(
+    renderer: Renderer,
+    sheet: SpriteSheet,
+    dst: Rect = {},
+    index: int,
+    frame: Frame
+) {
+    using frame
+    if render_pass == nil do panic("Render pass not in progress")
+    if index >= len(sheet.rects) {
+        log.logf(.Error, "Sprite index %d is out of range", index)
+        return
+    }
+    ubo := SpriteSheetUBO {
+        dst,
+        sheet.rects[index],
+        {
+            f32(sheet.size.x), f32(sheet.size.y),
+            1/f32(sheet.size.x), 1/f32(sheet.size.y)
+        },
+        win_size
+    }
+    sdl.PushGPUVertexUniformData(cmd_buff, 0, &ubo, size_of(SpriteSheetUBO))
+    sdl.BindGPUFragmentSamplers(render_pass, 0, 
+        &(sdl.GPUTextureSamplerBinding {
+            texture = sheet.texture,
+            sampler = renderer.default_sampler
         }), 1
     )
     sdl.DrawGPUIndexedPrimitives(render_pass, 6, 1, 0, 0, 0)

@@ -10,18 +10,14 @@ import "core:path/filepath"
 import "core:encoding/json"
 import sdl "vendor:sdl3"
 
-Renderer :: struct {
+Renderer3 :: struct {
     obj_pipeline:       ^sdl.GPUGraphicsPipeline,
     bbox_pipeline:      ^sdl.GPUGraphicsPipeline,
     skybox_pipeline:    ^sdl.GPUGraphicsPipeline,
     heightmap_pipeline: ^sdl.GPUGraphicsPipeline,
     depth_texture:      ^sdl.GPUTexture,
-    fallback_texture:   ^sdl.GPUTexture,
     skybox_texture:     ^sdl.GPUTexture,
-    default_sampler:    ^sdl.GPUSampler,
-    fullscreen:         bool,
     light:              PointLight,
-    r2d:                R2D,
 }
 
 
@@ -65,13 +61,27 @@ Frame :: struct {
 
 RND_Init :: proc() -> Renderer {
     renderer: Renderer
+    using renderer
     pixels, size := load_pixels_byte("assets/err_tex.jpg")
-    size_u32: [2]u32 = {u32(size.x), u32(size.y)}
     defer free_pixels(pixels)
 
     copy_commands := sdl.AcquireGPUCommandBuffer(g.gpu); assert(copy_commands != nil)
     copy_pass := sdl.BeginGPUCopyPass(copy_commands); assert(copy_pass != nil)
-    renderer.skybox_texture = load_cubemap_texture(copy_pass, {
+
+    renderer.fallback_texture = upload_texture(copy_pass, pixels, {u32(size.x), u32(size.y)})
+    renderer.default_sampler = sdl.CreateGPUSampler(g.gpu, {})
+    assert(renderer.default_sampler != nil)
+
+    r2 = init_r2(copy_pass)
+    r3 = init_r3(copy_pass)
+    sdl.EndGPUCopyPass(copy_pass)
+    ok := sdl.SubmitGPUCommandBuffer(copy_commands); assert(ok)
+    return renderer
+}
+
+init_r3 :: proc(copy_pass: ^sdl.GPUCopyPass) -> Renderer3 {
+    r3: Renderer3
+    r3.skybox_texture = load_cubemap_texture(copy_pass, {
         .POSITIVEX = "assets/skybox/right.png",
         .NEGATIVEX = "assets/skybox/left.png",
         .POSITIVEY = "assets/skybox/top.png",
@@ -79,13 +89,9 @@ RND_Init :: proc() -> Renderer {
         .POSITIVEZ = "assets/skybox/front.png",
         .NEGATIVEZ = "assets/skybox/back.png",
     })
-    renderer.fallback_texture = upload_texture(copy_pass, pixels, size_u32)
-
-    sdl.EndGPUCopyPass(copy_pass)
-    ok := sdl.SubmitGPUCommandBuffer(copy_commands); assert(ok)
 
     width, height: i32
-    ok = sdl.GetWindowSize(g.window, &width, &height); assert(ok)
+    ok := sdl.GetWindowSize(g.window, &width, &height); assert(ok)
     depth_texture := sdl.CreateGPUTexture(g.gpu, {
         type = .D2,
         width = u32(width),
@@ -95,58 +101,39 @@ RND_Init :: proc() -> Renderer {
         format = .D32_FLOAT,
         usage = {.SAMPLER, .DEPTH_STENCIL_TARGET}
     })
-    renderer.depth_texture = depth_texture
+    r3.depth_texture = depth_texture
 
-    renderer.obj_pipeline = create_render_pipeline(
+    r3.obj_pipeline = create_render_pipeline(
         "shader.vert",
         "shader.frag",
         OBJVertex,
         {.FLOAT3, .FLOAT3, .FLOAT2, .UINT},
     )
-    renderer.bbox_pipeline = create_render_pipeline(
+    r3.bbox_pipeline = create_render_pipeline(
         "bbox.vert",
         "bbox.frag",
         vec3,
         {.FLOAT3},
         primitive_type = sdl.GPUPrimitiveType.LINELIST
     )
-    renderer.heightmap_pipeline = create_render_pipeline(
+    r3.heightmap_pipeline = create_render_pipeline(
         "heightmap.vert",
         "heightmap.frag",
         HeightMapVertex,
         {.FLOAT3, .FLOAT3},
     )
-    renderer.skybox_pipeline = create_skybox_pipeline()
-
-    renderer.default_sampler = sdl.CreateGPUSampler(g.gpu, {})
-    assert(renderer.default_sampler != nil)
-
-    renderer.light = PointLight {
+    r3.skybox_pipeline = create_skybox_pipeline()
+    r3.light = PointLight {
         position = vec3{0, 10, 25},
         color = 1,
         power = 50
     }
-    init_r2d(renderer)
-    return renderer
-}
-
-RND_Destroy :: proc(renderer: ^Renderer) {
-    using renderer
-    sdl.ReleaseGPUGraphicsPipeline(g.gpu, obj_pipeline)
-    sdl.ReleaseGPUGraphicsPipeline(g.gpu, bbox_pipeline)
-    sdl.ReleaseGPUGraphicsPipeline(g.gpu, heightmap_pipeline)
-    sdl.ReleaseGPUGraphicsPipeline(g.gpu, r2d.ui_pipeline)
-    sdl.ReleaseGPUTexture(g.gpu, depth_texture)
-    sdl.ReleaseGPUTexture(g.gpu, fallback_texture)
-    sdl.ReleaseGPUSampler(g.gpu, default_sampler)
-    sdl.ReleaseWindowFromGPUDevice(g.gpu, g.window)
-    sdl.DestroyWindow(g.window)
-    sdl.DestroyGPUDevice(g.gpu)
+    return r3
 }
 
 toggle_fullscreen :: proc(state: ^AppState) {
     using state
-    renderer.fullscreen = !renderer.fullscreen
+    g.fullscreen = !g.fullscreen
     ok: bool
     window_bounds: sdl.Rect
     if !sdl.GetDisplayBounds(1, &window_bounds) {
@@ -155,7 +142,7 @@ toggle_fullscreen :: proc(state: ^AppState) {
     sdl.ReleaseWindowFromGPUDevice(g.gpu, g.window)
     sdl.DestroyWindow(g.window)
     width, height: i32
-    if renderer.fullscreen {
+    if g.fullscreen {
         width = window_bounds.w
         height = window_bounds.h
         g.window = sdl.CreateWindow("Demo window", width, height, {.FULLSCREEN})
@@ -178,8 +165,8 @@ toggle_fullscreen :: proc(state: ^AppState) {
         format = .D32_FLOAT,
         usage = {.SAMPLER, .DEPTH_STENCIL_TARGET}
     })
-    sdl.ReleaseGPUTexture(g.gpu, renderer.depth_texture)
-    renderer.depth_texture = depth
+    sdl.ReleaseGPUTexture(g.gpu, renderer.r3.depth_texture)
+    renderer.r3.depth_texture = depth
     switch g.mode {
         case .EDIT:
             ok = sdl.SetWindowRelativeMouseMode(g.window, false); assert(ok)
@@ -236,16 +223,16 @@ frame_submit :: proc(frame: Frame) {
 create_frag_ubo :: proc(state: ^AppState) -> FragUBOGlobal {
     using state
     return FragUBOGlobal {
-        light_pos = renderer.light.position,
-        light_color = renderer.light.color,
-        light_intensity = renderer.light.power,
+        light_pos = renderer.r3.light.position,
+        light_color = renderer.r3.light.color,
+        light_intensity = renderer.r3.light.power,
         view_pos = get_camera_position(player)
     }
 }
 
 render_heightmap :: proc (height_map: HeightMap, renderer: Renderer, frame: Frame) {
     scale := height_map.scale
-    sdl.BindGPUGraphicsPipeline(frame.render_pass, renderer.heightmap_pipeline)
+    sdl.BindGPUGraphicsPipeline(frame.render_pass, renderer.r3.heightmap_pipeline)
     sdl.PushGPUVertexUniformData(frame.cmd_buff, 1, &scale, size_of(vec3))
     bindings: [2]sdl.GPUBufferBinding = {
         sdl.GPUBufferBinding{buffer = height_map.vbo},
@@ -266,7 +253,7 @@ begin_3d :: proc(renderer: Renderer, frame: ^Frame) {
         clear_color = 0,
     }
     depth_target_info := sdl.GPUDepthStencilTargetInfo {
-        texture = renderer.depth_texture,
+        texture = renderer.r3.depth_texture,
         clear_depth = 1,
         load_op = .CLEAR,
         store_op = .STORE,
@@ -299,7 +286,7 @@ render_3D :: proc(state: ^AppState, frame: ^Frame) {
         texture = state.renderer.fallback_texture,
         sampler = state.renderer.default_sampler
     }
-    sdl.BindGPUGraphicsPipeline(frame.render_pass, renderer.obj_pipeline)
+    sdl.BindGPUGraphicsPipeline(frame.render_pass, renderer.r3.obj_pipeline)
     for &model in state.models {
         bindings: [1]sdl.GPUBufferBinding = {{buffer = model.vbo}}
         sdl.BindGPUVertexBuffers(frame.render_pass, 0, &bindings[0], 1)
@@ -339,7 +326,7 @@ render_3D :: proc(state: ^AppState, frame: ^Frame) {
             if entity.model == nil do continue
             if entity.id != state.editor.selected_entity do continue
             if !is_visible(entity, frame.frustum_planes) do continue
-            sdl.BindGPUGraphicsPipeline(frame.render_pass, renderer.bbox_pipeline)
+            sdl.BindGPUGraphicsPipeline(frame.render_pass, renderer.r3.bbox_pipeline)
             bindings: [1]sdl.GPUBufferBinding = { sdl.GPUBufferBinding { buffer = entity.model.aabb_vbo } } 
             sdl.BindGPUVertexBuffers(frame.render_pass, 0, &bindings[0], 1)
             model_matrix := linalg.matrix4_from_trs(
@@ -356,9 +343,9 @@ render_3D :: proc(state: ^AppState, frame: ^Frame) {
 
     // Skybox
     {
-        sdl.BindGPUGraphicsPipeline(frame.render_pass, renderer.skybox_pipeline)
+        sdl.BindGPUGraphicsPipeline(frame.render_pass, renderer.r3.skybox_pipeline)
         sdl.BindGPUFragmentSamplers(frame.render_pass, 0, &(sdl.GPUTextureSamplerBinding  {
-            texture = renderer.skybox_texture,
+            texture = renderer.r3.skybox_texture,
             sampler = renderer.default_sampler
         }), 1)
         debug_info.draw_call_count += 1
@@ -444,7 +431,7 @@ upload_texture :: proc(
         height = u32(size.y),
         layer_count_or_depth = 1,
         num_levels = 1
-    })
+    }); assert(texture != nil)
 
     tex_transfer_buffer := sdl.CreateGPUTransferBuffer(g.gpu, {
         usage = .UPLOAD,
