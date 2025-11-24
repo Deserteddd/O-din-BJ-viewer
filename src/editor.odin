@@ -1,7 +1,6 @@
 package obj_viewer
 
 import "core:time"
-import "core:fmt"
 import sdl "vendor:sdl3"
 import im "shared:imgui"
 import im_sdl "shared:imgui/imgui_impl_sdl3"
@@ -92,13 +91,10 @@ stop_dragging :: proc(editor: ^Editor) {
     sdl.WarpMouseInWindow(g.window, editor.drag_start.x, editor.drag_start.y)
 }
 
-draw_editor :: proc(editor: ^Editor, renderer: Renderer, frame: Frame) {
-    sdl.BindGPUGraphicsPipeline(frame.render_pass, renderer.r2.ui_pipeline)
+draw_editor :: proc(editor: Editor, renderer: ^Renderer, frame: Frame) {
+    bind_pipeline(renderer, frame, .QUAD)
     draw_rect(editor.sidebar_left.rect, frame)
     draw_rect(editor.sidebar_right.rect, frame)
-
-    sdl.BindGPUGraphicsPipeline(frame.render_pass, renderer.r2.sprite_sheet_pipeline)
-    draw_text("GRANDIOOSAAA123a!  ¤¤¤", 400, 1, renderer, frame)
 }
 
 draw_imgui :: proc(state: ^AppState, frame: Frame) {

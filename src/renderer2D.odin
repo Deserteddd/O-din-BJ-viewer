@@ -1,9 +1,7 @@
 package obj_viewer
 
 import "core:log"
-import "core:strings"
 import sdl "vendor:sdl3"
-
 
 Vertex2D :: struct {
     position: vec2,
@@ -13,9 +11,8 @@ Vertex2D :: struct {
 Rect :: sdl.FRect
 
 Renderer2 :: struct {
-    ui_pipeline:           ^sdl.GPUGraphicsPipeline,
+    quad_pipeline:         ^sdl.GPUGraphicsPipeline,
     sprite_sheet_pipeline: ^sdl.GPUGraphicsPipeline,
-    font_sheet:             SpriteSheet,
     crosshair:              Sprite,
     quad:                   Quad,
 }
@@ -34,10 +31,10 @@ SpriteSheet :: struct {
 }
 
 SpriteSheetUBO :: struct {
-    dst_rect,
-    src_rect,
+    dst_rect:    Rect,
+    src_rect:    Rect,
     tex_size:    Rect,
-    screen_size: vec2
+    screen_size: vec2,
 }
 
 Quad :: struct {
@@ -56,7 +53,7 @@ UBO2D :: struct {
 
 init_r2 :: proc(copy_pass: ^sdl.GPUCopyPass) -> Renderer2 {
     r2: Renderer2
-    r2.ui_pipeline = create_render_pipeline(
+    r2.quad_pipeline = create_render_pipeline(
         "ui.vert",
         "ui.frag",
         Vertex2D,
@@ -72,7 +69,6 @@ init_r2 :: proc(copy_pass: ^sdl.GPUCopyPass) -> Renderer2 {
     )
     r2.crosshair = load_sprite("assets/crosshair.png", copy_pass)
     r2.quad = init_quad(copy_pass)
-    r2.font_sheet = load_sprite_sheet("assets/font.png", copy_pass)
     return r2
 }
 
@@ -99,8 +95,7 @@ begin_2d :: proc(renderer: Renderer, frame: ^Frame) {
     using renderer, frame
     assert(cmd_buff != nil)
     assert(swapchain != nil)
-    assert(r2.ui_pipeline != nil)
-
+    assert(r2.quad_pipeline != nil)
 
     color_target := sdl.GPUColorTargetInfo {
         texture = swapchain,
@@ -121,9 +116,9 @@ begin_2d :: proc(renderer: Renderer, frame: ^Frame) {
     sdl.BindGPUIndexBuffer(render_pass, bindings[1], ._16BIT)
 }
 
-draw_crosshair :: proc(renderer: Renderer2, frame: Frame) {
-    sdl.BindGPUGraphicsPipeline(frame.render_pass, renderer.ui_pipeline)
-    draw_sprite(renderer.crosshair, frame)
+draw_crosshair :: proc(renderer: ^Renderer, frame: Frame) {
+    bind_pipeline(renderer, frame, .QUAD)
+    draw_sprite(renderer.r2.crosshair, frame)
 }
 
 draw_sprite :: proc(sprite: Sprite, frame: Frame, pos: vec2 = 0, scale: f32 = 1) {
@@ -148,27 +143,10 @@ draw_sprite :: proc(sprite: Sprite, frame: Frame, pos: vec2 = 0, scale: f32 = 1)
     sdl.DrawGPUIndexedPrimitives(render_pass, 6, 1, 0, 0, 0)
 }
 
-draw_text :: proc(s: string, pos: vec2, size: f32 = 1, renderer: Renderer, frame: Frame) {
-    s := s
-    pos := pos
-    for char in strings.split_iterator(&s, "") {
-        rect_idx := len(char) == 1 ? int(char[0]-32) : 10
-        src := renderer.r2.font_sheet.rects[rect_idx]
-        draw_sprite_from_sheet(
-            renderer, 
-            renderer.r2.font_sheet, 
-            {pos.x, pos.y, src.w*size, src.h*size}, 
-            rect_idx, 
-            frame
-        )
-        pos.x += src.w*size
-    }
-}
-
 draw_sprite_from_sheet :: proc(
     renderer: Renderer,
     sheet: SpriteSheet,
-    dst: Rect = {},
+    pos: vec2,
     index: int,
     frame: Frame
 ) {
@@ -178,16 +156,18 @@ draw_sprite_from_sheet :: proc(
         log.logf(.Error, "Sprite index %d is out of range", index)
         return
     }
-    ubo := SpriteSheetUBO {
-        dst,
-        sheet.rects[index],
+
+    src_rect := sheet.rects[index]
+    ubo_global := SpriteSheetUBO{
+        {pos.x, pos.y, src_rect.w, src_rect.h},
+        src_rect,
         {
             f32(sheet.size.x), f32(sheet.size.y),
             1/f32(sheet.size.x), 1/f32(sheet.size.y)
         },
         win_size
     }
-    sdl.PushGPUVertexUniformData(cmd_buff, 0, &ubo, size_of(SpriteSheetUBO))
+    sdl.PushGPUVertexUniformData(cmd_buff, 0, &ubo_global, size_of(SpriteSheetUBO))
     sdl.BindGPUFragmentSamplers(render_pass, 0, 
         &(sdl.GPUTextureSamplerBinding {
             texture = sheet.texture,

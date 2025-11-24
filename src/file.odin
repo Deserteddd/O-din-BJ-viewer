@@ -3,9 +3,9 @@ package obj_viewer
 import "core:strings"
 import "base:runtime"
 import "core:slice"
+import "core:fmt"
 import "core:os"
 import "core:encoding/json"
-import "core:log"
 import stbi "vendor:stb/image"
 import sdl "vendor:sdl3"
 
@@ -22,7 +22,7 @@ SaveFile :: struct {
     instances: []AssetInstance
 }
 
-write_save_file :: proc(state: AppState) {
+write_save_file :: proc(state: AppState, loc := #caller_location) {
     save: SaveFile = {
         instances = make([]AssetInstance, len(state.entities), context.temp_allocator),
         assets = make(map[string]string, context.temp_allocator)
@@ -41,7 +41,7 @@ write_save_file :: proc(state: AppState) {
     json_data, err := json.marshal(
         save, 
         opt = {
-            pretty = true,
+            // pretty = true,
             mjson_keys_use_quotes = true
         },
         allocator = context.temp_allocator
@@ -49,7 +49,7 @@ write_save_file :: proc(state: AppState) {
     assert(err == nil)
     ok := os.write_entire_file("savefile.json", json_data)
     assert(ok)
-    log.logf(.Info, "Saved successfully")
+    fmt.printfln("%v: Save file writing successful", loc)
 }
 
 load_sprite :: proc(path: string, copy_pass: ^sdl.GPUCopyPass) -> Sprite {
@@ -78,28 +78,30 @@ load_sprite_sheet :: proc(path: string, copy_pass: ^sdl.GPUCopyPass) -> SpriteSh
     width  := size.x
     height := size.y
 
-    horizontal_segments,
-    vertical_segments: [dynamic][2]i32
+    horizontal_segments: [dynamic][2]i32
     defer delete(horizontal_segments)
-    defer delete(vertical_segments)
     {
         non_empty_streak: i32
         start: i32
         for row: i32 = 0; row < height; row += 1 {
             row_is_empty := true
+
             row_start := row * width * 4
+
             for col: i32 = 0; col < width; col += 1 {
                 alpha := pixels[row_start + col*4 + 3]
+
                 if alpha > 2 {
                     row_is_empty = false
                     break
                 }
             }
+
             if !row_is_empty {
                 if non_empty_streak == 0 do start = row
                 non_empty_streak += 1
             } else {
-                if non_empty_streak > 10 {
+                if non_empty_streak > 3 {
                     segment: [2]i32 = {start, row}
                     append(&horizontal_segments, segment)
                 }
@@ -107,43 +109,44 @@ load_sprite_sheet :: proc(path: string, copy_pass: ^sdl.GPUCopyPass) -> SpriteSh
             }
         }
     }
-    {
-        non_empty_streak: i32
-        start: i32
-        for col: i32 = 0; col < width; col += 1 {
-            col_is_empty := true
-            for row: i32 = 0; row < height; row += 1 {
-                pixel_index := row * width * 4 + col * 4
-                alpha := pixels[pixel_index + 3]
-                if alpha > 2 {
-                    col_is_empty = false
-                    break
-                }
-            }
-            if !col_is_empty {
-                if non_empty_streak == 0 do start = col
-                non_empty_streak += 1
-            } else {
-                if non_empty_streak > 10 {
-                    segment: [2]i32 = {start, col}
-                    append(&vertical_segments, segment)
-                }
-                non_empty_streak = 0
-            }
-        }
-    }
     rects: [dynamic]Rect
-    for horizontal in horizontal_segments {
-        for vertical in vertical_segments {
-            rect := Rect {
-                f32(vertical.x),
-                f32(horizontal.x), 
-                f32(vertical.y - vertical.x),
-                f32(horizontal.y - horizontal.x),
+    for segment, i in horizontal_segments {
+        start: i32 = -1
+        end: i32   = -1
+        empty_streak: int
+        for col in 0..<width {
+            empty_column := true
+            for row in segment.x..<segment.y {
+                index := (row * width + col) * 4
+                alpha := pixels[index+3]
+                if alpha > 5 {
+                    empty_column = false
+                    break
+                } 
             }
-            append(&rects, rect)
+            if empty_column {
+                if start != -1 && end != -1 && empty_streak > 12 || (col == width - 1 && end == -1 && start != -1) {
+                    // if i == 2 do log.debugf("upper: %d, lower: %d, left: %d, right: %d", segment.x, segment.y, start, end)
+                    append(&rects, Rect{
+                        f32(start),
+                        f32(segment.x),
+                        f32(end - start),
+                        f32(segment.y - segment.x)
+                    })
+                    start = -1
+                    end   = -1
+                }
+                if empty_streak == 0 do end = col
+                empty_streak += 1
+            } else {
+                if start == -1 do start = col
+                empty_streak = 0
+            }
+
+
         }
     }
+
     sheet: SpriteSheet
     sheet.texture = upload_texture(copy_pass, pixels, {u32(size.x), u32(size.y)})
     assert(sheet.texture != nil)

@@ -12,15 +12,13 @@ import sdl "vendor:sdl3"
 
 Renderer3 :: struct {
     obj_pipeline:       ^sdl.GPUGraphicsPipeline,
-    bbox_pipeline:      ^sdl.GPUGraphicsPipeline,
+    aabb_pipeline:      ^sdl.GPUGraphicsPipeline,
     skybox_pipeline:    ^sdl.GPUGraphicsPipeline,
     heightmap_pipeline: ^sdl.GPUGraphicsPipeline,
     depth_texture:      ^sdl.GPUTexture,
     skybox_texture:     ^sdl.GPUTexture,
     light:              PointLight,
 }
-
-
 
 PointLight :: struct {
     position: vec3,
@@ -109,7 +107,7 @@ init_r3 :: proc(copy_pass: ^sdl.GPUCopyPass) -> Renderer3 {
         OBJVertex,
         {.FLOAT3, .FLOAT3, .FLOAT2, .UINT},
     )
-    r3.bbox_pipeline = create_render_pipeline(
+    r3.aabb_pipeline = create_render_pipeline(
         "bbox.vert",
         "bbox.frag",
         vec3,
@@ -187,13 +185,13 @@ frame_begin :: proc(
     frag_ubo: FragUBOGlobal
 ) -> Frame {
     cmd_buff := sdl.AcquireGPUCommandBuffer(g.gpu); assert(cmd_buff != nil)
+    assert(cmd_buff  != nil)
     swapchain: ^sdl.GPUTexture
     ok := sdl.WaitAndAcquireGPUSwapchainTexture(cmd_buff, g.window, &swapchain, nil, nil)
+    assert(swapchain != nil)
+    assert(ok)
     win_size := get_window_size()
     frustum_planes := create_frustum_planes(vert_ubo.vp)
-    assert(ok)
-    assert(cmd_buff  != nil)
-    assert(swapchain != nil)
     return Frame {
         cmd_buff,
         swapchain,
@@ -230,9 +228,9 @@ create_frag_ubo :: proc(state: ^AppState) -> FragUBOGlobal {
     }
 }
 
-render_heightmap :: proc (height_map: HeightMap, renderer: Renderer, frame: Frame) {
+render_heightmap :: proc (height_map: HeightMap, renderer: ^Renderer, frame: Frame) {
     scale := height_map.scale
-    sdl.BindGPUGraphicsPipeline(frame.render_pass, renderer.r3.heightmap_pipeline)
+    bind_pipeline(renderer, frame, .HEIGHTMAP)
     sdl.PushGPUVertexUniformData(frame.cmd_buff, 1, &scale, size_of(vec3))
     bindings: [2]sdl.GPUBufferBinding = {
         sdl.GPUBufferBinding{buffer = height_map.vbo},
@@ -274,7 +272,7 @@ submit_3d :: proc(frame: ^Frame) {
     frame.render_pass = nil
 }
 
-render_3D :: proc(state: ^AppState, frame: ^Frame) {
+render_3D :: proc(state: ^AppState, frame: Frame) {
     using state
 
     assert(frame.cmd_buff  != nil)
@@ -286,7 +284,7 @@ render_3D :: proc(state: ^AppState, frame: ^Frame) {
         texture = state.renderer.fallback_texture,
         sampler = state.renderer.default_sampler
     }
-    sdl.BindGPUGraphicsPipeline(frame.render_pass, renderer.r3.obj_pipeline)
+    bind_pipeline(&renderer, frame, .OBJ)
     for &model in state.models {
         bindings: [1]sdl.GPUBufferBinding = {{buffer = model.vbo}}
         sdl.BindGPUVertexBuffers(frame.render_pass, 0, &bindings[0], 1)
@@ -326,7 +324,7 @@ render_3D :: proc(state: ^AppState, frame: ^Frame) {
             if entity.model == nil do continue
             if entity.id != state.editor.selected_entity do continue
             if !is_visible(entity, frame.frustum_planes) do continue
-            sdl.BindGPUGraphicsPipeline(frame.render_pass, renderer.r3.bbox_pipeline)
+            bind_pipeline(&renderer, frame, .AABB)
             bindings: [1]sdl.GPUBufferBinding = { sdl.GPUBufferBinding { buffer = entity.model.aabb_vbo } } 
             sdl.BindGPUVertexBuffers(frame.render_pass, 0, &bindings[0], 1)
             model_matrix := linalg.matrix4_from_trs(
@@ -343,7 +341,7 @@ render_3D :: proc(state: ^AppState, frame: ^Frame) {
 
     // Skybox
     {
-        sdl.BindGPUGraphicsPipeline(frame.render_pass, renderer.r3.skybox_pipeline)
+        bind_pipeline(&renderer, frame, .SKYBOX)
         sdl.BindGPUFragmentSamplers(frame.render_pass, 0, &(sdl.GPUTextureSamplerBinding  {
             texture = renderer.r3.skybox_texture,
             sampler = renderer.default_sampler

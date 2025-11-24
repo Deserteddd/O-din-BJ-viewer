@@ -2,10 +2,8 @@ package obj_viewer
 
 import "core:os"
 import "core:strings"
-import "core:slice"
 import "core:strconv"
 import "core:log"
-import "core:fmt"
 import sdl "vendor:sdl3"
 
 OBJModel :: struct {
@@ -50,12 +48,8 @@ Texture :: struct {
     texture: ^sdl.GPUTexture,
 }
 
-delete_obj :: proc(model: OBJModel) {
-    panic("Not implemented")
-}
-
 load_obj_model :: proc(dir_path: string) -> OBJModel {
-    fmt.println("Loading:", dir_path)
+    log.infof("Loading OBJ: %v", dir_path)
     defer free_all(context.temp_allocator)
     asset_handle, err := os.open(dir_path, 0, 0); assert(err == nil)
     dir_split: []string

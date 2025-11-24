@@ -8,7 +8,7 @@ struct Output {
     float2 uv : TEXCOORD0;
 };
 
-cbuffer SpriteCB : register(b0, space1)
+cbuffer SpriteCBGlobal : register(b0, space1)
 {
     float4 dstRect; // x, y, w, h
     float4 srcRect; // x, y, w, h in pixels

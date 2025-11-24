@@ -10,7 +10,6 @@ import sdl "vendor:sdl3"
 import im "shared:imgui"
 import im_sdl "shared:imgui/imgui_impl_sdl3"
 
-// Globals
 VSYNC :: true
 default_context: runtime.Context
 g: Globals = {
@@ -35,6 +34,7 @@ Renderer :: struct {
     r3: Renderer3,
     fallback_texture:   ^sdl.GPUTexture,
     default_sampler:    ^sdl.GPUSampler,
+    bound_pipeline:     Pipeline,
 }
 
 AppState :: struct {
@@ -50,12 +50,10 @@ AppState :: struct {
 
 main :: proc() {
     context.logger = log.create_console_logger()
-    fmt.println("MAIN: initing")
     state: AppState = {}
     init(&state)
-    fmt.println("MAIN: init done")
+    log.debugf("Program initialized successfully")
     run(&state)
-    fmt.println("MAIN: Exiting")
 }
 
 init :: proc(state: ^AppState) {
@@ -130,15 +128,15 @@ run :: proc(state: ^AppState) {
         defer frame_submit(frame)
 
         begin_3d(renderer, &frame)
-        render_3D(state, &frame)
+        render_3D(state, frame)
         submit_3d(&frame)
         assert(frame.render_pass == nil)
 
         begin_2d(renderer, &frame)
         if g.mode == .EDIT {
-            draw_editor(&state.editor, renderer, frame)
+            draw_editor(editor, &renderer, frame)
         } else {
-            draw_crosshair(renderer.r2, frame)
+            draw_crosshair(&renderer, frame)
         }
         submit_2d(&frame)
         dragging := editor.dragging

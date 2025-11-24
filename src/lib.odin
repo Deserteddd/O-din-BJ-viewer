@@ -2,6 +2,8 @@ package obj_viewer
 import "core:math"
 import "core:math/linalg"
 import "core:math/rand"
+import "core:log"
+import "base:runtime"
 
 import sdl "vendor:sdl3"
 
@@ -29,6 +31,16 @@ Globals :: struct {
     debug_draw: bool,
 }
 
+Pipeline :: enum {
+    NONE,
+    OBJ,
+    AABB,
+    SKYBOX,
+    HEIGHTMAP,
+    QUAD,
+    SPRITESHEET,
+}
+
 Mode :: enum {
     PLAY,
     EDIT
@@ -49,6 +61,29 @@ HeightMap :: struct {
 
 HeightMapVertex :: struct {
     position, color: vec3,
+}
+
+bind_pipeline :: proc(renderer: ^Renderer, frame: Frame, pipeline: Pipeline, loc := #caller_location) {
+    assert(frame.render_pass != nil)
+    if pipeline == renderer.bound_pipeline {
+        log.warnf("%v: attempted to bind already bound pipeline: %v", loc, pipeline)
+        return
+    }
+    to_be_bound: ^sdl.GPUGraphicsPipeline
+    switch pipeline {
+        case .NONE: {
+            log.errorf("%v: attempted to bind NONE pipeline", loc)
+            runtime.trap()
+        }
+        case .OBJ:          to_be_bound = renderer.r3.obj_pipeline
+        case .AABB:         to_be_bound = renderer.r3.aabb_pipeline
+        case .SKYBOX:       to_be_bound = renderer.r3.skybox_pipeline
+        case .HEIGHTMAP:    to_be_bound = renderer.r3.heightmap_pipeline
+        case .QUAD:         to_be_bound = renderer.r2.quad_pipeline
+        case .SPRITESHEET:  to_be_bound = renderer.r2.sprite_sheet_pipeline
+    }
+    sdl.BindGPUGraphicsPipeline(frame.render_pass, to_be_bound)
+    renderer.bound_pipeline = pipeline
 }
 
 to_vec4 :: proc(v: vec3, f: f32) -> vec4 { return vec4{v.x, v.y, v.z, f} }
