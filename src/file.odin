@@ -22,16 +22,16 @@ SaveFile :: struct {
     instances: []AssetInstance
 }
 
-write_save_file :: proc(state: AppState, loc := #caller_location) {
+write_save_file :: proc(scene: Scene, loc := #caller_location) {
     save: SaveFile = {
-        instances = make([]AssetInstance, len(state.entities), context.temp_allocator),
+        instances = make([]AssetInstance, len(scene.entities), context.temp_allocator),
         assets = make(map[string]string, context.temp_allocator)
     }
-    save.checkpoint = state.player.checkpoint
-    for a in state.models {
+    save.checkpoint = g.player.checkpoint
+    for a in scene.models {
         save.assets[a.name] = a.path
     }
-    for e, i in state.entities {
+    for e, i in scene.entities {
         save.instances[i] = AssetInstance {
             asset    = e.model.name,
             position = e.transform.translation,
@@ -155,21 +155,23 @@ load_sprite_sheet :: proc(path: string, copy_pass: ^sdl.GPUCopyPass) -> SpriteSh
     return sheet
 }
 
-load_scene :: proc(state: ^AppState, save_file: string) {
-    save_file := load_save_file("savefile")
+load_scene :: proc(savefile_path: string) -> Scene {
+    save_file := load_save_file(savefile_path)
     defer free_save_file(save_file)
-    state.player.checkpoint = save_file.checkpoint
-    reset_player_pos(&state.player)
+    g.player.checkpoint = save_file.checkpoint
+    reset_player_pos()
+    scene: Scene
     for asset in save_file.assets {
         model := load_obj_model(save_file.assets[asset])
-        append(&state.models, model)
+        append(&scene.models, model)
         for instance in save_file.instances {
             if instance.asset == asset {
-                entity, ok := entity_from_model(state, asset); assert(ok)
-                set_entity_transform(state, entity, instance.position, instance.scale)
+                entity_id, ok := entity_from_model(&scene, asset); assert(ok)
+                set_entity_transform(&scene, entity_id, instance.position, instance.scale)
             }
         }
     }
+    return scene
 }
 
 load_save_file :: proc(path: string) -> SaveFile {

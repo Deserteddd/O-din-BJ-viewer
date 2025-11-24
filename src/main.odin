@@ -2,61 +2,24 @@ package obj_viewer
 
 import "base:runtime"
 import "core:log"
-import "core:fmt"
 import "core:math/linalg"
 import "core:time"
 import sa "core:container/small_array"
 import sdl "vendor:sdl3"
-import im "shared:imgui"
 import im_sdl "shared:imgui/imgui_impl_sdl3"
 
-VSYNC :: true
+VSYNC :: false
 default_context: runtime.Context
-g: Globals = {
-    fov = 90
-}
-
-KeyEvent :: struct {
-    key: sdl.Scancode,
-    mod: sdl.Keymod
-}
-
-KeyboardEvents :: sa.Small_Array(64, KeyEvent)
-
-DebugInfo :: struct {
-    frame_time:         time.Duration,
-    draw_call_count:    u32,
-    player_speed:       f32,
-}
-
-Renderer :: struct {
-    r2: Renderer2,
-    r3: Renderer3,
-    fallback_texture:   ^sdl.GPUTexture,
-    default_sampler:    ^sdl.GPUSampler,
-    bound_pipeline:     Pipeline,
-}
-
-AppState :: struct {
-    editor:             Editor,
-    player:             Player,
-    debug_info:         DebugInfo,
-    renderer:           Renderer,
-    ui_context:        ^im.Context,
-    models:             [dynamic]OBJModel,
-    entities:       #soa[dynamic]Entity,
-}
 
 main :: proc() {
     context.logger = log.create_console_logger()
-    state: AppState = {}
-    init(&state)
+    init()
     log.debugf("Program initialized successfully")
-    run(&state)
+    scene := load_scene("savefile")
+    run(&scene)
 }
 
-init :: proc(state: ^AppState) {
-    using state
+init :: proc() {
     default_context = context
     sdl.SetLogPriorities(.VERBOSE)
     sdl.SetLogOutputFunction(
@@ -75,27 +38,24 @@ init :: proc(state: ^AppState) {
     present_mode: sdl.GPUPresentMode = VSYNC? .VSYNC : .IMMEDIATE
     ok = sdl.SetGPUSwapchainParameters(g.gpu, g.window, .SDR_LINEAR, present_mode); assert(ok)
 
-    renderer = RND_Init()
-    init_imgui(state)
-    editor = {
+    g.renderer = RND_Init()
+    init_imgui()
+    g.editor = {
         sidebar_left  = {{0, 0, 300, 720}},
         sidebar_right = {{1280-300, 0, 300, 720}}
     }
 
-    player = create_player()
-    load_scene(state, "savefile")
+    g.player = create_player()
 }
 
-run :: proc(state: ^AppState) {
+run :: proc(scene: ^Scene) {
     context.allocator = runtime.panic_allocator()
     free_all(context.temp_allocator)
-    using state
     main_loop: for {
         defer {
             free_all(context.temp_allocator)
             g.lmb_down = false
             g.rmb_down = false
-            g.frame += 1
         }
         now := time.now()
         key_presses: KeyboardEvents
@@ -107,7 +67,7 @@ run :: proc(state: ^AppState) {
                     break main_loop
                 case .KEY_DOWN: 
                     #partial switch ev.key.scancode {
-                        case .F11: toggle_fullscreen(state)
+                        case .F11: toggle_fullscreen()
                     }
                     sa.append(&key_presses, KeyEvent{ev.key.scancode, ev.key.mod})
                 case .MOUSE_BUTTON_DOWN: switch ev.button.button {
@@ -115,92 +75,92 @@ run :: proc(state: ^AppState) {
                     case 3: g.rmb_down = true
                 }
                 case .MOUSE_BUTTON_UP: switch ev.button.button {
-                    case 1: stop_dragging(&state.editor)
+                    case 1: stop_dragging()
                 }
             }
         }
-        if update(state, key_presses) do break main_loop
-        vert_ubo := get_vertex_ubo_global(player)
-        debug_info.draw_call_count = 0
-        frag_ubo := create_frag_ubo(state)
-        frame := frame_begin(vert_ubo, frag_ubo)
+
+        if update(scene, key_presses) do break main_loop
+        g.debug_info.draw_call_count = 0
+
+        frame := frame_begin()
         defer frame_submit(frame)
 
-        begin_3d(renderer, &frame)
-        render_3D(state, frame)
+        begin_3d(&frame)
+        render_3D(scene^, frame)
         submit_3d(&frame)
-        assert(frame.render_pass == nil)
 
-        begin_2d(renderer, &frame)
+        begin_2d(&frame)
         if g.mode == .EDIT {
-            draw_editor(editor, &renderer, frame)
+            draw_editor(frame)
         } else {
-            draw_crosshair(&renderer, frame)
+            draw_crosshair(frame)
         }
+
         submit_2d(&frame)
-        dragging := editor.dragging
-        draw_imgui(state, frame)
-        if !dragging && editor.dragging do start_dragging(&editor)
-        state.debug_info.frame_time = time.since(now)
+
+        dragging := g.editor.dragging
+        draw_imgui(scene, frame)
+        if !dragging && g.editor.dragging do start_dragging()
+
+        g.debug_info.frame_time = time.since(now)
     }
 }
 
-update :: proc(state: ^AppState, keys: KeyboardEvents) -> (exit: bool) {
-    using state
+update :: proc(scene: ^Scene, keys: KeyboardEvents) -> (exit: bool) {
     switch g.mode {
         case .PLAY:
-            exit = update_game(state, keys)
+            exit = update_game(scene, keys)
         case .EDIT:
-            exit = update_editor(state, keys)
+            exit = update_editor(scene, keys)
     }
     return
 }
 
-update_game :: proc(state: ^AppState, keys: KeyboardEvents) -> (exit: bool) {
-    using state
+update_game :: proc(scene: ^Scene, keys: KeyboardEvents) -> (exit: bool) {
     for elem in 0..<keys.len {
         key := keys.data[elem].key
         mod := keys.data[elem].mod
         #partial switch key {
             case .ESCAPE:
-                toggle_mode(state)
+                toggle_mode()
             case .C:
                 if .LCTRL in mod do return true
             case .Q:
-                if !player.airborne do player.checkpoint = get_player_translation(player)
+                if !g.player.airborne do g.player.checkpoint = get_player_translation()
             case .E:
-                reset_player_pos(&player)
-                player.noclip = false
-            case .N: player.noclip = !player.noclip
+                reset_player_pos()
+                g.player.noclip = false
+            case .N: g.player.noclip = !g.player.noclip
         }
     }
     new_ticks := sdl.GetTicks();
     dt := f32(new_ticks - g.last_ticks) / 1000
     g.last_ticks = new_ticks
-    update_player(state, dt)
-    update_camera(&player)
+    update_player(scene^, dt)
+    update_camera()
 
-    debug_info.player_speed = linalg.length(player.speed)
-    renderer.r3.light.position = {
-        player.position.x,
-        player.bbox.max.y,
-        player.position.z
+    g.debug_info.player_speed = linalg.length(g.player.speed)
+    g.renderer.r3.light.position = {
+        g.player.position.x,
+        g.player.bbox.max.y,
+        g.player.position.z
     }
     return
 }
 
 
-toggle_mode :: proc(state: ^AppState) {
+toggle_mode :: proc() {
     switch g.mode {
         case .PLAY:
-            assert(state.editor.dragging == false)
+            assert(g.editor.dragging == false)
             g.mode = .EDIT
             ok := sdl.SetWindowRelativeMouseMode(g.window, false); assert(ok)
             win_size := get_window_size() / 2
             sdl.WarpMouseInWindow(g.window, win_size.x, win_size.y)
         case .EDIT:
             g.mode = .PLAY
-            if state.editor.dragging do stop_dragging(&state.editor)
+            if g.editor.dragging do stop_dragging()
             ok := sdl.SetWindowRelativeMouseMode(g.window, true); assert(ok)
 
             // Update ticks so next call to update doesn't have a massive dt
@@ -211,17 +171,17 @@ toggle_mode :: proc(state: ^AppState) {
     }
 }
 
-reset_player_pos :: proc(player: ^Player, at_origin := false) {
-    if at_origin do player.position = 0; 
-    else if player.checkpoint.x == 0 {
-        player.position = player.checkpoint.x
+reset_player_pos :: proc(at_origin := false) {
+    if at_origin do g.player.position = 0; 
+    else if g.player.checkpoint.x == 0 {
+        g.player.position = g.player.checkpoint.x
     } else {
-        player.position = player.checkpoint.x
-        player.rotation = player.checkpoint.y
+        g.player.position = g.player.checkpoint.x
+        g.player.rotation = g.player.checkpoint.y
     }
-    player.speed = 0
-    player.bbox = AABB {
-        min = player.position + {-0.3, 0, -0.3},
-        max = player.position + {0.3, 2, 0.3}
+    g.player.speed = 0
+    g.player.bbox = AABB {
+        min = g.player.position + {-0.3, 0, -0.3},
+        max = g.player.position + {0.3, 2, 0.3}
     }
 }

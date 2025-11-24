@@ -19,37 +19,36 @@ Panel :: struct {
     rect: Rect,
 }
 
-update_editor :: proc(state: ^AppState, keys: KeyboardEvents) -> (exit: bool) {
-    using state
+update_editor :: proc(scene: ^Scene, keys: KeyboardEvents) -> (exit: bool) {
     for elem in 0..<keys.len {
         key := keys.data[elem].key
         mod := keys.data[elem].mod
         #partial switch key {
             case .S:
-                if .LCTRL in mod do write_save_file(state^)
+                if .LCTRL in mod do write_save_file(scene^)
             case .C:
                 if .LCTRL in mod do return true
             case .ESCAPE:
-                if editor.dragging {
-                    stop_dragging(&editor) 
+                if g.editor.dragging {
+                    stop_dragging() 
                 } else {
-                    toggle_mode(state)
+                    toggle_mode()
                 }
             case .DELETE:
-                remove_selected_entity(state)
+                remove_selected_entity(scene)
             case .RETURN:
-                stop_dragging(&editor)
+                stop_dragging()
         }
     } 
     if g.lmb_down {
         m_pos: vec2
         win_size := get_window_size()
         _ = sdl.GetMouseState(&m_pos.x, &m_pos.y)
-        if m_pos.x > editor.sidebar_left.rect.w && m_pos.x < editor.sidebar_right.rect.x {
-            ray_origin, ray_dir := ray_from_screen(player, m_pos, win_size)
+        if m_pos.x > g.editor.sidebar_left.rect.w && m_pos.x < g.editor.sidebar_right.rect.x {
+            ray_origin, ray_dir := ray_from_screen(m_pos, win_size)
             closest_hit: f32 = max(f32)
             closest_entity: i32 = -1
-            for &entity in entities {
+            for &entity in scene.entities {
                 aabbs := entity_aabbs(entity)
                 for aabb in aabbs {
                     intersection := ray_intersect_aabb(ray_origin, ray_dir, aabb)
@@ -60,60 +59,59 @@ update_editor :: proc(state: ^AppState, keys: KeyboardEvents) -> (exit: bool) {
 
                 }
             }
-            editor.selected_entity = closest_entity
+            g.editor.selected_entity = closest_entity
         }
     }
-    if editor.dragging {
+    if g.editor.dragging {
         m_pos: vec2
         _ = sdl.GetRelativeMouseState(&m_pos.x, &m_pos.y)
-        editor.drag_position += m_pos
+        g.editor.drag_position += m_pos
         io := im.GetIO()
-        im.IO_AddMousePosEvent(io, editor.drag_position.x-editor.drag_position.y, editor.drag_position.y)
+        im.IO_AddMousePosEvent(io, g.editor.drag_position.x-g.editor.drag_position.y, g.editor.drag_position.y)
     }
     return
 }
 
-start_dragging :: proc(editor: ^Editor) {
-    editor.dragging = true
+start_dragging :: proc() {
+    g.editor.dragging = true
     x, y: f32
     _ = sdl.GetMouseState(&x, &y)
-    editor.drag_position = {x, y}
-    editor.drag_start    = {x, y}
+    g.editor.drag_position = {x, y}
+    g.editor.drag_start    = {x, y}
     ok := sdl.SetWindowRelativeMouseMode(g.window, true); assert(ok)
     _ = sdl.GetRelativeMouseState(nil, nil)
 }
 
-stop_dragging :: proc(editor: ^Editor) {
-    if !editor.dragging do return
-    editor.dragging = false
-    editor.drag_position = 0
+stop_dragging :: proc() {
+    if !g.editor.dragging do return
+    g.editor.dragging = false
+    g.editor.drag_position = 0
     ok := sdl.SetWindowRelativeMouseMode(g.window, false); assert(ok)
-    sdl.WarpMouseInWindow(g.window, editor.drag_start.x, editor.drag_start.y)
+    sdl.WarpMouseInWindow(g.window, g.editor.drag_start.x, g.editor.drag_start.y)
 }
 
-draw_editor :: proc(editor: Editor, renderer: ^Renderer, frame: Frame) {
-    bind_pipeline(renderer, frame, .QUAD)
-    draw_rect(editor.sidebar_left.rect, frame)
-    draw_rect(editor.sidebar_right.rect, frame)
+draw_editor :: proc(frame: Frame) {
+    bind_pipeline(frame, .QUAD)
+    draw_rect(g.editor.sidebar_left.rect, frame)
+    draw_rect(g.editor.sidebar_right.rect, frame)
 }
 
-draw_imgui :: proc(state: ^AppState, frame: Frame) {
-    using state, frame
+draw_imgui :: proc(scene: ^Scene, frame: Frame) {
     im_sdlgpu.NewFrame()
     im_sdl.NewFrame()
     im.NewFrame()
     if g.mode == .EDIT {
         if im.Begin("Properties", nil, {.NoTitleBar, .NoResize, .NoMove}) {
             im.SetWindowPos(0)
-            im.SetWindowSize({editor.sidebar_left.rect.w, editor.sidebar_left.rect.h})
+            im.SetWindowSize({g.editor.sidebar_left.rect.w, g.editor.sidebar_left.rect.h})
             if im.BeginTabBar("PropertiesTabs") {
                 defer im.EndTabBar()
                 if im.BeginTabItem("Entity") {
                     defer im.EndTabItem()
-                    for &e in entities {
-                        if e.id == editor.selected_entity {
-                            if im.DragFloat3("Position", &e.transform.translation, 0.01) do editor.dragging = true
-                            if im.DragFloat3("Scale",    &e.transform.scale, 0.01) do editor.dragging = true
+                    for &e in scene.entities {
+                        if e.id == g.editor.selected_entity {
+                            if im.DragFloat3("Position", &e.transform.translation, 0.01) do g.editor.dragging = true
+                            if im.DragFloat3("Scale",    &e.transform.scale, 0.01) do g.editor.dragging = true
                             for &axis in e.transform.scale do axis = max(0.01, axis)
                             break
                         }
@@ -124,10 +122,10 @@ draw_imgui :: proc(state: ^AppState, frame: Frame) {
                 if im.BeginTabItem("General") {
                     defer im.EndTabItem()
                     im.LabelText("", "General")
-                    if im.DragFloat("FOV", &g.fov, 1, 50, 140) do editor.dragging = true
+                    if im.DragFloat("FOV", &g.fov, 1, 50, 140) do g.editor.dragging = true
                     im.LabelText("", "Point Light")
-                    if im.DragFloat("intensity", &renderer.r3.light.power, 1, 0, 10000) do editor.dragging = true
-                    im.ColorPicker3("color", &renderer.r3.light.color, {.InputRGB})
+                    if im.DragFloat("intensity", &g.renderer.r3.light.power, 1, 0, 10000) do g.editor.dragging = true
+                    im.ColorPicker3("color", &g.renderer.r3.light.color, {.InputRGB})
                 }
             }
         }
@@ -136,43 +134,43 @@ draw_imgui :: proc(state: ^AppState, frame: Frame) {
         sdl.GetWindowSize(g.window, &w, &h)
         im.SetWindowPos(vec2{f32(w-140), 0})
         im.SetWindowSize(vec2{140, 0})
-        frame_time_float := i32(round(1/f32(time.duration_seconds(debug_info.frame_time))))
+        frame_time_float := i32(round(1/f32(time.duration_seconds(g.debug_info.frame_time))))
         im.SetNextItemWidth(50)
         im.DragInt("FPS", &frame_time_float)
-        rendered := i32(debug_info.draw_call_count)
+        rendered := i32(g.debug_info.draw_call_count)
         im.SetNextItemWidth(50)
         im.DragInt("Draw calls", &rendered)
         im.SetNextItemWidth(50)
         im.LabelText("", "Player")
-        im.DragFloat("Vel", &debug_info.player_speed)
-        im.DragFloat("X", &player.position.x)
-        im.DragFloat("Y", &player.position.y)
-        im.DragFloat("Z", &player.position.z)
+        im.DragFloat("Vel", &g.debug_info.player_speed)
+        im.DragFloat("X", &g.player.position.x)
+        im.DragFloat("Y", &g.player.position.y)
+        im.DragFloat("Z", &g.player.position.z)
     }
     im.End()
     im.Render()
     im_draw_data := im.GetDrawData()
-    im_sdlgpu.PrepareDrawData(im_draw_data, cmd_buff)
+    im_sdlgpu.PrepareDrawData(im_draw_data, frame.cmd_buff)
     im_color_target := sdl.GPUColorTargetInfo {
-        texture = swapchain,
+        texture = frame.swapchain,
         load_op = .LOAD,
         store_op = .STORE
     }
-    im_render_pass := sdl.BeginGPURenderPass(cmd_buff, &im_color_target, 1, nil); assert(im_render_pass != nil)
-    im_sdlgpu.RenderDrawData(im_draw_data, cmd_buff, im_render_pass)
+    im_render_pass := sdl.BeginGPURenderPass(frame.cmd_buff, &im_color_target, 1, nil); assert(im_render_pass != nil)
+    im_sdlgpu.RenderDrawData(im_draw_data, frame.cmd_buff, im_render_pass)
     sdl.EndGPURenderPass(im_render_pass)
 }
 
-init_imgui :: proc(state: ^AppState) {
+init_imgui :: proc() {
     assert(g.window != nil)
-    if state.ui_context != nil {
+    if g.ui_context != nil {
         im_sdlgpu.Shutdown()
         im_sdl.Shutdown()
         im.Shutdown()
-        im.DestroyContext(state.ui_context)
+        im.DestroyContext(g.ui_context)
     }
     im.CHECKVERSION()
-    state.ui_context = im.CreateContext()
+    g.ui_context = im.CreateContext()
     im_sdl.InitForSDLGPU(g.window)
     im_sdlgpu.Init(&{
         Device = g.gpu,

@@ -129,8 +129,7 @@ init_r3 :: proc(copy_pass: ^sdl.GPUCopyPass) -> Renderer3 {
     return r3
 }
 
-toggle_fullscreen :: proc(state: ^AppState) {
-    using state
+toggle_fullscreen :: proc() {
     g.fullscreen = !g.fullscreen
     ok: bool
     window_bounds: sdl.Rect
@@ -163,8 +162,8 @@ toggle_fullscreen :: proc(state: ^AppState) {
         format = .D32_FLOAT,
         usage = {.SAMPLER, .DEPTH_STENCIL_TARGET}
     })
-    sdl.ReleaseGPUTexture(g.gpu, renderer.r3.depth_texture)
-    renderer.r3.depth_texture = depth
+    sdl.ReleaseGPUTexture(g.gpu, g.renderer.r3.depth_texture)
+    g.renderer.r3.depth_texture = depth
     switch g.mode {
         case .EDIT:
             ok = sdl.SetWindowRelativeMouseMode(g.window, false); assert(ok)
@@ -172,17 +171,15 @@ toggle_fullscreen :: proc(state: ^AppState) {
             ok = sdl.SetWindowRelativeMouseMode(g.window, true)
     }
     assert(ok)
-    init_imgui(state)
-    state.editor.sidebar_left.rect.h  = f32(height)
-    state.editor.sidebar_right.rect.h = f32(height)
-    state.editor.sidebar_right.rect.x = f32(width-300)
+    init_imgui()
+    g.editor.sidebar_left.rect.h  = f32(height)
+    g.editor.sidebar_right.rect.h = f32(height)
+    g.editor.sidebar_right.rect.x = f32(width-300)
     _ = sdl.GetTicks()
 }
 
 
 frame_begin :: proc(
-    vert_ubo: VertUBOGlobal, 
-    frag_ubo: FragUBOGlobal
 ) -> Frame {
     cmd_buff := sdl.AcquireGPUCommandBuffer(g.gpu); assert(cmd_buff != nil)
     assert(cmd_buff  != nil)
@@ -191,6 +188,8 @@ frame_begin :: proc(
     assert(swapchain != nil)
     assert(ok)
     win_size := get_window_size()
+    vert_ubo := get_vertex_ubo_global()
+    frag_ubo := get_fragment_ubo_global()
     frustum_planes := create_frustum_planes(vert_ubo.vp)
     return Frame {
         cmd_buff,
@@ -203,9 +202,9 @@ frame_begin :: proc(
     }
 }
 
-get_vertex_ubo_global :: proc(player: Player) -> VertUBOGlobal {
+get_vertex_ubo_global :: proc() -> VertUBOGlobal {
     proj_matrix := create_proj_matrix()
-    view_matrix := create_view_matrix(player)
+    view_matrix := create_view_matrix()
     return VertUBOGlobal {
         vp = proj_matrix * view_matrix,
         inv_view_mat = linalg.inverse(view_matrix),
@@ -218,19 +217,18 @@ frame_submit :: proc(frame: Frame) {
     assert(ok)
 }
 
-create_frag_ubo :: proc(state: ^AppState) -> FragUBOGlobal {
-    using state
+get_fragment_ubo_global :: proc() -> FragUBOGlobal {
     return FragUBOGlobal {
-        light_pos = renderer.r3.light.position,
-        light_color = renderer.r3.light.color,
-        light_intensity = renderer.r3.light.power,
-        view_pos = get_camera_position(player)
+        light_pos = g.renderer.r3.light.position,
+        light_color = g.renderer.r3.light.color,
+        light_intensity = g.renderer.r3.light.power,
+        view_pos = get_camera_position()
     }
 }
 
-render_heightmap :: proc (height_map: HeightMap, renderer: ^Renderer, frame: Frame) {
+render_heightmap :: proc (height_map: HeightMap, frame: Frame) {
     scale := height_map.scale
-    bind_pipeline(renderer, frame, .HEIGHTMAP)
+    bind_pipeline(frame, .HEIGHTMAP)
     sdl.PushGPUVertexUniformData(frame.cmd_buff, 1, &scale, size_of(vec3))
     bindings: [2]sdl.GPUBufferBinding = {
         sdl.GPUBufferBinding{buffer = height_map.vbo},
@@ -241,7 +239,7 @@ render_heightmap :: proc (height_map: HeightMap, renderer: ^Renderer, frame: Fra
     sdl.DrawGPUIndexedPrimitives(frame.render_pass, height_map.num_indices, 1, 0, 0, 0)
 }
 
-begin_3d :: proc(renderer: Renderer, frame: ^Frame) {
+begin_3d :: proc(frame: ^Frame) {
     assert(frame.cmd_buff != nil)
     assert(frame.swapchain != nil)
     color_target := sdl.GPUColorTargetInfo {
@@ -251,7 +249,7 @@ begin_3d :: proc(renderer: Renderer, frame: ^Frame) {
         clear_color = 0,
     }
     depth_target_info := sdl.GPUDepthStencilTargetInfo {
-        texture = renderer.r3.depth_texture,
+        texture = g.renderer.r3.depth_texture,
         clear_depth = 1,
         load_op = .CLEAR,
         store_op = .STORE,
@@ -272,33 +270,31 @@ submit_3d :: proc(frame: ^Frame) {
     frame.render_pass = nil
 }
 
-render_3D :: proc(state: ^AppState, frame: Frame) {
-    using state
-
+render_3D :: proc(scene: Scene, frame: Frame) {
     assert(frame.cmd_buff  != nil)
     assert(frame.swapchain != nil)
     assert(frame.render_pass != nil)
 
     // Entities
     fallback_binding := sdl.GPUTextureSamplerBinding {
-        texture = state.renderer.fallback_texture,
-        sampler = state.renderer.default_sampler
+        texture = g.renderer.fallback_texture,
+        sampler = g.renderer.default_sampler
     }
-    bind_pipeline(&renderer, frame, .OBJ)
-    for &model in state.models {
+    bind_pipeline(frame, .OBJ)
+    for &model in scene.models {
         bindings: [1]sdl.GPUBufferBinding = {{buffer = model.vbo}}
         sdl.BindGPUVertexBuffers(frame.render_pass, 0, &bindings[0], 1)
         sdl.BindGPUFragmentStorageBuffers(frame.render_pass, 0, &model.material_buffer, 1)
         tex_bindings: [8]sdl.GPUTextureSamplerBinding
         for tex, i in 0..<8 {
             tex_bindings[i] = len(model.textures) > i ? {
-                texture = model.textures[i].texture, sampler = renderer.default_sampler
+                texture = model.textures[i].texture, sampler = g.renderer.default_sampler
             } : {
-                texture = renderer.fallback_texture, sampler = renderer.default_sampler
+                texture = g.renderer.fallback_texture, sampler = g.renderer.default_sampler
             }
         }
         sdl.BindGPUFragmentSamplers(frame.render_pass, 0, raw_data(tex_bindings[:]), len(tex_bindings))
-        for entity in state.entities {
+        for entity in scene.entities {
             if &model != entity.model do continue
             if !is_visible(entity, frame.frustum_planes) do continue
 
@@ -313,18 +309,18 @@ render_3D :: proc(state: ^AppState, frame: Frame) {
                 normal_mat = normal_matrix
             }
             sdl.PushGPUVertexUniformData(frame.cmd_buff, 1, &vert_ubo_local, size_of(VertUBOLocal))
-            debug_info.draw_call_count += 1
+            g.debug_info.draw_call_count += 1
             sdl.DrawGPUPrimitives(frame.render_pass, model.num_vertices, 1, 0, 0)           
         }
     }
 
     // Bounding Box
     if g.mode == .EDIT {
-        for entity in entities {
+        for entity in scene.entities {
             if entity.model == nil do continue
-            if entity.id != state.editor.selected_entity do continue
+            if entity.id != g.editor.selected_entity do continue
             if !is_visible(entity, frame.frustum_planes) do continue
-            bind_pipeline(&renderer, frame, .AABB)
+            bind_pipeline(frame, .AABB)
             bindings: [1]sdl.GPUBufferBinding = { sdl.GPUBufferBinding { buffer = entity.model.aabb_vbo } } 
             sdl.BindGPUVertexBuffers(frame.render_pass, 0, &bindings[0], 1)
             model_matrix := linalg.matrix4_from_trs(
@@ -333,7 +329,7 @@ render_3D :: proc(state: ^AppState, frame: Frame) {
                 entity.transform.scale
             )
             sdl.PushGPUVertexUniformData(frame.cmd_buff, 1, &model_matrix, size_of(mat4))
-            debug_info.draw_call_count += 1
+            g.debug_info.draw_call_count += 1
             sdl.DrawGPUPrimitives(frame.render_pass, u32(24*len(entity.model.aabbs)), 1, 0, 0)
             break
         }
@@ -341,28 +337,28 @@ render_3D :: proc(state: ^AppState, frame: Frame) {
 
     // Skybox
     {
-        bind_pipeline(&renderer, frame, .SKYBOX)
+        bind_pipeline(frame, .SKYBOX)
         sdl.BindGPUFragmentSamplers(frame.render_pass, 0, &(sdl.GPUTextureSamplerBinding  {
-            texture = renderer.r3.skybox_texture,
-            sampler = renderer.default_sampler
+            texture = g.renderer.r3.skybox_texture,
+            sampler = g.renderer.default_sampler
         }), 1)
-        debug_info.draw_call_count += 1
+        g.debug_info.draw_call_count += 1
         sdl.DrawGPUPrimitives(frame.render_pass, 3, 1, 0, 0)
     }
 
 }
 
-get_camera_position :: proc(player: Player) -> (camera_position: vec3) {
-    camera_position = -player.position
+get_camera_position :: proc() -> (camera_position: vec3) {
+    camera_position = -g.player.position
     camera_position.y -= 2
     return
 }
 
-create_view_matrix :: proc(player: Player) -> linalg.Matrix4f32 {
-    using linalg, player
+create_view_matrix :: proc() -> linalg.Matrix4f32 {
+    using linalg, g.player
     pitch_matrix := matrix4_rotate_f32(to_radians(rotation.x), {1, 0, 0})
     yaw_matrix := matrix4_rotate_f32(to_radians(rotation.y), {0, 1, 0})
-    position_matrix := matrix4_translate_f32(get_camera_position(player))
+    position_matrix := matrix4_translate_f32(get_camera_position())
     return pitch_matrix * yaw_matrix * position_matrix
 }
 

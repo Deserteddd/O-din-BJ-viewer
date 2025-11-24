@@ -25,17 +25,17 @@ create_player :: proc(pos: vec3 = 0) -> Player {
     }
 }
 
-get_player_translation :: proc(p: Player) -> [2]vec3 {
+get_player_translation :: proc() -> [2]vec3 {
     return {
-        p.position,
-        p.rotation
+        g.player.position,
+        g.player.rotation
     }
 }
 
-update_player :: proc(state: ^AppState, dt: f32) {
-    using state, player
+update_player :: proc(scene: Scene, dt: f32) {
+    using g.player
     G: f32 = 25
-    wishveloc := player_wish_speed(player)
+    wishveloc := player_wish_speed()
     airborne_at_start := airborne
     if noclip {
         speed = 0
@@ -50,7 +50,7 @@ update_player :: proc(state: ^AppState, dt: f32) {
         } else if !airborne {
             speed += wishveloc
         } else {
-            air_accelerate(&wishveloc, &player, dt)
+            air_accelerate(&wishveloc, dt)
             speed.y -= G * dt
             speed.y = math.max(speed.y, -20)
         }
@@ -63,11 +63,11 @@ update_player :: proc(state: ^AppState, dt: f32) {
     found_collision: bool
     
     win_size := get_window_size()
-    ray_origin, ray_dir := ray_from_screen(player, win_size/2, win_size)
+    ray_origin, ray_dir := ray_from_screen(win_size/2, win_size)
     closest_hit: f32 = math.F32_MAX
     closest_entity: i32 = -1
 
-    for &entity in entities {
+    for &entity in scene.entities {
         aabbs := entity_aabbs(entity)
         for aabb in aabbs {
             if aabbs_collide(bbox, aabb) && !noclip {
@@ -108,25 +108,24 @@ update_player :: proc(state: ^AppState, dt: f32) {
     }
 
     if g.lmb_down {
-        for &e, i in state.entities {
+        for &e, i in scene.entities {
             if e.id == closest_entity {
-                editor.selected_entity = e.id
+                g.editor.selected_entity = e.id
                 break
             }
         }
     }
 }
 
-update_camera :: proc(player: ^Player) {
-    using player
+update_camera :: proc() {
     x, y: f32
     _ = sdl.GetRelativeMouseState(&x, &y)
-    rotation.y += x * 0.03
-    rotation.x = math.min(rotation.x + y*0.03, 90)
-    if rotation.x < -90 do rotation.x = -90
+    g.player.rotation.y += x * 0.03
+    g.player.rotation.x = math.min(g.player.rotation.x + y*0.03, 90)
+    if g.player.rotation.x < -90 do g.player.rotation.x = -90
 }
 
-player_wish_speed :: proc(player: Player) -> vec3 {
+player_wish_speed :: proc() -> vec3 {
     using sdl.Scancode
     key_state := sdl.GetKeyboardState(nil)
     wish_speed: vec3
@@ -136,27 +135,27 @@ player_wish_speed :: proc(player: Player) -> vec3 {
     fb := f32(int(key_state[S])-int(key_state[W]))
     lr := f32(int(key_state[D])-int(key_state[A]))
 
-    yaw_cos := math.cos(math.to_radians(player.rotation.y))
-    yaw_sin := math.sin(math.to_radians(player.rotation.y))
+    yaw_cos := math.cos(math.to_radians(g.player.rotation.y))
+    yaw_sin := math.sin(math.to_radians(g.player.rotation.y))
 
-    wish_speed.y = u * f32(int(!player.airborne))
-    if player.noclip do wish_speed.y = u-d
+    wish_speed.y = u * f32(int(!g.player.airborne))
+    if g.player.noclip do wish_speed.y = u-d
     wish_speed.x += (lr * yaw_cos - fb * yaw_sin)
     wish_speed.z += (lr * yaw_sin + fb * yaw_cos)
     return wish_speed
 }
 
-air_accelerate :: proc(wishveloc: ^vec3, player: ^Player, dt: f32) {
+air_accelerate :: proc(wishveloc: ^vec3, dt: f32) {
     addspeed, wishspd, accelspeed, currentspeed: f32
     wishveloc^ *= 10
     wishspd = vector_normalize(wishveloc);
     grounded_wishspd := wishspd
     // if wishspd > 2 do wishspd = 2
     wishspd = math.min(wishspd, 2)
-    currentspeed = linalg.dot(player.speed, wishveloc^)
+    currentspeed = linalg.dot(g.player.speed, wishveloc^)
     addspeed = wishspd - currentspeed
     if addspeed <= 0 do return
 
     accelspeed = grounded_wishspd * 5 * dt
-    player.speed += accelspeed * wishveloc^
+    g.player.speed += accelspeed * wishveloc^
 }

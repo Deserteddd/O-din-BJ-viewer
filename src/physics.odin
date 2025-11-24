@@ -9,12 +9,11 @@ AABB :: struct {
 }
 
 entity_aabbs :: proc(entity: Entity) -> []AABB {
-    using entity
     aabbs := make([]AABB, len(entity.model.aabbs), context.temp_allocator)
     for aabb, i in entity.model.aabbs {
         aabbs[i] = AABB {
-            min = aabb.min * transform.scale + transform.translation,
-            max = aabb.max * transform.scale + transform.translation
+            min = aabb.min * entity.transform.scale + entity.transform.translation,
+            max = aabb.max * entity.transform.scale + entity.transform.translation
         }
     }
     return aabbs
@@ -93,12 +92,11 @@ resolve_aabb_collision_mtv :: proc(moving: AABB, solid: AABB) -> vec3 {
 }
 
 ray_from_screen :: proc(
-    player:        Player,
     screen_pos:    vec2,
     viewport_size: vec2
 ) -> (origin, direction: vec3) {
     proj_matrix := create_proj_matrix()
-    view_matrix := create_view_matrix(player)
+    view_matrix := create_view_matrix()
     vp := proj_matrix * view_matrix
     // normalize to NDC (-1..1)
     ndc_x := (2.0 * screen_pos.x) / viewport_size.x - 1.0

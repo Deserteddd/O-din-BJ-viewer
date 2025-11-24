@@ -4,7 +4,10 @@ import "core:math/linalg"
 import "core:math/rand"
 import "core:log"
 import "base:runtime"
+import "core:time"
 
+import sa "core:container/small_array"
+import im "shared:imgui"
 import sdl "vendor:sdl3"
 
 vec2 :: [2]f32
@@ -22,13 +25,18 @@ Globals :: struct {
     mode:       Mode,
     gpu:        ^sdl.GPUDevice,
     window:     ^sdl.Window,
-    last_ticks: u64,
-    frame:      u64,
-    fov:        f32,
+    player:      Player,
+    editor:      Editor,
+    debug_info:  DebugInfo,
+    renderer:    Renderer,
+    ui_context: ^im.Context,
+    last_ticks:  u64,
+    fov:         f32,
     fullscreen,
     lmb_down,
     rmb_down,
     debug_draw: bool,
+
 }
 
 Pipeline :: enum {
@@ -63,9 +71,40 @@ HeightMapVertex :: struct {
     position, color: vec3,
 }
 
-bind_pipeline :: proc(renderer: ^Renderer, frame: Frame, pipeline: Pipeline, loc := #caller_location) {
+
+KeyEvent :: struct {
+    key: sdl.Scancode,
+    mod: sdl.Keymod
+}
+
+KeyboardEvents :: sa.Small_Array(64, KeyEvent)
+
+DebugInfo :: struct {
+    frame_time:         time.Duration,
+    draw_call_count:    u32,
+    player_speed:       f32,
+}
+
+Renderer :: struct {
+    r2:                Renderer2,
+    r3:                Renderer3,
+    fallback_texture: ^sdl.GPUTexture,
+    default_sampler:  ^sdl.GPUSampler,
+    bound_pipeline:    Pipeline,
+}
+
+Scene :: struct {
+    models:       [dynamic]OBJModel,
+    entities: #soa[dynamic]Entity,
+}
+
+g: Globals = {
+    fov = 90
+}
+
+bind_pipeline :: proc(frame: Frame, pipeline: Pipeline, loc := #caller_location) {
     assert(frame.render_pass != nil)
-    if pipeline == renderer.bound_pipeline {
+    if pipeline == g.renderer.bound_pipeline {
         log.warnf("%v: attempted to bind already bound pipeline: %v", loc, pipeline)
         return
     }
@@ -75,15 +114,15 @@ bind_pipeline :: proc(renderer: ^Renderer, frame: Frame, pipeline: Pipeline, loc
             log.errorf("%v: attempted to bind NONE pipeline", loc)
             runtime.trap()
         }
-        case .OBJ:          to_be_bound = renderer.r3.obj_pipeline
-        case .AABB:         to_be_bound = renderer.r3.aabb_pipeline
-        case .SKYBOX:       to_be_bound = renderer.r3.skybox_pipeline
-        case .HEIGHTMAP:    to_be_bound = renderer.r3.heightmap_pipeline
-        case .QUAD:         to_be_bound = renderer.r2.quad_pipeline
-        case .SPRITESHEET:  to_be_bound = renderer.r2.sprite_sheet_pipeline
+        case .OBJ:          to_be_bound = g.renderer.r3.obj_pipeline
+        case .AABB:         to_be_bound = g.renderer.r3.aabb_pipeline
+        case .SKYBOX:       to_be_bound = g.renderer.r3.skybox_pipeline
+        case .HEIGHTMAP:    to_be_bound = g.renderer.r3.heightmap_pipeline
+        case .QUAD:         to_be_bound = g.renderer.r2.quad_pipeline
+        case .SPRITESHEET:  to_be_bound = g.renderer.r2.sprite_sheet_pipeline
     }
     sdl.BindGPUGraphicsPipeline(frame.render_pass, to_be_bound)
-    renderer.bound_pipeline = pipeline
+    g.renderer.bound_pipeline = pipeline
 }
 
 to_vec4 :: proc(v: vec3, f: f32) -> vec4 { return vec4{v.x, v.y, v.z, f} }
