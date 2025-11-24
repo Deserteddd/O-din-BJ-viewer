@@ -1,6 +1,7 @@
 package obj_viewer
 
 import "core:log"
+import fs "vendor:fontstash"
 import sdl "vendor:sdl3"
 
 Vertex2D :: struct {
@@ -50,7 +51,6 @@ UBO2D :: struct {
     color:    vec4
 }
 
-
 init_r2 :: proc(copy_pass: ^sdl.GPUCopyPass) -> Renderer2 {
     r2: Renderer2
     r2.quad_pipeline = create_render_pipeline(
@@ -72,9 +72,12 @@ init_r2 :: proc(copy_pass: ^sdl.GPUCopyPass) -> Renderer2 {
     return r2
 }
 
-init_quad :: proc(
-    copy_pass:      ^sdl.GPUCopyPass
-) -> Quad {
+load_font :: proc() {
+    fons_context: fs.FontContext
+    fs.Init(&fons_context)
+}
+
+init_quad :: proc(copy_pass: ^sdl.GPUCopyPass) -> Quad {
     verts := [4]Vertex2D {
         Vertex2D{{-1, -1}, {0, 0}}, // Bottom-left
         Vertex2D{{ 1, -1}, {1, 0}}, // Bottom-right

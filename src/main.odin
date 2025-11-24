@@ -43,7 +43,6 @@ AppState :: struct {
     debug_info:         DebugInfo,
     renderer:           Renderer,
     ui_context:        ^im.Context,
-    sprites:            [dynamic]Sprite,
     models:             [dynamic]OBJModel,
     entities:       #soa[dynamic]Entity,
 }
