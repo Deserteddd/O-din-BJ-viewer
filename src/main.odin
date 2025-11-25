@@ -39,6 +39,7 @@ init :: proc() {
     ok = sdl.SetGPUSwapchainParameters(g.gpu, g.window, .SDR_LINEAR, present_mode); assert(ok)
 
     g.renderer = RND_Init()
+    for pipeline, i in g.renderer.pipelines do assert(pipeline != nil || i == .NONE)
     init_imgui()
     g.editor = {
         sidebar_left  = {{0, 0, 300, 720}},
@@ -146,7 +147,7 @@ update_game :: proc(scene: ^Scene, keys: KeyboardEvents) -> (exit: bool) {
     update_camera()
 
     g.debug_info.player_speed = linalg.length(g.player.speed)
-    g.renderer.r3.light.position = {
+    g.renderer.light.position = {
         g.player.position.x,
         g.player.bbox.max.y,
         g.player.position.z

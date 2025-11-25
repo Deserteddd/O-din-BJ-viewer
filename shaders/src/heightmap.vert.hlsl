@@ -10,7 +10,7 @@ struct Input {
 struct Output {
     float4 clip_position : sv_position;
     float3 world_position : TEXCOORD0;
-    float4 p_color : TEXCOORD1;
+    float4 p_color : TEXCOORD2;
 };
 
 cbuffer Global : register(b1, space1) {

@@ -10,13 +10,6 @@ Vertex2D :: struct {
 
 Rect :: sdl.FRect
 
-Renderer2 :: struct {
-    quad_pipeline:         ^sdl.GPUGraphicsPipeline,
-    sprite_sheet_pipeline: ^sdl.GPUGraphicsPipeline,
-    crosshair:              Sprite,
-    quad:                   Quad,
-}
-
 Sprite :: struct {
     name: string,
     sampler: ^sdl.GPUSampler,
@@ -50,27 +43,6 @@ UBO2D :: struct {
     color:    vec4
 }
 
-init_r2 :: proc(copy_pass: ^sdl.GPUCopyPass) -> Renderer2 {
-    r2: Renderer2
-    r2.quad_pipeline = create_render_pipeline(
-        "ui.vert",
-        "ui.frag",
-        Vertex2D,
-        {.FLOAT2, .FLOAT2},
-        false,
-    )
-    r2.sprite_sheet_pipeline = create_render_pipeline(
-        "spritesheet.vert",
-        "spritesheet.frag",
-        Vertex2D,
-        {.FLOAT2, .FLOAT2},
-        false,
-    )
-    r2.crosshair = load_sprite("assets/crosshair.png", copy_pass)
-    r2.quad = init_quad(copy_pass)
-    return r2
-}
-
 init_quad :: proc(copy_pass: ^sdl.GPUCopyPass) -> Quad {
     verts := [4]Vertex2D {
         Vertex2D{{-1, -1}, {0, 0}}, // Bottom-left
@@ -92,7 +64,6 @@ begin_2d :: proc(frame: ^Frame) {
     assert(frame.cmd_buff != nil)
     assert(frame.swapchain != nil)
     assert(frame.render_pass == nil)
-    assert(g.renderer.r2.quad_pipeline != nil)
 
     color_target := sdl.GPUColorTargetInfo {
         texture = frame.swapchain,
@@ -100,10 +71,10 @@ begin_2d :: proc(frame: ^Frame) {
         store_op = .STORE,
     }
     frame.render_pass = sdl.BeginGPURenderPass(frame.cmd_buff, &color_target, 1, nil); assert(frame.render_pass != nil)
-    assert(g.renderer.r2.quad.vbo != nil)
+    assert(g.renderer.quad.vbo != nil)
     bindings: [2]sdl.GPUBufferBinding = {
-        sdl.GPUBufferBinding {buffer = g.renderer.r2.quad.vbo},
-        sdl.GPUBufferBinding {buffer = g.renderer.r2.quad.ibo},
+        sdl.GPUBufferBinding {buffer = g.renderer.quad.vbo},
+        sdl.GPUBufferBinding {buffer = g.renderer.quad.ibo},
     }
     sdl.BindGPUFragmentSamplers(frame.render_pass, 0, &(sdl.GPUTextureSamplerBinding  {
         texture = g.renderer.fallback_texture,
@@ -115,7 +86,7 @@ begin_2d :: proc(frame: ^Frame) {
 
 draw_crosshair :: proc(frame: Frame) {
     bind_pipeline(frame, .QUAD)
-    draw_sprite(g.renderer.r2.crosshair, frame)
+    draw_sprite(g.renderer.crosshair, frame)
 }
 
 draw_sprite :: proc(sprite: Sprite, frame: Frame, pos: vec2 = 0, scale: f32 = 1) {

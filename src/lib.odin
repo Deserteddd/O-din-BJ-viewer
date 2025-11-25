@@ -88,11 +88,15 @@ DebugInfo :: struct {
 }
 
 Renderer :: struct {
-    r2:                Renderer2,
-    r3:                Renderer3,
+    pipelines:         [Pipeline]^sdl.GPUGraphicsPipeline,
+    bound_pipeline:    Pipeline,
     fallback_texture: ^sdl.GPUTexture,
     default_sampler:  ^sdl.GPUSampler,
-    bound_pipeline:    Pipeline,
+    depth_texture:    ^sdl.GPUTexture,
+    skybox_texture:   ^sdl.GPUTexture,
+    light:             PointLight,
+    crosshair:         Sprite,
+    quad:              Quad,
 }
 
 Scene :: struct {
@@ -110,20 +114,11 @@ bind_pipeline :: proc(frame: Frame, pipeline: Pipeline, loc := #caller_location)
         log.warnf("%v: attempted to bind already bound pipeline: %v", loc, pipeline)
         return
     }
-    to_be_bound: ^sdl.GPUGraphicsPipeline
-    switch pipeline {
-        case .NONE: {
-            log.errorf("%v: attempted to bind NONE pipeline", loc)
-            runtime.trap()
-        }
-        case .OBJ:          to_be_bound = g.renderer.r3.obj_pipeline
-        case .AABB:         to_be_bound = g.renderer.r3.aabb_pipeline
-        case .SKYBOX:       to_be_bound = g.renderer.r3.skybox_pipeline
-        case .HEIGHTMAP:    to_be_bound = g.renderer.r3.heightmap_pipeline
-        case .QUAD:         to_be_bound = g.renderer.r2.quad_pipeline
-        case .SPRITESHEET:  to_be_bound = g.renderer.r2.sprite_sheet_pipeline
+    if pipeline == .NONE {
+        log.errorf("Bound none pipeline %v", loc)
+        return
     }
-    sdl.BindGPUGraphicsPipeline(frame.render_pass, to_be_bound)
+    sdl.BindGPUGraphicsPipeline(frame.render_pass, g.renderer.pipelines[pipeline])
     g.renderer.bound_pipeline = pipeline
 }
 

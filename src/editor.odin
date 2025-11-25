@@ -124,8 +124,8 @@ draw_imgui :: proc(scene: ^Scene, frame: Frame) {
                     im.LabelText("", "General")
                     if im.DragFloat("FOV", &g.fov, 1, 50, 140) do g.editor.dragging = true
                     im.LabelText("", "Point Light")
-                    if im.DragFloat("intensity", &g.renderer.r3.light.power, 1, 0, 10000) do g.editor.dragging = true
-                    im.ColorPicker3("color", &g.renderer.r3.light.color, {.InputRGB})
+                    if im.DragFloat("intensity", &g.renderer.light.power, 1, 0, 10000) do g.editor.dragging = true
+                    im.ColorPicker3("color", &g.renderer.light.color, {.InputRGB})
                 }
             }
         }

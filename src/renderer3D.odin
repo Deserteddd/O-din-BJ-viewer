@@ -10,16 +10,6 @@ import "core:path/filepath"
 import "core:encoding/json"
 import sdl "vendor:sdl3"
 
-Renderer3 :: struct {
-    obj_pipeline:       ^sdl.GPUGraphicsPipeline,
-    aabb_pipeline:      ^sdl.GPUGraphicsPipeline,
-    skybox_pipeline:    ^sdl.GPUGraphicsPipeline,
-    heightmap_pipeline: ^sdl.GPUGraphicsPipeline,
-    depth_texture:      ^sdl.GPUTexture,
-    skybox_texture:     ^sdl.GPUTexture,
-    light:               PointLight,
-}
-
 PointLight :: struct {
     position: vec3,
     power:    f32,
@@ -69,17 +59,44 @@ RND_Init :: proc() -> Renderer {
     renderer.fallback_texture = upload_texture(copy_pass, pixels, {u32(size.x), u32(size.y)})
     renderer.default_sampler = sdl.CreateGPUSampler(g.gpu, {})
     assert(renderer.default_sampler != nil)
-
-    r2 = init_r2(copy_pass)
-    r3 = init_r3(copy_pass)
-    sdl.EndGPUCopyPass(copy_pass)
-    ok := sdl.SubmitGPUCommandBuffer(copy_commands); assert(ok)
-    return renderer
-}
-
-init_r3 :: proc(copy_pass: ^sdl.GPUCopyPass) -> Renderer3 {
-    r3: Renderer3
-    r3.skybox_texture = load_cubemap_texture(copy_pass, {
+    pipelines[.QUAD] = create_render_pipeline(
+        "ui.vert",
+        "ui.frag",
+        Vertex2D,
+        {.FLOAT2, .FLOAT2},
+        false,
+    )
+    pipelines[.SPRITESHEET] = create_render_pipeline(
+        "spritesheet.vert",
+        "spritesheet.frag",
+        Vertex2D,
+        {.FLOAT2, .FLOAT2},
+        false,
+    )
+    pipelines[.OBJ] = create_render_pipeline(
+        "shader.vert",
+        "shader.frag",
+        OBJVertex,
+        {.FLOAT3, .FLOAT3, .FLOAT2, .UINT},
+    )
+    pipelines[.AABB] = create_render_pipeline(
+        "bbox.vert",
+        "bbox.frag",
+        vec3,
+        {.FLOAT3},
+        primitive_type = sdl.GPUPrimitiveType.LINELIST
+    )
+    pipelines[.HEIGHTMAP] = create_render_pipeline(
+        "heightmap.vert",
+        "heightmap.frag",
+        HeightMapVertex,
+        {.FLOAT3, .FLOAT3},
+        wireframe = true
+    )
+    pipelines[.SKYBOX] = create_skybox_pipeline()
+    crosshair = load_sprite("assets/crosshair.png", copy_pass)
+    quad = init_quad(copy_pass)
+    skybox_texture = load_cubemap_texture(copy_pass, {
         .POSITIVEX = "assets/skybox/right.png",
         .NEGATIVEX = "assets/skybox/left.png",
         .POSITIVEY = "assets/skybox/top.png",
@@ -90,7 +107,7 @@ init_r3 :: proc(copy_pass: ^sdl.GPUCopyPass) -> Renderer3 {
 
     width, height: i32
     ok := sdl.GetWindowSize(g.window, &width, &height); assert(ok)
-    depth_texture := sdl.CreateGPUTexture(g.gpu, {
+    depth_texture = sdl.CreateGPUTexture(g.gpu, {
         type = .D2,
         width = u32(width),
         height = u32(height),
@@ -99,35 +116,15 @@ init_r3 :: proc(copy_pass: ^sdl.GPUCopyPass) -> Renderer3 {
         format = .D32_FLOAT,
         usage = {.SAMPLER, .DEPTH_STENCIL_TARGET}
     })
-    r3.depth_texture = depth_texture
 
-    r3.obj_pipeline = create_render_pipeline(
-        "shader.vert",
-        "shader.frag",
-        OBJVertex,
-        {.FLOAT3, .FLOAT3, .FLOAT2, .UINT},
-    )
-    r3.aabb_pipeline = create_render_pipeline(
-        "bbox.vert",
-        "bbox.frag",
-        vec3,
-        {.FLOAT3},
-        primitive_type = sdl.GPUPrimitiveType.LINELIST
-    )
-    r3.heightmap_pipeline = create_render_pipeline(
-        "heightmap.vert",
-        "heightmap.frag",
-        HeightMapVertex,
-        {.FLOAT3, .FLOAT3},
-        wireframe = true
-    )
-    r3.skybox_pipeline = create_skybox_pipeline()
-    r3.light = PointLight {
+    light = PointLight {
         position = vec3{0, 10, 25},
         color = 1,
         power = 50
     }
-    return r3
+    sdl.EndGPUCopyPass(copy_pass)
+    ok = sdl.SubmitGPUCommandBuffer(copy_commands); assert(ok)
+    return renderer
 }
 
 toggle_fullscreen :: proc() {
@@ -163,8 +160,8 @@ toggle_fullscreen :: proc() {
         format = .D32_FLOAT,
         usage = {.SAMPLER, .DEPTH_STENCIL_TARGET}
     })
-    sdl.ReleaseGPUTexture(g.gpu, g.renderer.r3.depth_texture)
-    g.renderer.r3.depth_texture = depth
+    sdl.ReleaseGPUTexture(g.gpu, g.renderer.depth_texture)
+    g.renderer.depth_texture = depth
     switch g.mode {
         case .EDIT:
             ok = sdl.SetWindowRelativeMouseMode(g.window, false); assert(ok)
@@ -220,9 +217,9 @@ frame_submit :: proc(frame: Frame) {
 
 get_fragment_ubo_global :: proc() -> FragUBOGlobal {
     return FragUBOGlobal {
-        light_pos = g.renderer.r3.light.position,
-        light_color = g.renderer.r3.light.color,
-        light_intensity = g.renderer.r3.light.power,
+        light_pos = g.renderer.light.position,
+        light_color = g.renderer.light.color,
+        light_intensity = g.renderer.light.power,
         view_pos = get_camera_position()
     }
 }
@@ -250,7 +247,7 @@ begin_3d :: proc(frame: ^Frame) {
         clear_color = 0,
     }
     depth_target_info := sdl.GPUDepthStencilTargetInfo {
-        texture = g.renderer.r3.depth_texture,
+        texture = g.renderer.depth_texture,
         clear_depth = 1,
         load_op = .CLEAR,
         store_op = .STORE,
@@ -340,7 +337,7 @@ render_3D :: proc(scene: Scene, frame: Frame) {
     {
         bind_pipeline(frame, .SKYBOX)
         sdl.BindGPUFragmentSamplers(frame.render_pass, 0, &(sdl.GPUTextureSamplerBinding  {
-            texture = g.renderer.r3.skybox_texture,
+            texture = g.renderer.skybox_texture,
             sampler = g.renderer.default_sampler
         }), 1)
         g.debug_info.draw_call_count += 1

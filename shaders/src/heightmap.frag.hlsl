@@ -1,3 +1,4 @@
+#include "common.hlsl"
 struct Input {
     float3 worldPosition: TEXCOORD0;
     float4 color : TEXCOORD1;

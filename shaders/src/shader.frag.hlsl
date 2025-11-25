@@ -89,7 +89,6 @@ float3 blinnPhongBRDF(float3 dirToLight, float3 dirToView, float3 surfaceNormal,
     float3 diffuseReflection = get_diffuse_color(input);
 
     return specularReflection + diffuseReflection;
-
 }
 
 float4 main(Input input) : SV_Target0 {
