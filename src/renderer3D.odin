@@ -17,7 +17,7 @@ Renderer3 :: struct {
     heightmap_pipeline: ^sdl.GPUGraphicsPipeline,
     depth_texture:      ^sdl.GPUTexture,
     skybox_texture:     ^sdl.GPUTexture,
-    light:              PointLight,
+    light:               PointLight,
 }
 
 PointLight :: struct {
@@ -119,6 +119,7 @@ init_r3 :: proc(copy_pass: ^sdl.GPUCopyPass) -> Renderer3 {
         "heightmap.frag",
         HeightMapVertex,
         {.FLOAT3, .FLOAT3},
+        wireframe = true
     )
     r3.skybox_pipeline = create_skybox_pipeline()
     r3.light = PointLight {
@@ -226,17 +227,17 @@ get_fragment_ubo_global :: proc() -> FragUBOGlobal {
     }
 }
 
-render_heightmap :: proc (height_map: HeightMap, frame: Frame) {
-    scale := height_map.scale
+render_heightmap :: proc (frame: Frame) {
     bind_pipeline(frame, .HEIGHTMAP)
-    sdl.PushGPUVertexUniformData(frame.cmd_buff, 1, &scale, size_of(vec3))
+    time := f32(g.total_time)
+    sdl.PushGPUVertexUniformData(frame.cmd_buff, 1, &time, size_of(f32))
     bindings: [2]sdl.GPUBufferBinding = {
-        sdl.GPUBufferBinding{buffer = height_map.vbo},
-        sdl.GPUBufferBinding{buffer = height_map.ibo}
+        sdl.GPUBufferBinding{buffer = g.heightmap.vbo},
+        sdl.GPUBufferBinding{buffer = g.heightmap.ibo}
     }
     sdl.BindGPUVertexBuffers(frame.render_pass, 0, &bindings[0], 1)
     sdl.BindGPUIndexBuffer(frame.render_pass, bindings[1], ._32BIT)
-    sdl.DrawGPUIndexedPrimitives(frame.render_pass, height_map.num_indices, 1, 0, 0, 0)
+    sdl.DrawGPUIndexedPrimitives(frame.render_pass, g.heightmap.num_indices, 1, 0, 0, 0)
 }
 
 begin_3d :: proc(frame: ^Frame) {
@@ -577,6 +578,7 @@ create_render_pipeline :: proc(
     vb_attribute_formats: []sdl.GPUVertexElementFormat,
     use_depth_buffer := true,
     primitive_type := sdl.GPUPrimitiveType.TRIANGLELIST,
+    wireframe := false
 ) -> ^sdl.GPUGraphicsPipeline {
     vert_shader := load_shader(vert_shader); defer sdl.ReleaseGPUShader(g.gpu, vert_shader)
     frag_shader := load_shader(frag_shader); defer sdl.ReleaseGPUShader(g.gpu, frag_shader)
@@ -628,7 +630,7 @@ create_render_pipeline :: proc(
             num_vertex_attributes = u32(len(vb_attributes))
         },
         rasterizer_state = {
-            fill_mode = primitive_type == .TRIANGLELIST ? .FILL : .LINE,
+            fill_mode = wireframe ? .LINE : .FILL,
             cull_mode = .BACK
         },
         depth_stencil_state = {

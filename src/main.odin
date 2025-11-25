@@ -46,6 +46,8 @@ init :: proc() {
     }
 
     g.player = create_player()
+
+    g.heightmap = load_height_map("assets/height_map")
 }
 
 run :: proc(scene: ^Scene) {
@@ -88,6 +90,7 @@ run :: proc(scene: ^Scene) {
 
         begin_3d(&frame)
         render_3D(scene^, frame)
+        render_heightmap(frame)
         submit_3d(&frame)
 
         begin_2d(&frame)
@@ -103,7 +106,9 @@ run :: proc(scene: ^Scene) {
         draw_imgui(scene, frame)
         if !dragging && g.editor.dragging do start_dragging()
 
+
         g.debug_info.frame_time = time.since(now)
+        g.total_time += time.duration_seconds(g.debug_info.frame_time)
     }
 }
 
