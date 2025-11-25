@@ -7,9 +7,20 @@ import "core:time"
 import sa "core:container/small_array"
 import sdl "vendor:sdl3"
 import im_sdl "shared:imgui/imgui_impl_sdl3"
-
+import "core:fmt"
 VSYNC :: false
 default_context: runtime.Context
+
+My_Union :: union {
+	f32,
+	int,
+	Person_Data,
+}
+
+Person_Data :: struct {
+	health: int,
+	age: int,
+}
 
 main :: proc() {
     context.logger = log.create_console_logger()

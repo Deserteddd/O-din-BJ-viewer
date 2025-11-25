@@ -1,5 +1,7 @@
 package obj_viewer
 
+import "core:fmt"
+import "core:reflect"
 import "core:mem"
 import "core:math/linalg"
 import "core:log"
@@ -8,6 +10,7 @@ import "core:c"
 import "core:os"
 import "core:path/filepath"
 import "core:encoding/json"
+import "base:runtime"
 import sdl "vendor:sdl3"
 
 PointLight :: struct {
@@ -63,34 +66,29 @@ RND_Init :: proc() -> Renderer {
         "ui.vert",
         "ui.frag",
         Vertex2D,
-        {.FLOAT2, .FLOAT2},
         false,
     )
     pipelines[.SPRITESHEET] = create_render_pipeline(
         "spritesheet.vert",
         "spritesheet.frag",
         Vertex2D,
-        {.FLOAT2, .FLOAT2},
         false,
     )
     pipelines[.OBJ] = create_render_pipeline(
         "shader.vert",
         "shader.frag",
         OBJVertex,
-        {.FLOAT3, .FLOAT3, .FLOAT2, .UINT},
     )
     pipelines[.AABB] = create_render_pipeline(
         "bbox.vert",
         "bbox.frag",
         vec3,
-        {.FLOAT3},
         primitive_type = sdl.GPUPrimitiveType.LINELIST
     )
     pipelines[.HEIGHTMAP] = create_render_pipeline(
         "heightmap.vert",
         "heightmap.frag",
         HeightMapVertex,
-        {.FLOAT3, .FLOAT3},
         wireframe = true
     )
     pipelines[.SKYBOX] = create_skybox_pipeline()
@@ -572,7 +570,6 @@ create_render_pipeline :: proc(
     vert_shader: string,
     frag_shader: string,
     $vertex_type: typeid,
-    vb_attribute_formats: []sdl.GPUVertexElementFormat,
     use_depth_buffer := true,
     primitive_type := sdl.GPUPrimitiveType.TRIANGLELIST,
     wireframe := false
@@ -586,17 +583,17 @@ create_render_pipeline :: proc(
         input_rate = .VERTEX,
         instance_step_rate = 0
     }}
-
-    vb_attributes := make([]sdl.GPUVertexAttribute, len(vb_attribute_formats), context.temp_allocator)
+    vb_attribute_data := get_vb_layout(vertex_type)
+    vb_attributes := make([]sdl.GPUVertexAttribute, len(vb_attribute_data), context.temp_allocator)
     offset: u32
-    for format, i in vb_attribute_formats {
+    for info, i in vb_attribute_data {
         vb_attributes[i] = sdl.GPUVertexAttribute {
             location = u32(i),
             buffer_slot = 0,
-            format = format,
+            format = info.format,
             offset = offset
         }
-        offset += attribute_size(format)
+        offset += info.size
     }
     swapchain_format := sdl.GetGPUSwapchainTextureFormat(g.gpu, g.window)
     pipeline := sdl.CreateGPUGraphicsPipeline(g.gpu, {
@@ -639,17 +636,31 @@ create_render_pipeline :: proc(
     return pipeline
 }
 
-attribute_size :: proc(a: sdl.GPUVertexElementFormat) -> u32 {
-    #partial switch a {
-        case .FLOAT2: return size_of(vec2)
-        case .FLOAT3: return size_of(vec3)
-        case .FLOAT4: return size_of(vec4)
-        case .UINT:   return size_of(u32)
-        case .UINT2:  return size_of(u32)*2
-        case .UINT3:  return size_of(u32)*3
-        case .UINT4:  return size_of(u32)*4
-        case: {
-            panic("Invalid attribute")
+vbElementInfo :: struct {
+    format: sdl.GPUVertexElementFormat,
+    size: u32
+}
+
+get_vb_layout :: proc($vertex_type: typeid) -> []vbElementInfo {
+    element_info_from_type :: proc(type: ^runtime.Type_Info) -> vbElementInfo {
+        switch type {
+            case type_info_of(vec2): return {.FLOAT2, size_of(vec2)}
+            case type_info_of(vec3): return {.FLOAT3, size_of(vec3)}
+            case type_info_of(vec4): return {.FLOAT4, size_of(vec4)}
+            case type_info_of(u32):  return {.UINT,   size_of(uint)}
+            case:
+                return {.INVALID, 0}
         }
     }
+    fields := reflect.struct_field_types(vertex_type)
+    data := make([]vbElementInfo, len(fields) > 0 ? len(fields) : 1, context.temp_allocator)
+    if len(data) == 0 {
+        data[0] = element_info_from_type(type_info_of(vertex_type))
+        return data
+    }
+    for field, i in fields {
+        data[i] = element_info_from_type(field)
+    }
+    return data
 }
+
