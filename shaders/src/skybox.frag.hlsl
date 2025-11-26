@@ -1,5 +1,3 @@
-#include "common.hlsl"
-
 TextureCube<float4> cubeMap : register(t0, space2);
 SamplerState smp : register(s0, space2);
 

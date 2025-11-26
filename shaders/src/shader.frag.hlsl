@@ -33,7 +33,11 @@ SamplerState smp5 : register(s5, space2);
 SamplerState smp6 : register(s6, space2);
 SamplerState smp7 : register(s7, space2);
 
-StructuredBuffer<Material> materials : register(t8, space2);
+TextureCube<float4> cubeMap : register(t8, space2);
+SamplerState cubeSmp : register(s8, space2);
+
+
+StructuredBuffer<Material> materials : register(t9, space2);
 
 float3 get_color_value(Input input, int map) {
     switch (map) {
@@ -92,17 +96,21 @@ float3 blinnPhongBRDF(float3 dirToLight, float3 dirToView, float3 surfaceNormal,
 }
 
 float4 main(Input input) : SV_Target0 {
+    float3 surfaceNormal = normalize(input.normal);
+    float3 ambientLight = cubeMap.Sample(cubeSmp, surfaceNormal).rgb;
+    float3 diff_color = get_diffuse_color(input);
+    float3 reflectedRadiance = ambientLight * diff_color;
+
+    if (lightIntensity < 0.1) {
+        return float4(reflectedRadiance, 1);
+    }
+
     float3 vecToLight = lightPosition - input.position;
     float distToLight = length(vecToLight);
     float3 dirToLight = vecToLight / distToLight;
     float3 dirToView = normalize(viewPosition - input.position);
-    float3 surfaceNormal = normalize(input.normal);
 
-    float3 diff_color = get_diffuse_color(input);
 
-    float3 ambientLight = 0.01;
-
-    float3 reflectedRadiance = ambientLight * diff_color;
 
     float incidenceAngleFactor = dot(dirToLight, surfaceNormal);
     if (incidenceAngleFactor > 0) {

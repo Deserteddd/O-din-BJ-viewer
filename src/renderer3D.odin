@@ -95,12 +95,12 @@ RND_Init :: proc() -> Renderer {
     crosshair = load_sprite("assets/crosshair.png", copy_pass)
     quad = init_quad(copy_pass)
     skybox_texture = load_cubemap_texture(copy_pass, {
-        .POSITIVEX = "assets/skybox/right.png",
-        .NEGATIVEX = "assets/skybox/left.png",
-        .POSITIVEY = "assets/skybox/top.png",
-        .NEGATIVEY = "assets/skybox/bottom.png",
-        .POSITIVEZ = "assets/skybox/front.png",
-        .NEGATIVEZ = "assets/skybox/back.png",
+        .POSITIVEX = "assets/skybox/px.png",
+        .NEGATIVEX = "assets/skybox/nx.png",
+        .POSITIVEY = "assets/skybox/py.png",
+        .NEGATIVEY = "assets/skybox/ny.png",
+        .POSITIVEZ = "assets/skybox/pz.png",
+        .NEGATIVEZ = "assets/skybox/nz.png",
     })
 
     width, height: i32
@@ -116,9 +116,8 @@ RND_Init :: proc() -> Renderer {
     })
 
     light = PointLight {
-        position = vec3{0, 10, 25},
         color = 1,
-        power = 50
+        power = 0
     }
     sdl.EndGPUCopyPass(copy_pass)
     ok = sdl.SubmitGPUCommandBuffer(copy_commands); assert(ok)
@@ -175,14 +174,12 @@ toggle_fullscreen :: proc() {
 }
 
 
-frame_begin :: proc(
-) -> Frame {
+frame_begin :: proc() -> Frame {
     cmd_buff := sdl.AcquireGPUCommandBuffer(g.gpu); assert(cmd_buff != nil)
     assert(cmd_buff  != nil)
     swapchain: ^sdl.GPUTexture
     ok := sdl.WaitAndAcquireGPUSwapchainTexture(cmd_buff, g.window, &swapchain, nil, nil)
-    assert(swapchain != nil)
-    assert(ok)
+    assert(swapchain != nil && ok)
     win_size := get_window_size()
     vert_ubo := get_vertex_ubo_global()
     frag_ubo := get_fragment_ubo_global()
@@ -230,6 +227,10 @@ render_heightmap :: proc (frame: Frame) {
         sdl.GPUBufferBinding{buffer = g.heightmap.vbo},
         sdl.GPUBufferBinding{buffer = g.heightmap.ibo}
     }
+    sdl.BindGPUFragmentSamplers(frame.render_pass, 0, &(sdl.GPUTextureSamplerBinding  {
+        texture = g.renderer.skybox_texture,
+        sampler = g.renderer.default_sampler
+    }), 1)
     sdl.BindGPUVertexBuffers(frame.render_pass, 0, &bindings[0], 1)
     sdl.BindGPUIndexBuffer(frame.render_pass, bindings[1], ._32BIT)
     sdl.DrawGPUIndexedPrimitives(frame.render_pass, g.heightmap.num_indices, 1, 0, 0, 0)
@@ -281,7 +282,7 @@ render_3D :: proc(scene: Scene, frame: Frame) {
         bindings: [1]sdl.GPUBufferBinding = {{buffer = model.vbo}}
         sdl.BindGPUVertexBuffers(frame.render_pass, 0, &bindings[0], 1)
         sdl.BindGPUFragmentStorageBuffers(frame.render_pass, 0, &model.material_buffer, 1)
-        tex_bindings: [8]sdl.GPUTextureSamplerBinding
+        tex_bindings: [9]sdl.GPUTextureSamplerBinding
         for tex, i in 0..<8 {
             tex_bindings[i] = len(model.textures) > i ? {
                 texture = model.textures[i].texture, sampler = g.renderer.default_sampler
@@ -289,6 +290,7 @@ render_3D :: proc(scene: Scene, frame: Frame) {
                 texture = g.renderer.fallback_texture, sampler = g.renderer.default_sampler
             }
         }
+        tex_bindings[8] = {texture = g.renderer.skybox_texture, sampler = g.renderer.default_sampler}
         sdl.BindGPUFragmentSamplers(frame.render_pass, 0, raw_data(tex_bindings[:]), len(tex_bindings))
         for entity in scene.entities {
             if &model != entity.model do continue
