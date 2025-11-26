@@ -654,7 +654,7 @@ get_vb_layout :: proc($vertex_type: typeid) -> []vbElementInfo {
     }
     fields := reflect.struct_field_types(vertex_type)
     data := make([]vbElementInfo, len(fields) > 0 ? len(fields) : 1, context.temp_allocator)
-    if len(data) == 0 {
+    if len(data) == 1 {
         data[0] = element_info_from_type(type_info_of(vertex_type))
         return data
     }
