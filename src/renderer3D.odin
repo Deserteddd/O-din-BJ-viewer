@@ -167,9 +167,7 @@ toggle_fullscreen :: proc() {
     }
     assert(ok)
     init_imgui()
-    g.editor.sidebar_left.rect.h  = f32(height)
-    g.editor.sidebar_right.rect.h = f32(height)
-    g.editor.sidebar_right.rect.x = f32(width-300)
+    init_editor({width, height})
     _ = sdl.GetTicks()
 }
 

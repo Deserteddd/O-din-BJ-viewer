@@ -4,6 +4,8 @@ struct Input {
 	uint vertexId : SV_VertexID;
 };
 
+
+
 struct Output {
 	float4 clipPosition : SV_Position;
 	float3 texCoords : TEXCOORD0;

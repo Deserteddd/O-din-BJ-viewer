@@ -63,10 +63,8 @@ load_sprite :: proc(path: string, copy_pass: ^sdl.GPUCopyPass) -> Sprite {
     name_split := strings.split(file_name[len(file_name)-1], ".", context.temp_allocator)
     name       := strings.clone(name_split[0])
 
-    sampler := sdl.CreateGPUSampler(g.gpu, {}); assert(sampler != nil)
     return Sprite {
         name,
-        sampler,
         texture,
         size
     }

@@ -14,6 +14,7 @@ cbuffer UBO : register(b0, space1) {
     float4 xywh;         // x, y, width, height in pixels
     float2 screen_size;  // screen width, height in pixels
     bool textured;
+    float4 color;
 };
 
 Output main(Input input) {
@@ -32,7 +33,7 @@ Output main(Input input) {
     if (textured) {
         output.color.r = -1;
     } else {
-        output.color = float4(0, 0, 0, 0.8);
+        output.color = color;
     }
 
     return output;

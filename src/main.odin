@@ -41,10 +41,8 @@ init :: proc() {
     g.renderer = RND_Init()
     for pipeline, i in g.renderer.pipelines do assert(pipeline != nil || i == .NONE)
     init_imgui()
-    g.editor = {
-        sidebar_left  = {{0, 0, 300, 720}},
-        sidebar_right = {{1280-300, 0, 300, 720}}
-    }
+
+    init_editor({1280, 720})
 
     g.player = create_player()
 
@@ -103,9 +101,9 @@ run :: proc(scene: ^Scene) {
 
         submit_2d(&frame)
 
-        dragging := g.editor.dragging
+        // dragging := g.editor.dragging
         draw_imgui(scene, frame)
-        if !dragging && g.editor.dragging do start_dragging()
+        // if !dragging && g.editor.dragging do start_dragging()
 
 
         g.debug_info.frame_time = time.since(now)

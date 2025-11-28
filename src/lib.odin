@@ -122,6 +122,10 @@ bind_pipeline :: proc(frame: Frame, pipeline: Pipeline, loc := #caller_location)
     g.renderer.bound_pipeline = pipeline
 }
 
+in_bounds :: proc(p: vec2, rect: Rect) -> bool {
+    return p.x >= rect.x && p.x < rect.x + rect.w && p.y >= rect.y && p.y < rect.y + rect.h
+}
+
 to_vec4 :: proc(v: vec3, f: f32) -> vec4 { return vec4{v.x, v.y, v.z, f} }
 
 norm :: proc(v: vec3) -> f32 { return math.sqrt_f32(v.x*v.x + v.y*v.y + v.z*v.z) }

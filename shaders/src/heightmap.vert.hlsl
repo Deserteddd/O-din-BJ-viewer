@@ -1,7 +1,7 @@
 #include "common.hlsl"
 
 #define TAU 6.2831853072
-
+#define WAVES 4
 struct Input {
     float3 position : TEXCOORD0;
     float3 color    : TEXCOORD1;
@@ -24,7 +24,7 @@ struct Wave {
 };
 
 Wave createWave(Input input, float3 waveDir, float waveLen, float waveHeight, float waveSpeed) {
-    float  peakSharpness = 0.4;
+    float  peakSharpness = 0.5;
 
     // Speed
     float tauPerLen = TAU/waveLen;
@@ -70,12 +70,23 @@ Wave createWave(Input input, float3 waveDir, float waveLen, float waveHeight, fl
 Output main(Input input) {
     Output output;
     
-    Wave w1 = createWave(input, float3(1, 0, 0.2), 4, 0.6, 0.8);
-    Wave w2 = createWave(input, float3(0.3, 0, 1), 6, 0.4, 1);
-    Wave w3 = createWave(input, float3(0.6, 0, 0.4), 10, 1, 1.2);
-    
-    float3 wavePos = (w1.position + w2.position + w3.position) / 3;
-    float3 waveNormal = (w1.normal + w2.normal + w3.normal) / 3;
+    Wave waves[WAVES] = {
+        createWave(input, float3(1, 0, 0.2), 4, 0.6, 0.8),
+        createWave(input, float3(0.3, 0, 1), 2, 0.4, 1),
+        createWave(input, float3(0.6, 0, 0.4), 3, 1, 1.2),
+        createWave(input, float3(0.2, 0, 0.9), 5, 0.3, 2),
+    };
+
+    float3 wavePos = float3(0, 0, 0);
+    float3 waveNormal = float3(0, 0, 0);
+
+    for (int i=0; i<WAVES; i++) {
+        wavePos += waves[i].position;
+        waveNormal += waves[i].normal;
+    }
+
+    wavePos /= WAVES;
+    waveNormal /= WAVES;
 
     float4 worldPosition = float4(wavePos, 1);
     output.clip_position = mul(vp, worldPosition);

@@ -12,7 +12,6 @@ Rect :: sdl.FRect
 
 Sprite :: struct {
     name: string,
-    sampler: ^sdl.GPUSampler,
     texture: ^sdl.GPUTexture,
     size:    [2]i32
 }
@@ -104,7 +103,7 @@ draw_sprite :: proc(sprite: Sprite, frame: Frame, pos: vec2 = 0, scale: f32 = 1)
     sdl.BindGPUFragmentSamplers(frame.render_pass, 0, 
         &(sdl.GPUTextureSamplerBinding {
             texture = sprite.texture,
-            sampler = sprite.sampler
+            sampler = g.renderer.default_sampler
         }), 1
     )
     sdl.DrawGPUIndexedPrimitives(frame.render_pass, 6, 1, 0, 0, 0)

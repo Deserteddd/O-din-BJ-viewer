@@ -1,6 +1,8 @@
 package obj_viewer
 
 import "core:time"
+import "core:log"
+import sa "core:container/small_array"
 import sdl "vendor:sdl3"
 import im "shared:imgui"
 import im_sdl "shared:imgui/imgui_impl_sdl3"
@@ -8,26 +10,38 @@ import im_sdlgpu "shared:imgui/imgui_impl_sdlgpu3"
 
 Editor :: struct {
     selected_entity: i32,
-    sidebar_left:    Panel,
-    sidebar_right:   Panel,
     dragging:        bool,
     drag_position:   vec2,
     drag_start:      vec2,
+    panels:          [PanelLocation]Panel,
+}
+
+PanelLocation :: enum {
+    LEFT,
+    RIGHT
 }
 
 Panel :: struct {
     rect: Rect,
+    widgets: sa.Small_Array(32, Widget)
+}
+
+Button :: struct {
+    rect: Rect,
+    callback: proc(),
+}
+
+Widget :: union {
+    Button
 }
 
 update_editor :: proc(scene: ^Scene, keys: KeyboardEvents) -> (exit: bool) {
-    for elem in 0..<keys.len {
-        key := keys.data[elem].key
-        mod := keys.data[elem].mod
-        #partial switch key {
+    for k in keys.data {
+        #partial switch k.key {
             case .S:
-                if .LCTRL in mod do write_save_file(scene^)
+                if .LCTRL in k.mod do write_save_file(scene^)
             case .C:
-                if .LCTRL in mod do return true
+                if .LCTRL in k.mod do return true
             case .ESCAPE:
                 if g.editor.dragging {
                     stop_dragging() 
@@ -42,9 +56,9 @@ update_editor :: proc(scene: ^Scene, keys: KeyboardEvents) -> (exit: bool) {
     } 
     if g.lmb_down {
         m_pos: vec2
-        win_size := get_window_size()
         _ = sdl.GetMouseState(&m_pos.x, &m_pos.y)
-        if m_pos.x > g.editor.sidebar_left.rect.w && m_pos.x < g.editor.sidebar_right.rect.x {
+        if !click(m_pos) {
+            win_size := get_window_size()
             ray_origin, ray_dir := ray_from_screen(m_pos, win_size)
             closest_hit: f32 = max(f32)
             closest_entity: i32 = -1
@@ -72,7 +86,51 @@ update_editor :: proc(scene: ^Scene, keys: KeyboardEvents) -> (exit: bool) {
     return
 }
 
-start_dragging :: proc() {
+// Return true if a UI element was clicked
+click :: proc(m_pos: vec2) -> (clicked_ui_element: bool) {
+    for panel, i in g.editor.panels {
+        if !in_bounds(m_pos, panel.rect) do continue
+        clicked_ui_element = true
+        for widget in panel.widgets.data {
+            switch v in widget {
+                case Button:
+                    btn_rect := Rect {
+                        x = panel.rect.x + v.rect.x, 
+                        y = panel.rect.y + v.rect.y,
+                        w = v.rect.w,
+                        h = v.rect.h
+                    }
+                    if in_bounds(m_pos, btn_rect) do v.callback()
+            }
+        }
+    }
+    return clicked_ui_element
+}
+
+init_editor :: proc(winsize: [2]i32) {
+    using g.editor 
+    panels[.LEFT] = {
+        rect = {0, 0, 300, f32(winsize.y)},
+    }
+    {
+        panels[.RIGHT] = {
+            rect = {f32(winsize.x)-300, 0, 300, f32(winsize.y)},
+        }
+        sa.clear(&panels[.RIGHT].widgets)
+        sa.append(&panels[.RIGHT].widgets, 
+            Button {
+                rect = {10, 10, 50, 20},
+                callback = proc() {
+                    log.debugf("Button was pressed")
+                }
+            }
+        )
+    }
+}
+
+start_dragging :: proc(loc := #caller_location) {
+    if g.editor.dragging do return
+    log.debugf("%v: Started dragging", loc)
     g.editor.dragging = true
     x, y: f32
     _ = sdl.GetMouseState(&x, &y)
@@ -82,8 +140,9 @@ start_dragging :: proc() {
     _ = sdl.GetRelativeMouseState(nil, nil)
 }
 
-stop_dragging :: proc() {
+stop_dragging :: proc(loc := #caller_location) {
     if !g.editor.dragging do return
+    log.debugf("%v: Stopped dragging", loc)
     g.editor.dragging = false
     g.editor.drag_position = 0
     ok := sdl.SetWindowRelativeMouseMode(g.window, false); assert(ok)
@@ -92,8 +151,25 @@ stop_dragging :: proc() {
 
 draw_editor :: proc(frame: Frame) {
     bind_pipeline(frame, .QUAD)
-    draw_rect(g.editor.sidebar_left.rect, frame)
-    draw_rect(g.editor.sidebar_right.rect, frame)
+    for panel in g.editor.panels {
+        draw_panel(panel, frame)
+    }
+}
+
+draw_panel :: proc(panel: Panel, frame: Frame) {
+    draw_rect(panel.rect, frame)
+    for widget in panel.widgets.data {
+        switch v in widget {
+            case Button:
+                btn_rect := Rect {
+                    x = panel.rect.x + v.rect.x, 
+                    y = panel.rect.y + v.rect.y,
+                    w = v.rect.w,
+                    h = v.rect.h
+                }
+                draw_rect(btn_rect, frame, {1, 0, 0, 1})
+        }   
+    }
 }
 
 draw_imgui :: proc(scene: ^Scene, frame: Frame) {
@@ -103,15 +179,15 @@ draw_imgui :: proc(scene: ^Scene, frame: Frame) {
     if g.mode == .EDIT {
         if im.Begin("Properties", nil, {.NoTitleBar, .NoResize, .NoMove}) {
             im.SetWindowPos(0)
-            im.SetWindowSize({g.editor.sidebar_left.rect.w, g.editor.sidebar_left.rect.h})
+            // im.SetWindowSize({g.editor.sidebar_left.rect.w, g.editor.sidebar_left.rect.h})
             if im.BeginTabBar("PropertiesTabs") {
                 defer im.EndTabBar()
                 if im.BeginTabItem("Entity") {
                     defer im.EndTabItem()
                     for &e in scene.entities {
                         if e.id == g.editor.selected_entity {
-                            if im.DragFloat3("Position", &e.transform.translation, 0.01) do g.editor.dragging = true
-                            if im.DragFloat3("Scale",    &e.transform.scale, 0.01) do g.editor.dragging = true
+                            if im.DragFloat3("Position", &e.transform.translation, 0.01) do start_dragging()
+                            if im.DragFloat3("Scale",    &e.transform.scale, 0.01) do start_dragging()
                             for &axis in e.transform.scale do axis = max(0.01, axis)
                             break
                         }
