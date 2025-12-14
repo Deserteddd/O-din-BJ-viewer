@@ -1,0 +1,37 @@
+{
+	"folders":
+	[
+		{
+			"path": ".",
+		},
+		{
+			"path": "C:\\odin-windows-amd64-dev-2025-12a\\core"
+		},
+	],
+	"build_systems":
+	[
+		{
+			"name": "debug",
+			"cmd": [
+				"odin run build.odin -file -- debug",
+				"./gaym.exe"
+			],
+			"file_regex": "^(.+)\\(([0-9]+):([0-9]+)\\) (.+)$",
+		},
+		{
+			"name": "build shaders",
+			"cmd": "odin run build.odin -file -- bs",
+			"file_regex": "^(.+)\\(([0-9]+):([0-9]+)\\) (.+)$",
+		}
+	],
+	"settings":
+	{
+		"LSP":
+		{
+			"odin":
+			{
+				"enabled": true,
+			},
+		},
+	},
+}

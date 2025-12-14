@@ -1,0 +1,1247 @@
+{
+	"auto_complete":
+	{
+		"selected_items":
+		[
+			[
+				"prin",
+				"printfln(fmt: string, args: ..any, flush := true) -> int"
+			],
+			[
+				"print",
+				"printfln(fmt: string, args: ..any, flush := true) -> int"
+			]
+		]
+	},
+	"buffers":
+	[
+		{
+			"file": "src/main.odin",
+			"redo_stack":
+			[
+				[
+					43,
+					1,
+					"nv_vi_dd",
+					{
+						"count": 1,
+						"mode": "mode_internal_normal",
+						"register": "\""
+					},
+					"AQAAAAEGAAAAAAAAAgYAAAAAAAAAAAAA",
+					"AQAAAAAAAAABAAAAAQYAAAAAAAABBgAAAAAAAAAAAAAAAPC/"
+				],
+				[
+					41,
+					1,
+					"nv_vi_dd",
+					{
+						"count": 1,
+						"mode": "mode_internal_normal",
+						"register": "\""
+					},
+					"AQAAAAIGAAAAAAAAOQYAAAAAAAAAAAAA",
+					"AQAAAAAAAAABAAAAAgYAAAAAAAACBgAAAAAAAAAAAAAAAPC/"
+				]
+			],
+			"settings":
+			{
+				"buffer_size": 5858,
+				"encoding": "UTF-8",
+				"line_ending": "Windows"
+			},
+			"undo_stack":
+			[
+				[
+					8,
+					1,
+					"sequence",
+					{
+						"commands":
+						[
+							[
+								"nv_vi_c",
+								{
+									"count": 1,
+									"mode": "mode_visual",
+									"register": "\""
+								}
+							],
+							[
+								"insert",
+								{
+									"characters": "w"
+								}
+							]
+						]
+					},
+					"AgAAAN8AAAAAAAAA3wAAAAAAAAACAAAAIHTfAAAAAAAAAOAAAAAAAAAAAAAAAA",
+					"AQAAAAAAAAABAAAA3wAAAAAAAADhAAAAAAAAAAAAAAAAAPC/"
+				],
+				[
+					15,
+					1,
+					"sequence",
+					{
+						"commands":
+						[
+							[
+								"nv_vi_c",
+								{
+									"count": 1,
+									"mode": "mode_internal_normal",
+									"motion":
+									{
+										"motion": "nv_vi_w",
+										"motion_args":
+										{
+											"count": 1,
+											"mode": "mode_internal_normal"
+										}
+									},
+									"register": "\""
+								}
+							],
+							[
+								"insert",
+								{
+									"characters": " false"
+								}
+							]
+						]
+					},
+					"BwAAAN8AAAAAAAAA3wAAAAAAAAAEAAAAd3J1Zd8AAAAAAAAA4AAAAAAAAAAAAAAA4AAAAAAAAADhAAAAAAAAAAAAAADhAAAAAAAAAOIAAAAAAAAAAAAAAOIAAAAAAAAA4wAAAAAAAAAAAAAA4wAAAAAAAADkAAAAAAAAAAAAAADkAAAAAAAAAOUAAAAAAAAAAAAAAA",
+					"AQAAAAAAAAABAAAA3wAAAAAAAADfAAAAAAAAAAAAAAAAAPC/"
+				]
+			]
+		},
+		{
+			"file": "src/file.odin",
+			"settings":
+			{
+				"buffer_size": 9375,
+				"encoding": "UTF-8",
+				"line_ending": "Windows"
+			},
+			"undo_stack":
+			[
+				[
+					6,
+					1,
+					"nv_vi_d",
+					{
+						"count": 1,
+						"mode": "mode_visual",
+						"register": "\""
+					},
+					"AQAAADsWAAAAAAAAOxYAAAAAAABxAQAAICAgIC8vIGhlaWdodF9wYXRoICAgOj0gc3RyaW5ncy5jb25jYXRlbmF0ZSh7cGF0aCwgIi9oZWlnaHRfbWFwLnBuZyJ9KQogICAgLy8gZGlmZnVzZV9wYXRoICA6PSBzdHJpbmdzLmNvbmNhdGVuYXRlKHtwYXRoLCAiL2RpZmZ1c2UucG5nIn0pCiAgICAvLyBwaXhlbHMsIHNpemUgIDo9IGxvYWRfcGl4ZWxzX3UxNihoZWlnaHRfcGF0aCk7ICAgZGVmZXIgZnJlZV9waXhlbHMocGl4ZWxzKQogICAgLy8gY29sb3JzLCBkc2l6ZSA6PSBsb2FkX3BpeGVsc19ieXRlKGRpZmZ1c2VfcGF0aCk7IGRlZmVyIGZyZWVfcGl4ZWxzKGNvbG9ycykKICAgIC8vIGFzc2VydChzaXplID09IGRzaXplKQogICAgLy8gZm10LnByaW50bG4obGVuKHBpeGVscyksIHNpemUp",
+					"AQAAAAAAAAABAAAArBcAAAAAAAA7FgAAAAAAAAAAAAAAAPC/"
+				],
+				[
+					10,
+					1,
+					"nv_vi_d",
+					{
+						"count": 1,
+						"mode": "mode_visual",
+						"register": "\""
+					},
+					"AQAAAFQWAAAAAAAAVBYAAAAAAABpAAAAICAgIC8vIG1pbjogdTE2ID0gMSA8PCAxNTsKICAgIC8vIGZvciBwaXhlbCBpbiBwaXhlbHMgewogICAgICAgIC8vIGlmIHBpeGVsIDwgbWluIGRvIG1pbiA9IHBpeGVsCiAgICAvLyB9",
+					"AQAAAAAAAAABAAAAvRYAAAAAAABUFgAAAAAAAAAAAAAAAPC/"
+				],
+				[
+					11,
+					1,
+					"nv_vi_dd",
+					{
+						"count": 1,
+						"mode": "mode_internal_normal",
+						"register": "\""
+					},
+					"AQAAAFQWAAAAAAAAVBYAAAAAAAABAAAACg",
+					"AQAAAAAAAAABAAAAVBYAAAAAAABUFgAAAAAAAAAAAAAAAPC/"
+				],
+				[
+					14,
+					1,
+					"nv_vi_dd",
+					{
+						"count": 1,
+						"mode": "mode_internal_normal",
+						"register": "\""
+					},
+					"AQAAADsWAAAAAAAAOxYAAAAAAAABAAAACg",
+					"AQAAAAAAAAABAAAAOxYAAAAAAAA7FgAAAAAAAAAAAAAAAPC/"
+				],
+				[
+					18,
+					1,
+					"nv_vi_dd",
+					{
+						"count": 1,
+						"mode": "mode_internal_normal",
+						"register": "\""
+					},
+					"AQAAAHMYAAAAAAAAcxgAAAAAAAAeAAAAICAgICAgICAvLyB2ZXJ0aWNlc1tpXSA9IHZlcnQK",
+					"AQAAAAAAAAABAAAAhhgAAAAAAACGGAAAAAAAAAAAAAAAAPC/"
+				],
+				[
+					21,
+					1,
+					"nv_vi_dd",
+					{
+						"count": 1,
+						"mode": "mode_internal_normal",
+						"register": "\""
+					},
+					"AQAAACgYAAAAAAAAKBgAAAAAAABBAAAAICAgICAgICAgICAgLy8gY29sb3IgPSBnZXRfcGl4ZWxfY29sb3IoY29sb3JzLCByb3csIGNvbCwgc2l6ZS54KQo",
+					"AQAAAAAAAAABAAAAQBgAAAAAAABAGAAAAAAAAAAAAAAAAPC/"
+				],
+				[
+					24,
+					1,
+					"nv_vi_dd",
+					{
+						"count": 1,
+						"mode": "mode_internal_normal",
+						"register": "\""
+					},
+					"AQAAADgYAAAAAAAAOBgAAAAAAAA1AAAAICAgIC8vIGFzc2VydChpMzIobGVuKHZlcnRpY2VzKSkgPT0gc2l6ZS54ICogc2l6ZS55KQo",
+					"AQAAAAAAAAABAAAATBgAAAAAAABMGAAAAAAAAAAAAAAAAPC/"
+				]
+			]
+		},
+		{
+			"file": "build.odin",
+			"settings":
+			{
+				"buffer_size": 2010,
+				"line_ending": "Windows"
+			},
+			"undo_stack":
+			[
+			]
+		},
+		{
+			"file": "sublime_odin.sublime-project",
+			"settings":
+			{
+				"buffer_size": 515,
+				"encoding": "UTF-8",
+				"line_ending": "Windows"
+			},
+			"undo_stack":
+			[
+				[
+					5,
+					1,
+					"nv_vi_d",
+					{
+						"count": 1,
+						"mode": "mode_internal_normal",
+						"motion":
+						{
+							"motion": "nv_vi_w",
+							"motion_args":
+							{
+								"count": 1,
+								"mode": "mode_internal_normal"
+							}
+						},
+						"register": "\""
+					},
+					"AQAAAMkAAAAAAAAAyQAAAAAAAAADAAAAcnVu",
+					"AQAAAAAAAAABAAAAyQAAAAAAAADJAAAAAAAAAAAAAAAAAPC/"
+				],
+				[
+					7,
+					1,
+					"nv_vi_x",
+					{
+						"count": 1,
+						"mode": "mode_internal_normal",
+						"register": "\""
+					},
+					"AQAAAMgAAAAAAAAAyAAAAAAAAAABAAAAIA",
+					"AQAAAAAAAAABAAAAyAAAAAAAAADIAAAAAAAAAAAAAAAAAPC/"
+				],
+				[
+					14,
+					1,
+					"insert",
+					{
+						"characters": " run"
+					},
+					"BAAAAMgAAAAAAAAAyQAAAAAAAAAAAAAAyQAAAAAAAADKAAAAAAAAAAAAAADKAAAAAAAAAMsAAAAAAAAAAAAAAMsAAAAAAAAAzAAAAAAAAAAAAAAA",
+					"AQAAAAAAAAABAAAAyAAAAAAAAADIAAAAAAAAAAAAAAAAAPC/"
+				],
+				[
+					26,
+					1,
+					"sequence",
+					{
+						"commands":
+						[
+							[
+								"nv_vi_a",
+								{
+									"count": 1,
+									"mode": "mode_internal_normal",
+									"register": "\""
+								}
+							],
+							[
+								"left_delete",
+								null
+							],
+							[
+								"left_delete",
+								null
+							],
+							[
+								"left_delete",
+								null
+							],
+							[
+								"left_delete",
+								null
+							]
+						]
+					},
+					"BAAAAMsAAAAAAAAAywAAAAAAAAABAAAAbsoAAAAAAAAAygAAAAAAAAABAAAAdckAAAAAAAAAyQAAAAAAAAABAAAAcsgAAAAAAAAAyAAAAAAAAAABAAAAIA",
+					"AQAAAAAAAAABAAAAywAAAAAAAADLAAAAAAAAAAAAAAAAAPC/"
+				],
+				[
+					35,
+					1,
+					"sequence",
+					{
+						"commands":
+						[
+							[
+								"nv_vi_a",
+								{
+									"count": 1,
+									"mode": "mode_internal_normal",
+									"register": "\""
+								}
+							],
+							[
+								"insert",
+								{
+									"characters": ";"
+								}
+							],
+							[
+								"insert",
+								{
+									"characters": " run"
+								}
+							],
+							[
+								"insert",
+								{
+									"characters": " "
+								}
+							],
+							[
+								"left_delete",
+								null
+							],
+							[
+								"left_delete",
+								null
+							],
+							[
+								"left_delete",
+								null
+							],
+							[
+								"left_delete",
+								null
+							],
+							[
+								"insert",
+								{
+									"characters": "./Gay"
+								}
+							],
+							[
+								"left_delete",
+								null
+							],
+							[
+								"left_delete",
+								null
+							],
+							[
+								"left_delete",
+								null
+							],
+							[
+								"insert",
+								{
+									"characters": "gaym.exe"
+								}
+							]
+						]
+					},
+					"GgAAAMgAAAAAAAAAyQAAAAAAAAAAAAAAyQAAAAAAAADKAAAAAAAAAAAAAADKAAAAAAAAAMsAAAAAAAAAAAAAAMsAAAAAAAAAzAAAAAAAAAAAAAAAzAAAAAAAAADNAAAAAAAAAAAAAADNAAAAAAAAAM4AAAAAAAAAAAAAAM0AAAAAAAAAzQAAAAAAAAABAAAAIMwAAAAAAAAAzAAAAAAAAAABAAAAbssAAAAAAAAAywAAAAAAAAABAAAAdcoAAAAAAAAAygAAAAAAAAABAAAAcsoAAAAAAAAAywAAAAAAAAAAAAAAywAAAAAAAADMAAAAAAAAAAAAAADMAAAAAAAAAM0AAAAAAAAAAAAAAM0AAAAAAAAAzgAAAAAAAAAAAAAAzgAAAAAAAADPAAAAAAAAAAAAAADOAAAAAAAAAM4AAAAAAAAAAQAAAHnNAAAAAAAAAM0AAAAAAAAAAQAAAGHMAAAAAAAAAMwAAAAAAAAAAQAAAEfMAAAAAAAAAM0AAAAAAAAAAAAAAM0AAAAAAAAAzgAAAAAAAAAAAAAAzgAAAAAAAADPAAAAAAAAAAAAAADPAAAAAAAAANAAAAAAAAAAAAAAANAAAAAAAAAA0QAAAAAAAAAAAAAA0QAAAAAAAADSAAAAAAAAAAAAAADSAAAAAAAAANMAAAAAAAAAAAAAANMAAAAAAAAA1AAAAAAAAAAAAAAA",
+					"AQAAAAAAAAABAAAAxwAAAAAAAADHAAAAAAAAAAAAAAAAAPC/"
+				],
+				[
+					43,
+					2,
+					"nv_vi_x",
+					{
+						"count": 1,
+						"mode": "mode_internal_normal",
+						"register": "\""
+					},
+					"AgAAAMgAAAAAAAAAyAAAAAAAAAABAAAAO8gAAAAAAAAAyAAAAAAAAAABAAAAIA",
+					"AQAAAAAAAAABAAAAyAAAAAAAAADIAAAAAAAAAAAAAAAAAPC/"
+				],
+				[
+					63,
+					1,
+					"sequence",
+					{
+						"commands":
+						[
+							[
+								"nv_vi_a",
+								{
+									"count": 1,
+									"mode": "mode_internal_normal",
+									"register": "\""
+								}
+							],
+							[
+								"left_delete",
+								null
+							],
+							[
+								"move",
+								{
+									"by": "characters",
+									"forward": false
+								}
+							],
+							[
+								"insert",
+								{
+									"characters": "["
+								}
+							],
+							[
+								"insert",
+								{
+									"characters": "\n"
+								}
+							],
+							[
+								"move",
+								{
+									"by": "characters",
+									"forward": true
+								}
+							],
+							[
+								"insert",
+								{
+									"characters": "\n}"
+								}
+							],
+							[
+								"left_delete",
+								null
+							],
+							[
+								"insert",
+								{
+									"characters": "]"
+								}
+							]
+						]
+					},
+					"DwAAAMgAAAAAAAAAyAAAAAAAAAAKAAAALi9nYXltLmV4ZaUAAAAAAAAApgAAAAAAAAAAAAAApgAAAAAAAACqAAAAAAAAAAAAAACnAAAAAAAAAKcAAAAAAAAAAwAAAAkJCacAAAAAAAAAqwAAAAAAAAAAAAAAzwAAAAAAAADUAAAAAAAAAAAAAADUAAAAAAAAANUAAAAAAAAAAAAAANAAAAAAAAAA0AAAAAAAAAAEAAAACQkJCdAAAAAAAAAA0wAAAAAAAAAAAAAA0wAAAAAAAADTAAAAAAAAAAEAAAB90AAAAAAAAADQAAAAAAAAAAMAAAAJCQnQAAAAAAAAANQAAAAAAAAAAAAAANQAAAAAAAAA1QAAAAAAAAAAAAAA0AAAAAAAAADQAAAAAAAAAAQAAAAJCQkJ0AAAAAAAAADTAAAAAAAAAAAAAAA",
+					"AQAAAAAAAAABAAAA0QAAAAAAAADRAAAAAAAAAAAAAAAAAPC/"
+				],
+				[
+					75,
+					1,
+					"sequence",
+					{
+						"commands":
+						[
+							[
+								"nv_vi_a",
+								{
+									"count": 1,
+									"mode": "mode_internal_normal",
+									"register": "\""
+								}
+							],
+							[
+								"insert",
+								{
+									"characters": ","
+								}
+							],
+							[
+								"insert",
+								{
+									"characters": "\n"
+								}
+							],
+							[
+								"insert_snippet",
+								{
+									"contents": "\"$0\""
+								}
+							],
+							[
+								"insert",
+								{
+									"characters": "ga"
+								}
+							],
+							[
+								"left_delete",
+								null
+							],
+							[
+								"left_delete",
+								null
+							],
+							[
+								"insert",
+								{
+									"characters": "./gaym.ex"
+								}
+							],
+							[
+								"insert",
+								{
+									"characters": "e"
+								}
+							]
+						]
+					},
+					"EQAAAM8AAAAAAAAA0AAAAAAAAAAAAAAA0AAAAAAAAADVAAAAAAAAAAAAAADVAAAAAAAAANcAAAAAAAAAAAAAANYAAAAAAAAA1wAAAAAAAAAAAAAA1wAAAAAAAADYAAAAAAAAAAAAAADXAAAAAAAAANcAAAAAAAAAAQAAAGHWAAAAAAAAANYAAAAAAAAAAQAAAGfWAAAAAAAAANcAAAAAAAAAAAAAANcAAAAAAAAA2AAAAAAAAAAAAAAA2AAAAAAAAADZAAAAAAAAAAAAAADZAAAAAAAAANoAAAAAAAAAAAAAANoAAAAAAAAA2wAAAAAAAAAAAAAA2wAAAAAAAADcAAAAAAAAAAAAAADcAAAAAAAAAN0AAAAAAAAAAAAAAN0AAAAAAAAA3gAAAAAAAAAAAAAA3gAAAAAAAADfAAAAAAAAAAAAAADfAAAAAAAAAOAAAAAAAAAAAAAAAA",
+					"AQAAAAAAAAABAAAAzgAAAAAAAADOAAAAAAAAAAAAAAAAAPC/"
+				]
+			]
+		},
+		{
+			"file": "/C/odin-windows-amd64-dev-2025-12a/core/os/os2/process.odin",
+			"settings":
+			{
+				"buffer_size": 15750,
+				"line_ending": "Windows"
+			},
+			"undo_stack":
+			[
+			]
+		}
+	],
+	"build_system": "debug",
+	"build_system_choices":
+	[
+		[
+			[
+				[
+					"build shaders",
+					""
+				],
+				[
+					"debug",
+					""
+				]
+			],
+			[
+				"debug",
+				""
+			]
+		]
+	],
+	"build_varint": "",
+	"command_palette":
+	{
+		"height": 0.0,
+		"last_filter": "",
+		"selected_items":
+		[
+			[
+				"save a",
+				"File: Save All"
+			],
+			[
+				"sa",
+				"Set Syntax: ASP"
+			],
+			[
+				"key",
+				"Preferences: Key Bindings"
+			],
+			[
+				"vintageous",
+				"Preferences: NeoVintageous Settings"
+			],
+			[
+				"build",
+				"Build: New Build System"
+			],
+			[
+				"save",
+				"File: Save All"
+			],
+			[
+				"lsp",
+				"LSP: Enable Language Server in Project"
+			],
+			[
+				"neovinta",
+				"Preferences: NeoVintageous Settings"
+			],
+			[
+				"install pac",
+				"Package Control: Install Package"
+			],
+			[
+				"remove",
+				"Package Control: Remove Package"
+			],
+			[
+				"acutalVim",
+				"Preferences: ActualVim Settings"
+			],
+			[
+				"actual",
+				"ActualVim: Disable (File)"
+			],
+			[
+				"install pack",
+				"Package Control: Install Package"
+			],
+			[
+				"remove pac",
+				"Package Control: Remove Package"
+			],
+			[
+				"remove pack",
+				"Package Control: Remove Channel"
+			],
+			[
+				"package remove",
+				"Package Control: Remove Channel"
+			],
+			[
+				"vimpor",
+				"Vimprov: Toggle Vimprov"
+			],
+			[
+				"vimpro",
+				"Vimprov: Toggle Vimprov"
+			],
+			[
+				"list oac",
+				"Package Control: List Packages"
+			],
+			[
+				"install package",
+				"Package Control: Install Package"
+			],
+			[
+				"remove pa",
+				"Package Control: Remove Package"
+			],
+			[
+				"package list ",
+				"Package Control: List Packages"
+			],
+			[
+				"vim",
+				"View: Toggle Minimap"
+			],
+			[
+				"install",
+				"Package Control: Install Package"
+			],
+			[
+				"package rmeove",
+				"Package Control: Remove Package"
+			],
+			[
+				"package",
+				"Package Control: Clear Cache Directory"
+			],
+			[
+				"acutal",
+				"ActualVim: Enable (File)"
+			],
+			[
+				"disable",
+				"ActualVim: Disable (File)"
+			],
+			[
+				"browse",
+				"Preferences: Browse Packages"
+			],
+			[
+				"list pac",
+				"Package Control: List Packages"
+			],
+			[
+				"list packa",
+				"Package Control: List Packages"
+			],
+			[
+				"add package",
+				"Package Control: Add Repository"
+			],
+			[
+				"add packa",
+				"Package Control: Add Channel"
+			],
+			[
+				"list packages",
+				"Package Control: List Packages"
+			],
+			[
+				"install pa",
+				"Package Control: Install Package"
+			],
+			[
+				"lsp enable",
+				"LSP: Enable Language Server in Project"
+			],
+			[
+				"install package control",
+				"Package Control: Install Package"
+			]
+		],
+		"width": 0.0
+	},
+	"console":
+	{
+		"height": 214.0,
+		"history":
+		[
+			"build",
+			"exit()",
+			"build",
+			"neovim",
+			"asd",
+			"hello",
+			"as",
+			"quit",
+			"exit",
+			"exit()",
+			"a  = 1",
+			"asd",
+			"quit",
+			"exit",
+			"exit()",
+			"odin"
+		]
+	},
+	"distraction_free":
+	{
+		"menu_visible": true,
+		"show_minimap": false,
+		"show_open_files": false,
+		"show_tabs": false,
+		"side_bar_visible": false,
+		"status_bar_visible": false
+	},
+	"expanded_folders":
+	[
+		"/C/Users/eelis/Koodaus/O-din-BJ-viewer"
+	],
+	"file_history":
+	[
+		"/C/Users/eelis/Koodaus/O-din-BJ-viewer/build.odin",
+		"/C/Users/eelis/Koodaus/O-din-BJ-viewer/sublime_odin.sublime-project",
+		"/C/odin-windows-amd64-dev-2025-12a/core/os/os2/process.odin",
+		"/C/Users/eelis/Koodaus/Projektit/Gaym/Gaym/sublime_odin.sublime-project",
+		"/C/Users/eelis/Koodaus/wot/main.odin",
+		"/C/Users/eelis/Koodaus/wot/sublime_odin.sublime-project",
+		"/C/odin-windows-amd64-dev-2025-12a/core/mem/tracking_allocator.odin",
+		"/C/Users/eelis/Koodaus/fantastic_project/main.odin",
+		"/C/Users/eelis/AppData/Roaming/Sublime Text/Packages/User/Preferences.sublime-settings",
+		"/C/Users/eelis/AppData/Roaming/Sublime Text/Packages/NeoVintageous/Preferences.sublime-settings",
+		"/C/Users/eelis/Koodaus/sublime_odin/sublime_odin.sublime-project",
+		"/C/Users/eelis/Koodaus/sublime_odin/hello_sublime.odin",
+		"/C/Users/eelis/AppData/Roaming/Sublime Text/Packages/User/.neovintageousrc",
+		"/C/Users/eelis/AppData/Roaming/Sublime Text/Packages/User/ActualVim.sublime-settings",
+		"/C/odin-windows-amd64-dev-2025-12a/core/fmt/fmt_js.odin",
+		"/C/odin-windows-amd64-dev-2025-12a/core/fmt/fmt.odin",
+		"/C/Users/eelis/Desktop/Eelis_70_aaahan_eaerka/ahmati_Matikka_Aura/repo/kirjasto.py",
+		"/C/Users/eelis/Desktop/Eelis_70_aaahan_eaerka/ahtikoskiveeti_Veeti_Ahtikoski/repo/kirjasto.py",
+		"/C/Users/eelis/Desktop/Eelis_70_aaahan_eaerka/aiiaal_Aalto_Aino/repo/kirjasto.py",
+		"/C/Users/eelis/Desktop/Eelis_70_aaahan_eaerka/aimuti_Mutikainen_Aada/repo/kirjasto.py",
+		"/C/Users/eelis/Desktop/Eelis_70_aaahan_eaerka/aisivo_Sivonen_Anni/repo/kirjasto.py",
+		"/C/Users/eelis/Desktop/Eelis_70_aaahan_eaerka/ajkyos_Kyöstiö_Aapo/repo/kirjasto.py",
+		"/C/Users/eelis/Desktop/Eelis_70_aaahan_eaerka/ajraih_Räihä_Atte/repo/kirjasto.py",
+		"/C/Users/eelis/Desktop/Eelis_70_aaahan_eaerka/ajsilv_Silvennoinen_Antti/repo/kirjasto.py",
+		"/C/Users/eelis/Desktop/Eelis_70_aaahan_eaerka/akjkan_Kangas_Aku/repo/kirjasto.py",
+		"/C/Users/eelis/Desktop/Eelis_70_aaahan_eaerka/akkero_Eronen_Aki/repo/kirjasto.py",
+		"/C/Users/eelis/Desktop/Eelis_70_aaahan_eaerka/alaaho_Aho_Aleksanteri/repo/kirjasto.py",
+		"/C/Users/eelis/Desktop/Eelis_70_aaahan_eaerka/alanur_Nurmi_Aleksi/repo/kirjasto.py",
+		"/C/Users/eelis/Desktop/Eelis_70_aaahan_eaerka/aletoi_Toiviainen_Alex/repo/kirjasto.py",
+		"/C/Users/eelis/Desktop/Eelis_70_aaahan_eaerka/alkham_Khames_Ali/repo/kirjasto.py",
+		"/C/Users/eelis/Desktop/Eelis_70_aaahan_eaerka/allahe_Lähelmä_Aino/repo/kirjasto.py",
+		"/C/Users/eelis/Desktop/Eelis_70_aaahan_eaerka/almajo_Jokila_Alisa/repo/kirjasto.py",
+		"/C/Users/eelis/Desktop/Eelis_70_aaahan_eaerka/almnyb_Nyberg_Alisia/repo/kirjasto.py",
+		"/C/Users/eelis/Desktop/Eelis_70_aaahan_eaerka/alnkir_Kirsilä_Alexi/repo/kirjasto.py",
+		"/C/Users/eelis/Desktop/Eelis_70_aaahan_eaerka/alssuh_Suhonen_Aliisa/repo/kirjasto.py",
+		"/C/Users/eelis/Desktop/Eelis_70_aaahan_eaerka/ampiuh_Piuhola_Anni/repo/kirjasto.py",
+		"/C/Users/eelis/Desktop/Eelis_70_aaahan_eaerka/amsorm_Sormunen_Anni/repo/kirjasto.py",
+		"/C/Users/eelis/Desktop/Eelis_70_aaahan_eaerka/amverm_Vermola_Aaro/repo/kirjasto.py",
+		"/C/Users/eelis/Desktop/Eelis_70_aaahan_eaerka/analel_Laivamaa_Antti/repo/kirjasto.py",
+		"/C/Users/eelis/Desktop/Eelis_70_aaahan_eaerka/anehir_Hirvonen_Anniina/repo/kirjasto.py",
+		"/C/Users/eelis/Desktop/Eelis_70_aaahan_eaerka/anilms_Suominen_Antti/repo/kirjasto.py",
+		"/C/Users/eelis/Desktop/Eelis_70_aaahan_eaerka/animus_Mustonen_Antti/repo/kirjasto.py",
+		"/C/Users/eelis/Desktop/Eelis_70_aaahan_eaerka/anjpel_Peltonen_Antti/repo/kirjasto.py",
+		"/C/Users/eelis/Desktop/Eelis_70_aaahan_eaerka/anlifu_Fu_Anlin/repo/kirjasto.py",
+		"/C/Users/eelis/Desktop/Eelis_70_aaahan_eaerka/anmikl_Laine_Annika/repo/kirjasto.py",
+		"/C/Users/eelis/Desktop/Eelis_70_aaahan_eaerka/anptii_Tiilikainen_Anton/repo/kirjasto.py",
+		"/C/Users/eelis/Desktop/Eelis_70_aaahan_eaerka/aomali_Malin_Anton/repo/kirjasto.py",
+		"/C/Users/eelis/Desktop/Eelis_70_aaahan_eaerka/arbkay_Kaya_Baran/repo/kirjasto.py",
+		"/C/Users/eelis/Desktop/Eelis_70_aaahan_eaerka/aretuo_Tuominen_Eemeli/repo/kirjasto.py",
+		"/C/Users/eelis/Desktop/Eelis_70_aaahan_eaerka/arnurk_Nurk_Arnelia/repo/kirjasto.py",
+		"/C/Users/eelis/Desktop/Eelis_70_aaahan_eaerka/assavo_Savolainen_Aapo/repo/kirjasto.py",
+		"/C/Users/eelis/Desktop/Eelis_70_aaahan_eaerka/arrran_Rantala_Arttu/repo/kirjasto.py",
+		"/C/Users/eelis/Desktop/Eelis_70_aaahan_eaerka/asohak_Hakala_Anni/repo/kirjasto.py",
+		"/C/Users/eelis/Desktop/Eelis_70_aaahan_eaerka/astonn_Tönnes_Annika/repo/kirjasto.py",
+		"/C/Users/eelis/Desktop/Eelis_70_aaahan_eaerka/atekuu_Kuusela_Atte/repo/kirjasto.py",
+		"/C/Users/eelis/Desktop/Eelis_70_aaahan_eaerka/atiivo_Iivonen_Atte/repo/kirjasto.py",
+		"/C/Users/eelis/Desktop/Eelis_70_aaahan_eaerka/balalb_Burra_Balsam/repo/kirjasto.py",
+		"/C/Users/eelis/Desktop/Eelis_70_aaahan_eaerka/baruil_Li_Rui/repo/kirjasto.py",
+		"/C/Users/eelis/Desktop/Eelis_70_aaahan_eaerka/bebodi_Bódi_BoglÃ¡rka/repo/kirjasto.py",
+		"/C/Users/eelis/Desktop/Eelis_70_aaahan_eaerka/cklind_Lindström_Casper/repo/kirjasto.py",
+		"/C/Users/eelis/Desktop/Eelis_70_aaahan_eaerka/dahell_Helle_Daniel/repo/kirjasto.py",
+		"/C/Users/eelis/Desktop/Eelis_70_aaahan_eaerka/damoha_Mohamed_Dahir/repo/kirjasto.py",
+		"/C/Users/eelis/Desktop/Eelis_70_aaahan_eaerka/dlsuki_Kivihall_Daniel/repo/kirjasto.py",
+		"/C/Users/eelis/Desktop/Eelis_70_aaahan_eaerka/dmvilo_Vilola_Daniel/repo/kirjasto.py",
+		"/C/Users/eelis/Desktop/Eelis_70_aaahan_eaerka/eaerka_Erkamaa_Emma/repo/kirjasto.py",
+		"/C/Users/eelis/Desktop/Eelis_70_aaahan_eaerka/anttvu_Vuorio_Antti/repo/kirjasto.py",
+		"/C/Users/eelis/Desktop/Eelis_70_aaahan_eaerka/ahmalk_Malkavaara_Anna/repo/kirjasto.py",
+		"/C/Users/eelis/Desktop/Eelis_70_aaahan_eaerka/afnare_Recio_Antti/repo/kirjasto.py",
+		"/C/Users/eelis/Downloads/Lab 3 Image processing/students/task3.py",
+		"/C/Users/eelis/Desktop/planmeca",
+		"/E/Kurssit/Hajo/demo3/doc/tehtavananto.md",
+		"/C/Users/eelis/Desktop/engine-sim-v0.1.14a/basic/shaders/glsl/delta_console_shader.frag",
+		"/C/Users/eelis/Desktop/engine-sim-v0.1.14a/basic/shaders/glsl/delta_console_shader.vert",
+		"/E/Kurssit/Hajo/demo1/doc/tehtavananto.md",
+		"/C/Users/eelis/Desktop/polkutesti"
+	],
+	"find":
+	{
+		"height": 28.0
+	},
+	"find_in_files":
+	{
+		"height": 0.0,
+		"where_history":
+		[
+		]
+	},
+	"find_state":
+	{
+		"case_sensitive": false,
+		"find_history":
+		[
+		],
+		"highlight": true,
+		"in_selection": false,
+		"preserve_case": false,
+		"regex": false,
+		"replace_history":
+		[
+		],
+		"reverse": true,
+		"scrollbar_highlights": true,
+		"show_context": true,
+		"use_buffer2": true,
+		"use_gitignore": true,
+		"whole_word": false,
+		"wrap": true
+	},
+	"groups":
+	[
+		{
+			"sheets":
+			[
+				{
+					"buffer": 0,
+					"file": "src/main.odin",
+					"selected": true,
+					"semi_transient": false,
+					"settings":
+					{
+						"buffer_size": 5858,
+						"regions":
+						{
+						},
+						"selection":
+						[
+							[
+								1823,
+								1823
+							]
+						],
+						"settings":
+						{
+							"_nv_visual_sel_mode": "mode_visual",
+							"auto_complete_triggers":
+							[
+								{
+									"characters": "<",
+									"selector": "text.html, text.xml"
+								},
+								{
+									"rhs_empty": true,
+									"selector": "punctuation.accessor"
+								},
+								{
+									"characters": ".>#\"/:",
+									"selector": "meta.tag, source - comment - string.quoted.double.block - string.quoted.single.block - string.unquoted.heredoc",
+									"server": "odin"
+								}
+							],
+							"lsp_active": true,
+							"lsp_uri": "file:///C:/Users/eelis/Koodaus/O-din-BJ-viewer/src/main.odin",
+							"show_definitions": false,
+							"syntax": "Packages/Odin/Odin.sublime-syntax",
+							"tab_size": 4,
+							"translate_tabs_to_spaces": true
+						},
+						"translation.x": 0.0,
+						"translation.y": 476.0,
+						"zoom_level": 1.0
+					},
+					"stack_index": 0,
+					"stack_multiselect": false,
+					"type": "text"
+				},
+				{
+					"buffer": 1,
+					"file": "src/file.odin",
+					"semi_transient": false,
+					"settings":
+					{
+						"buffer_size": 9375,
+						"regions":
+						{
+						},
+						"selection":
+						[
+							[
+								1204,
+								1204
+							]
+						],
+						"settings":
+						{
+							"_nv_visual_sel_mode": "mode_visual",
+							"auto_complete_triggers":
+							[
+								{
+									"characters": "<",
+									"selector": "text.html, text.xml"
+								},
+								{
+									"rhs_empty": true,
+									"selector": "punctuation.accessor"
+								},
+								{
+									"characters": ".>#\"/:",
+									"selector": "meta.tag, source - comment - string.quoted.double.block - string.quoted.single.block - string.unquoted.heredoc",
+									"server": "odin"
+								}
+							],
+							"lsp_active": true,
+							"lsp_uri": "file:///C:/Users/eelis/Koodaus/O-din-BJ-viewer/src/file.odin",
+							"show_definitions": false,
+							"syntax": "Packages/Odin/Odin.sublime-syntax",
+							"tab_size": 4,
+							"translate_tabs_to_spaces": true
+						},
+						"translation.x": 0.0,
+						"translation.y": 854.0,
+						"zoom_level": 1.0
+					},
+					"stack_index": 1,
+					"stack_multiselect": false,
+					"type": "text"
+				},
+				{
+					"buffer": 2,
+					"file": "build.odin",
+					"semi_transient": true,
+					"settings":
+					{
+						"buffer_size": 2010,
+						"regions":
+						{
+						},
+						"selection":
+						[
+							[
+								215,
+								215
+							]
+						],
+						"settings":
+						{
+							"auto_complete_triggers":
+							[
+								{
+									"characters": "<",
+									"selector": "text.html, text.xml"
+								},
+								{
+									"rhs_empty": true,
+									"selector": "punctuation.accessor"
+								},
+								{
+									"characters": ".>#\"/:",
+									"selector": "meta.tag, source - comment - string.quoted.double.block - string.quoted.single.block - string.unquoted.heredoc",
+									"server": "odin"
+								}
+							],
+							"lsp_active": true,
+							"lsp_uri": "file:///C:/Users/eelis/Koodaus/O-din-BJ-viewer/build.odin",
+							"show_definitions": false,
+							"syntax": "Packages/Odin/Odin.sublime-syntax",
+							"tab_size": 4,
+							"translate_tabs_to_spaces": true
+						},
+						"translation.x": 0.0,
+						"translation.y": 0.0,
+						"zoom_level": 1.0
+					},
+					"stack_index": 3,
+					"stack_multiselect": false,
+					"type": "text"
+				},
+				{
+					"buffer": 3,
+					"file": "sublime_odin.sublime-project",
+					"semi_transient": false,
+					"settings":
+					{
+						"buffer_size": 515,
+						"regions":
+						{
+						},
+						"selection":
+						[
+							[
+								165,
+								165
+							]
+						],
+						"settings":
+						{
+							"lsp_uri": "file:///C:/Users/eelis/Koodaus/O-din-BJ-viewer/sublime_odin.sublime-project",
+							"syntax": "Packages/JSON/JSON.sublime-syntax",
+							"tab_size": 4,
+							"translate_tabs_to_spaces": false
+						},
+						"translation.x": 0.0,
+						"translation.y": 0.0,
+						"zoom_level": 1.0
+					},
+					"stack_index": 2,
+					"stack_multiselect": false,
+					"type": "text"
+				}
+			]
+		},
+		{
+			"sheets":
+			[
+				{
+					"buffer": 4,
+					"file": "/C/odin-windows-amd64-dev-2025-12a/core/os/os2/process.odin",
+					"selected": true,
+					"semi_transient": false,
+					"settings":
+					{
+						"buffer_size": 15750,
+						"regions":
+						{
+						},
+						"selection":
+						[
+							[
+								8400,
+								8400
+							]
+						],
+						"settings":
+						{
+							"auto_complete_triggers":
+							[
+								{
+									"characters": "<",
+									"selector": "text.html, text.xml"
+								},
+								{
+									"rhs_empty": true,
+									"selector": "punctuation.accessor"
+								},
+								{
+									"characters": ".>#\"/:",
+									"selector": "meta.tag, source - comment - string.quoted.double.block - string.quoted.single.block - string.unquoted.heredoc",
+									"server": "odin"
+								}
+							],
+							"lsp_active": true,
+							"lsp_uri": "file:///C:/odin-windows-amd64-dev-2025-12a/core/os/os2/process.odin",
+							"show_definitions": false,
+							"syntax": "Packages/Odin/Odin.sublime-syntax",
+							"tab_size": 4,
+							"translate_tabs_to_spaces": false
+						},
+						"translation.x": 0.0,
+						"translation.y": 5406.0,
+						"zoom_level": 1.0
+					},
+					"stack_index": 0,
+					"stack_multiselect": false,
+					"type": "text"
+				}
+			]
+		}
+	],
+	"incremental_find":
+	{
+		"height": 28.0
+	},
+	"input":
+	{
+		"height": 43.0
+	},
+	"layout":
+	{
+		"cells":
+		[
+			[
+				0,
+				0,
+				1,
+				1
+			],
+			[
+				1,
+				0,
+				2,
+				1
+			]
+		],
+		"cols":
+		[
+			0.0,
+			0.5,
+			1.0
+		],
+		"rows":
+		[
+			0.0,
+			1.0
+		]
+	},
+	"menu_visible": true,
+	"output.LSP Log Panel":
+	{
+		"height": 0.0,
+		"history":
+		[
+		]
+	},
+	"output.diagnostics":
+	{
+		"height": 0.0,
+		"history":
+		[
+		]
+	},
+	"output.exec":
+	{
+		"height": 136.0,
+		"history":
+		[
+		]
+	},
+	"output.find_results":
+	{
+		"height": 0.0,
+		"history":
+		[
+		]
+	},
+	"output.mdpopups":
+	{
+		"height": 0.0,
+		"history":
+		[
+		]
+	},
+	"pinned_build_system": "",
+	"project": "sublime_odin.sublime-project",
+	"replace":
+	{
+		"height": 52.0
+	},
+	"save_all_on_build": true,
+	"select_file":
+	{
+		"height": 0.0,
+		"last_filter": "",
+		"selected_items":
+		[
+			[
+				"fmt.",
+				"core\\fmt\\fmt.odin"
+			]
+		],
+		"width": 0.0
+	},
+	"select_project":
+	{
+		"height": 0.0,
+		"last_filter": "",
+		"selected_items":
+		[
+		],
+		"width": 0.0
+	},
+	"select_symbol":
+	{
+		"height": 0.0,
+		"last_filter": "",
+		"selected_items":
+		[
+		],
+		"width": 0.0
+	},
+	"selected_group": 1,
+	"settings":
+	{
+		"_vintageous_reset_during_init": true,
+		"lsp_show_inlay_hints": false
+	},
+	"show_minimap": false,
+	"show_open_files": false,
+	"show_tabs": true,
+	"side_bar_visible": true,
+	"side_bar_width": 226.0,
+	"status_bar_visible": true,
+	"template_settings":
+	{
+	}
+}
