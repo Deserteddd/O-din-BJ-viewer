@@ -8,7 +8,7 @@ import sa "core:container/small_array"
 import sdl "vendor:sdl3"
 import im_sdl "shared:imgui/imgui_impl_sdl3"
 
-VSYNC :: true
+VSYNC :: false
 default_context: runtime.Context
 
 main :: proc() {

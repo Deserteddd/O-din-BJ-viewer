@@ -163,7 +163,7 @@ toggle_fullscreen :: proc() {
         case .EDIT:
             ok = sdl.SetWindowRelativeMouseMode(g.window, false); assert(ok)
         case .PLAY:
-            ok = sdl.SetWindowRelativeMouseMode(g.window, true)
+            ok = sdl.SetWindowRelativeMouseMode(g.window, true); assert(ok)
     }
     assert(ok)
     init_imgui()

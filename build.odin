@@ -5,8 +5,7 @@ import "core:strings"
 import "core:slice"
 import "core:path/filepath"
 import os "core:os/os2"
-
-ODIN_PATH     :: "C:\\odin-windows-amd64-dev-2025-02"
+import "base:runtime"
 
 main :: proc() {
     context.logger = log.create_console_logger()
@@ -14,8 +13,9 @@ main :: proc() {
     if slice.contains(os.args, "bs") do build_shaders()
     b: strings.Builder
     strings.builder_init(&b)
-    strings.write_string(&b, ODIN_PATH+"\\odin build src")
+    strings.write_string(&b, "odin build src")
     if slice.contains(os.args, "debug")    do strings.write_string(&b, " -debug")
+    else do strings.write_string(&b, " -disable-assert")
     if slice.contains(os.args, "sanitize") do strings.write_string(&b, " -sanitize=address")
     strings.write_string(&b, " -out:"+EXE)
     run_str(strings.to_string(b))
@@ -59,7 +59,7 @@ run :: proc(cmd: []string) {
 }
 
 exec :: proc(cmd: []string) -> (code: int, error: os.Error) {
-    process := os.process_start({command = cmd}) or_return
+    process := os.process_start({command = cmd, stdout = os.stdout, stderr = os.stderr}) or_return
     state := os.process_wait(process) or_return
     os.process_close(process) or_return
     return state.exit_code, nil

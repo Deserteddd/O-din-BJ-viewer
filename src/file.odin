@@ -4,6 +4,7 @@ import "core:strings"
 import "base:runtime"
 import "core:slice"
 import "core:fmt"
+import "core:log"
 import "core:os"
 import "core:encoding/json"
 import stbi "vendor:stb/image"
@@ -254,10 +255,13 @@ load_height_map :: proc(path: string) -> HeightMap {
 }
 
 
-load_pixels_byte :: proc(path: string) -> (pixels: []byte, size: [2]i32) {
+load_pixels_byte :: proc(path: string, loc := #caller_location) -> (pixels: []byte, size: [2]i32) {
     path_cstr := strings.clone_to_cstring(path, context.temp_allocator);
     pixel_data := stbi.load(path_cstr, &size.x, &size.y, nil, 4)
-    assert(pixel_data != nil)
+    if pixel_data == nil {
+        log.errorf("%v: Pixel data nill", loc)
+        panic("")
+    }
     pixels = slice.bytes_from_ptr(pixel_data, int(size.x * size.y * 4))
     assert(pixels != nil)
     return

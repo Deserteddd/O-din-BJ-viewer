@@ -12,10 +12,7 @@
 	[
 		{
 			"name": "debug",
-			"cmd": [
-				"odin run build.odin -file -- debug",
-				"./gaym.exe"
-			],
+			"cmd": "odin run ../build.odin -file -- debug",
 			"file_regex": "^(.+)\\(([0-9]+):([0-9]+)\\) (.+)$",
 		},
 		{
