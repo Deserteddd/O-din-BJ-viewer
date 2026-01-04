@@ -104,7 +104,7 @@ click :: proc(m_pos: vec2) -> (clicked_ui_element: bool) {
             }
         }
     }
-    return clicked_ui_element
+    return
 }
 
 init_editor :: proc(winsize: [2]i32) {
@@ -210,9 +210,6 @@ draw_imgui :: proc(scene: ^Scene, frame: Frame) {
         sdl.GetWindowSize(g.window, &w, &h)
         im.SetWindowPos(vec2{f32(w-140), 0})
         im.SetWindowSize(vec2{140, 0})
-        frame_time_float := i32(round(1/f32(time.duration_seconds(g.debug_info.frame_time))))
-        im.SetNextItemWidth(50)
-        im.DragInt("FPS", &frame_time_float)
         rendered := i32(g.debug_info.draw_call_count)
         im.SetNextItemWidth(50)
         im.DragInt("Draw calls", &rendered)

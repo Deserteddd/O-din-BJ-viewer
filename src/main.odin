@@ -8,7 +8,7 @@ import sa "core:container/small_array"
 import sdl "vendor:sdl3"
 import im_sdl "shared:imgui/imgui_impl_sdl3"
 
-VSYNC :: false
+VSYNC :: true
 default_context: runtime.Context
 
 main :: proc() {
@@ -25,7 +25,15 @@ init :: proc() {
     sdl.SetLogOutputFunction(
         proc "c" (userdata: rawptr, category: sdl.LogCategory, priority: sdl.LogPriority, message: cstring) {
             context = default_context
-            log.debugf("SDL {} [{}]", category, priority, message)
+            level: log.Level
+            #partial switch priority {
+                case .DEBUG: level = .Debug
+                case .INFO: level = .Info
+                case .WARN: level = .Warning
+                case .ERROR: level = .Error
+                case .CRITICAL: level = .Fatal
+            }
+            log.logf(level, "SDL %v:\t%v (%v)", category, message, level)
         }, nil
     )
     ok := sdl.Init({.VIDEO}); assert(ok)
@@ -45,13 +53,12 @@ init :: proc() {
     init_editor({1280, 720})
 
     g.player = create_player()
-
-    g.heightmap = load_height_map("assets/height_map")
+    g.ocean  = load_height_map("")
 }
 
 run :: proc(scene: ^Scene) {
     context.allocator = runtime.panic_allocator()
-    free_all(context.temp_allocator)
+    
     main_loop: for {
         defer {
             free_all(context.temp_allocator)
@@ -89,10 +96,11 @@ run :: proc(scene: ^Scene) {
 
         begin_3d(&frame)
         render_3D(scene^, frame)
-        render_heightmap(frame)
+        render_plane(g.ocean, frame)
         submit_3d(&frame)
 
         begin_2d(&frame)
+
         if g.mode == .EDIT {
             draw_editor(frame)
         } else {
@@ -100,11 +108,7 @@ run :: proc(scene: ^Scene) {
         }
 
         submit_2d(&frame)
-
-        // dragging := g.editor.dragging
         draw_imgui(scene, frame)
-        // if !dragging && g.editor.dragging do start_dragging()
-
 
         g.debug_info.frame_time = time.since(now)
         g.total_time += time.duration_seconds(g.debug_info.frame_time)
@@ -136,6 +140,11 @@ update_game :: proc(scene: ^Scene, keys: KeyboardEvents) -> (exit: bool) {
                 reset_player_pos()
                 g.player.noclip = false
             case .N: g.player.noclip = !g.player.noclip
+        }
+    }
+    if g.rmb_down {
+        if g.player.pocket != nil && len(scene.models) > 0 {
+            entity_from_model(scene, scene.models[0].name)
         }
     }
     new_ticks := sdl.GetTicks();

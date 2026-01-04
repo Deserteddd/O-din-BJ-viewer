@@ -12,6 +12,7 @@ Player :: struct {
     bbox:       AABB,
     airborne,
     noclip:     bool,
+    pocket:     ^Entity,
     checkpoint: [2]vec3,                // Position, Rotation
 }
 

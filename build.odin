@@ -9,18 +9,20 @@ import "base:runtime"
 
 main :: proc() {
     context.logger = log.create_console_logger()
-    EXE :: "gaym.exe"
+    EXE :: "demo.exe"
     if slice.contains(os.args, "bs") do build_shaders()
-    b: strings.Builder
-    strings.builder_init(&b)
-    strings.write_string(&b, "odin build src")
+    run := slice.contains(os.args, "run")
+
+    b := strings.builder_make()
+    if run do strings.write_string(&b, "odin run src")
+    else do strings.write_string(&b, "odin build src")
+
     if slice.contains(os.args, "debug")    do strings.write_string(&b, " -debug")
-    else do strings.write_string(&b, " -disable-assert")
     if slice.contains(os.args, "sanitize") do strings.write_string(&b, " -sanitize=address")
-    strings.write_string(&b, " -out:"+EXE)
+
+    if !run do strings.write_string(&b, " -out:"+EXE)
     run_str(strings.to_string(b))
     log.info("Args:", os.args)
-    if slice.contains(os.args, "run") do run({EXE})
 }
 
 build_shaders :: proc() {

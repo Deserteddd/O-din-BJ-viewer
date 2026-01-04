@@ -85,10 +85,10 @@ RND_Init :: proc() -> Renderer {
         vec3,
         primitive_type = sdl.GPUPrimitiveType.LINELIST
     )
-    pipelines[.HEIGHTMAP] = create_render_pipeline(
-        "heightmap.vert",
-        "heightmap.frag",
-        HeightMapVertex,
+    pipelines[.PLANE] = create_render_pipeline(
+        "ocean.vert",
+        "ocean.frag",
+        OBJVertex,
         wireframe = true
     )
     pipelines[.SKYBOX] = create_skybox_pipeline()
@@ -217,13 +217,13 @@ get_fragment_ubo_global :: proc() -> FragUBOGlobal {
     }
 }
 
-render_heightmap :: proc (frame: Frame) {
-    bind_pipeline(frame, .HEIGHTMAP)
+render_plane :: proc (plane: Plane, frame: Frame) {
+    bind_pipeline(frame, .PLANE)
     time := f32(g.total_time)
     sdl.PushGPUVertexUniformData(frame.cmd_buff, 1, &time, size_of(f32))
     bindings: [2]sdl.GPUBufferBinding = {
-        sdl.GPUBufferBinding{buffer = g.heightmap.vbo},
-        sdl.GPUBufferBinding{buffer = g.heightmap.ibo}
+        sdl.GPUBufferBinding{buffer = plane.vbo},
+        sdl.GPUBufferBinding{buffer = plane.ibo}
     }
     sdl.BindGPUFragmentSamplers(frame.render_pass, 0, &(sdl.GPUTextureSamplerBinding  {
         texture = g.renderer.skybox_texture,
@@ -231,7 +231,7 @@ render_heightmap :: proc (frame: Frame) {
     }), 1)
     sdl.BindGPUVertexBuffers(frame.render_pass, 0, &bindings[0], 1)
     sdl.BindGPUIndexBuffer(frame.render_pass, bindings[1], ._32BIT)
-    sdl.DrawGPUIndexedPrimitives(frame.render_pass, g.heightmap.num_indices, 1, 0, 0, 0)
+    sdl.DrawGPUIndexedPrimitives(frame.render_pass, plane.num_indices, 1, 0, 0, 0)
 }
 
 begin_3d :: proc(frame: ^Frame) {
@@ -257,7 +257,6 @@ begin_3d :: proc(frame: ^Frame) {
     assert(frame.render_pass != nil)
     sdl.PushGPUVertexUniformData(frame.cmd_buff, 0, &frame.vert_ubo_global, size_of(VertUBOGlobal))
     sdl.PushGPUFragmentUniformData(frame.cmd_buff, 0, &frame.frag_ubo_global, size_of(FragUBOGlobal))
-
 }
 
 submit_3d :: proc(frame: ^Frame) {
@@ -663,4 +662,3 @@ get_vb_layout :: proc($vertex_type: typeid) -> []vbElementInfo {
     }
     return data
 }
-
