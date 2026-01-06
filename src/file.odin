@@ -13,6 +13,7 @@ import sdl "vendor:sdl3"
 
 AssetInstance :: struct {
     asset:    string,
+    name:     string,
     position,
     scale:    vec3   
 }
@@ -35,6 +36,7 @@ write_save_file :: proc(scene: Scene, loc := #caller_location) {
     for e, i in scene.entities {
         save.instances[i] = AssetInstance {
             asset    = e.model.name,
+            name     = e.name,
             position = e.transform.translation,
             scale    = e.transform.scale
         }
@@ -165,7 +167,7 @@ load_scene :: proc(savefile_path: string) -> Scene {
         append(&scene.models, model)
         for instance in save_file.instances {
             if instance.asset == asset {
-                entity_id, ok := entity_from_model(&scene, asset); assert(ok)
+                entity_id, ok := entity_from_model(&scene, asset, instance.name); assert(ok)
                 set_entity_transform(&scene, entity_id, instance.position, instance.scale)
             }
         }

@@ -17,6 +17,7 @@ Output main(Input input) {
     Output output;
     float4 worldPosition = mul(m, float4(input.position, 1));
     output.clip_position = mul(vp, worldPosition);
-    output.p_color = float4(1, 0, 0, 1);
+    float3 color_rgb = {255, 255, 0};
+    output.p_color = float4(normalize(color_rgb), 1);
     return output;
 }

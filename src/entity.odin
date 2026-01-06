@@ -1,7 +1,10 @@
 package obj_viewer
 
+import "core:fmt"
+
 Entity :: struct {
     id: i32,
+    name: string,
     model: ^OBJModel,
     transform: Transform,
 }
@@ -12,7 +15,19 @@ Transform :: struct {
     rotation:       quaternion128,
 }
 
-entity_from_model :: proc(scene: ^Scene, model_name: string) -> (id: i32, ok: bool) {
+spawn :: proc(scene: ^Scene, at_origin: bool) -> (id: i32, ok: bool) {
+    if len(scene.models) > 0 {
+        id = entity_from_model(scene, scene.models[0].name) or_return
+        set_entity_transform(scene, id, get_player_translation().x)
+        screen_size := get_window_size()
+        origin, dir := ray_from_screen(screen_size/2, screen_size)
+        set_entity_transform(scene, id, origin + 10*dir)
+        ok = true
+    }
+    return
+}
+
+entity_from_model :: proc(scene: ^Scene, model_name: string, entity_name: string = "") -> (id: i32, ok: bool) {
     entity: Entity
     for &model in scene.models {
         if model.name == model_name {
@@ -21,7 +36,10 @@ entity_from_model :: proc(scene: ^Scene, model_name: string) -> (id: i32, ok: bo
         }
     }
     if entity.model == nil do return
+
     id = lowest_free_id(scene.entities.id, len(scene.entities))
+    if entity_name == "" do entity.name = fmt.aprintf("%v-%v", model_name, id)
+    else do entity.name = entity_name
     entity.id = id
     entity.transform.scale = 1
     append_soa(&scene.entities, entity)

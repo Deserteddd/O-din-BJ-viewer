@@ -57,7 +57,6 @@ init :: proc() {
 }
 
 run :: proc(scene: ^Scene) {
-    context.allocator = runtime.panic_allocator()
     
     main_loop: for {
         defer {
@@ -69,6 +68,7 @@ run :: proc(scene: ^Scene) {
         key_presses: KeyboardEvents
         ev: sdl.Event
         for sdl.PollEvent(&ev) {
+            // process_event := true
             im_sdl.ProcessEvent(&ev)
             #partial switch ev.type {
                 case .QUIT: 
@@ -76,6 +76,7 @@ run :: proc(scene: ^Scene) {
                 case .KEY_DOWN: 
                     #partial switch ev.key.scancode {
                         case .F11: toggle_fullscreen()
+                        // case .TAB: process_event = false
                     }
                     sa.append(&key_presses, KeyEvent{ev.key.scancode, ev.key.mod})
                 case .MOUSE_BUTTON_DOWN: switch ev.button.button {
@@ -143,9 +144,7 @@ update_game :: proc(scene: ^Scene, keys: KeyboardEvents) -> (exit: bool) {
         }
     }
     if g.rmb_down {
-        if g.player.pocket != nil && len(scene.models) > 0 {
-            entity_from_model(scene, scene.models[0].name)
-        }
+        spawn(scene, true)
     }
     new_ticks := sdl.GetTicks();
     dt := f32(new_ticks - g.last_ticks) / 1000
