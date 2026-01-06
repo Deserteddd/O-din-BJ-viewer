@@ -21,6 +21,12 @@ pow        :: linalg.pow
 max        :: math.max
 min        :: math.min
 
+MouseButton :: enum {
+    NONE,
+    LEFT,
+    RIGHT,
+}
+
 Globals :: struct {
     mode:       Mode,
     gpu:        ^sdl.GPUDevice,
@@ -31,15 +37,15 @@ Globals :: struct {
     debug_info:  DebugInfo,
     renderer:    Renderer,
     ocean:       Plane,
+    mb_click:    MouseButton,
     last_ticks:  u64,
     total_time:  f64,
     fov:         f32,
     fullscreen,
-    lmb_down,
-    rmb_down,
     debug_draw: bool,
 
 }
+
 
 g: Globals = {
     fov = 90
@@ -75,7 +81,8 @@ Plane :: struct {
 
 KeyEvent :: struct {
     key: sdl.Scancode,
-    mod: sdl.Keymod
+    mod: sdl.Keymod,
+    repeat: bool,
 }
 
 KeyboardEvents :: sa.Small_Array(64, KeyEvent)

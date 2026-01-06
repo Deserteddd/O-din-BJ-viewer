@@ -53,35 +53,34 @@ init :: proc() {
     init_editor({1280, 720})
 
     g.player = create_player()
-    g.ocean  = load_height_map("")
+    // g.ocean  = load_height_map("")
 }
 
 run :: proc(scene: ^Scene) {
-    
     main_loop: for {
         defer {
             free_all(context.temp_allocator)
-            g.lmb_down = false
-            g.rmb_down = false
+            g.mb_click = .NONE
+            g.editor.tab_flag = false
         }
         now := time.now()
         key_presses: KeyboardEvents
         ev: sdl.Event
         for sdl.PollEvent(&ev) {
-            // process_event := true
-            im_sdl.ProcessEvent(&ev)
+            if !(ev.type == .KEY_DOWN && (ev.key.repeat || ev.key.scancode == .TAB)) {
+                im_sdl.ProcessEvent(&ev)
+            }
             #partial switch ev.type {
                 case .QUIT: 
                     break main_loop
                 case .KEY_DOWN: 
                     #partial switch ev.key.scancode {
                         case .F11: toggle_fullscreen()
-                        // case .TAB: process_event = false
                     }
-                    sa.append(&key_presses, KeyEvent{ev.key.scancode, ev.key.mod})
+                    sa.append(&key_presses, KeyEvent{ev.key.scancode, ev.key.mod, ev.key.repeat})
                 case .MOUSE_BUTTON_DOWN: switch ev.button.button {
-                    case 1: g.lmb_down = true
-                    case 3: g.rmb_down = true
+                    case 1: g.mb_click = .LEFT
+                    case 3: g.mb_click = .RIGHT
                 }
                 case .MOUSE_BUTTON_UP: switch ev.button.button {
                     case 1: stop_dragging()
@@ -101,8 +100,8 @@ run :: proc(scene: ^Scene) {
         submit_3d(&frame)
 
         begin_2d(&frame)
-
         if g.mode == .EDIT {
+            draw_active_aabb(scene^, frame)
             draw_editor(frame)
         } else {
             draw_crosshair(frame)
@@ -143,7 +142,7 @@ update_game :: proc(scene: ^Scene, keys: KeyboardEvents) -> (exit: bool) {
             case .N: g.player.noclip = !g.player.noclip
         }
     }
-    if g.rmb_down {
+    if g.mb_click == .RIGHT {
         spawn(scene, true)
     }
     new_ticks := sdl.GetTicks();

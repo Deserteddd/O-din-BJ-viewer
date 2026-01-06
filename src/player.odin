@@ -65,7 +65,7 @@ update_player :: proc(scene: Scene, dt: f32) {
     win_size := get_window_size()
     ray_origin, ray_dir := ray_from_screen(win_size/2, win_size)
     closest_hit: f32 = math.F32_MAX
-    closest_entity: i32 = -1
+    closest_entity: EntityID = -1
 
     for &entity in scene.entities {
         aabbs := entity_aabbs(entity)
@@ -87,7 +87,7 @@ update_player :: proc(scene: Scene, dt: f32) {
                 bbox.min += mtv
                 bbox.max += mtv
             }
-            if g.lmb_down {
+            if g.mb_click == .LEFT {
                 intersection := ray_intersect_aabb(ray_origin, ray_dir, aabb)
                 if intersection != -1 && intersection < closest_hit {
                     closest_hit = intersection
@@ -107,7 +107,7 @@ update_player :: proc(scene: Scene, dt: f32) {
         if linalg.length(speed.xz) > 20 do speed.xz *= 0.9
     }
 
-    if g.lmb_down {
+    if g.mb_click == .LEFT {
         for &e, i in scene.entities {
             if e.id == closest_entity {
                 g.editor.selected_entity = e.id
