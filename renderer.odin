@@ -224,7 +224,8 @@ draw_scene :: proc(scene: ^Scene) {
 		rd.bind(&ro.ibo)
 
 		for entity in scene.entities {
-			if entity.renderable != &ro || !entity.in_frustum do continue
+			if entity.renderable != &ro do continue
+            // if !entity.in_frustum do continue
             override_values := entity.material_overrides
             rd.push_constant_data(.Pixel, &override_values, 2)
 
@@ -264,23 +265,23 @@ draw_scene :: proc(scene: ^Scene) {
 	}
 
     // Ocean
-	rd.bind(&g.renderer.ps_ocean)
-	rd.bind(&g.renderer.vs_ocean)
-	rd.bind(&g.renderer.plane.vbo)
-	rd.bind(&g.renderer.plane.ibo)
+	// rd.bind(&g.renderer.ps_ocean)
+	// rd.bind(&g.renderer.vs_ocean)
+	// rd.bind(&g.renderer.plane.vbo)
+	// rd.bind(&g.renderer.plane.ibo)
 
-	time := time.duration_seconds(time.since(g.time))
-	rd.push_constant_data(.Vertex, &time, 1)
+	// time := time.duration_seconds(time.since(g.time))
+	// rd.push_constant_data(.Vertex, &time, 1)
 
-	ocean_ubo := struct {
-		vp: matrix[4,4]f32,
-		position: vec2
-	} {
-		vp, g.player.position.xz
-	}
+	// ocean_ubo := struct {
+	// 	vp: matrix[4,4]f32,
+	// 	position: vec2
+	// } {
+	// 	vp, g.player.position.xz
+	// }
 
-    rd.push_constant_data(.Vertex, &ocean_ubo, 0)
-    rd.draw_indexed(0, g.renderer.plane.num_indices)
+    // rd.push_constant_data(.Vertex, &ocean_ubo, 0)
+    // rd.draw_indexed(0, g.renderer.plane.num_indices)
 
 
     // Skybox
@@ -307,7 +308,8 @@ draw_aabbs :: proc(scene: ^Scene) {
     rd.set_primitive_topology(.lineList); defer rd.set_primitive_topology(.triangleList)
 
     for entity in scene.entities {
-        if entity.renderable == nil || !entity.in_frustum do continue
+        if entity.renderable == nil do continue
+        // if !entity.in_frustum do continue
 
         rd.bind(&entity.renderable.aabb);
         model_matrix := lg.matrix4_from_trs(

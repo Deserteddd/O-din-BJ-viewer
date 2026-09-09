@@ -81,6 +81,7 @@ write_save_file :: proc(scene: Scene, loc := #caller_location) {
 	log.infof("%v: Save file writing successful", loc)
 }
 
+@(private = "file")
 load_save_file :: proc(path: string) -> SaveFile {
 	result: SaveFile
 	path := resolve_project_path(path)
@@ -106,7 +107,7 @@ load_scene :: proc(path: string) -> Scene {
 		assert(used_ids[serialized.id] == false)
 		used_ids[serialized.id] = true
 		entity.name = serialized.name
-		entity.physics = Physics {
+		entity.physics = PhysicsComponent {
 			dyn      = serialized.physics.dyn,
 			position = serialized.physics.position,
 			scale    = serialized.physics.scale,
@@ -119,6 +120,7 @@ load_scene :: proc(path: string) -> Scene {
 			),
 			aabb     = serialized.physics.aabb,
 		}
+		add_dynamic_body(&entity)
 		for asset, index in scene.assets {
 			if asset.name == serialized.asset {
 				entity.asset_name = serialized.asset

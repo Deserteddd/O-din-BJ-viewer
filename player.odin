@@ -46,28 +46,29 @@ update_player :: proc() {
     dt := g.dt
     wishveloc := player_wish_speed()
     airborne_at_start := p.airborne
-    if p.noclip {
+    // if p.noclip {
         p.speed = 0
         delta_pos := wishveloc * f32(dt) * 16
         p.position += delta_pos
         p.bbox.min += delta_pos
         p.bbox.max += delta_pos
-    } else {
-        if wishveloc.y > 0 && !p.airborne {
-            p.speed.y = 9
-            p.airborne = true
-        } else if !p.airborne {
-            p.speed += wishveloc
-        } else {
-            air_accelerate(&wishveloc, f32(dt))
-            p.speed.y -= f32(G * dt)
-            p.speed.y = math.max(p.speed.y, -20)
-        }
-        delta_pos := p.speed * f32(dt)
-        p.position += delta_pos
-        p.bbox.min += delta_pos
-        p.bbox.max += delta_pos
-    }
+    // } 
+    // else {
+    //     if wishveloc.y > 0 && !p.airborne {
+    //         p.speed.y = 9
+    //         p.airborne = true
+    //     } else if !p.airborne {
+    //         p.speed += wishveloc
+    //     } else {
+    //         air_accelerate(&wishveloc, f32(dt))
+    //         p.speed.y -= f32(G * dt)
+    //         p.speed.y = math.max(p.speed.y, -20)
+    //     }
+    //     delta_pos := p.speed * f32(dt)
+    //     p.position += delta_pos
+    //     p.bbox.min += delta_pos
+    //     p.bbox.max += delta_pos
+    // }
 }
 
 reset_player_pos :: proc(at_origin := false) {
@@ -95,7 +96,7 @@ player_wish_speed :: proc() -> vec3 {
     yaw_cos := math.cos(math.to_radians(g.player.rotation.y))
     yaw_sin := math.sin(math.to_radians(g.player.rotation.y))
 
-    wish_speed.y = u * f32(int(!g.player.airborne))
+    wish_speed.y = u * f32(int(!g.player.airborne)) - d
     if g.player.noclip do wish_speed.y = u-d
     wish_speed.x += (lr * yaw_cos - fb * yaw_sin)
     wish_speed.z += (lr * yaw_sin + fb * yaw_cos)

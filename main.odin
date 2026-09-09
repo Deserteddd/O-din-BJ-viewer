@@ -58,9 +58,11 @@ init :: proc() {
     init_physics()
 
     add_player()
+    add_ground()
     rd.set_vsync(g.vsync)
     g.player.fov = 90
     g.time = time.now()
+    g.draw_aabbs = true
 }
 
 run :: proc(scene: ^Scene) {
@@ -103,12 +105,12 @@ run :: proc(scene: ^Scene) {
                         case .Q: if !g.player.airborne || g.player.noclip do g.player.checkpoint = get_player_translation()
                         case .N: g.player.noclip = !g.player.noclip
                         case .S: if .CONTROL in mod && !g.running do write_save_file(scene^)
-                        case .NUM1: if len(scene.assets) > 0 do spawn_entity(scene, scene.assets[0].name, false)
-                        case .NUM2: if len(scene.assets) > 1 do spawn_entity(scene, scene.assets[1].name, false)
-                        case .NUM3: if len(scene.assets) > 2 do spawn_entity(scene, scene.assets[2].name, false)
-                        case .NUM4: if len(scene.assets) > 3 do spawn_entity(scene, scene.assets[3].name, false)
-                        case .NUM5: if len(scene.assets) > 4 do spawn_entity(scene, scene.assets[4].name, false)
-                        case .NUM6: if len(scene.assets) > 5 do spawn_entity(scene, scene.assets[5].name, false)
+                        case .NUM1: if len(scene.assets) > 0 do spawn_entity(scene, scene.assets[0].name, false, true)
+                        case .NUM2: if len(scene.assets) > 1 do spawn_entity(scene, scene.assets[1].name, false, true)
+                        case .NUM3: if len(scene.assets) > 2 do spawn_entity(scene, scene.assets[2].name, false, true)
+                        case .NUM4: if len(scene.assets) > 3 do spawn_entity(scene, scene.assets[3].name, false, true)
+                        case .NUM5: if len(scene.assets) > 4 do spawn_entity(scene, scene.assets[4].name, false, true)
+                        case .NUM6: if len(scene.assets) > 5 do spawn_entity(scene, scene.assets[5].name, false, true)
                     }
                 case rd.MouseEvent:
                 #partial switch ev.type {
@@ -117,7 +119,6 @@ run :: proc(scene: ^Scene) {
                 }
             }
         }
-
         update(scene)
         rd.clear()
         draw_scene(scene)
@@ -131,6 +132,21 @@ run :: proc(scene: ^Scene) {
 }
 
 update :: proc(scene: ^Scene) -> (exit: bool) {
+    fmt.println(g.dt)
+    b3.World_Step(g.world.world_id, g.dt, 4)
+	for &entity, i in scene.entities {
+		assert(entity.physics.b3 != {})
+		assert(entity_index(scene, entity.id) == i)
+        old_pos := entity.physics.position
+		entity.physics.position = b3.Body_GetPosition(entity.physics.b3.body)
+	}
+	update_camera()
+    update_player()
+    // selected_index := entity_index(scene, g.selected_entity)
+    // if selected_index >= 0 do fmt.println(scene.entities[selected_index].physics.position)
+	return
+}
+update_ :: proc(scene: ^Scene) -> (exit: bool) {
     if !g.running {
         if g.lmb_click {
             mpos := rd.get_mouse_position()
@@ -160,7 +176,7 @@ update :: proc(scene: ^Scene) -> (exit: bool) {
     update_player()
     //
     if g.lmb_click {
-        index := spawn_entity(scene, "mappi", true)
+        index := spawn_entity(scene, "mappi", true, false)
         scene.entities[index].physics.scale = {1, 0.2, 1}
         scene.entities[index].physics.position += {0, 2, 0}
     }
@@ -178,11 +194,8 @@ update :: proc(scene: ^Scene) -> (exit: bool) {
     airborne_at_start := p.airborne
 
     for &entity, i in scene.entities {
-        //Rotate
-        if entity.asset_name == "helmet" {
-            entity.physics.rotation *= lg.quaternion_angle_axis_f32(g.dt * 0.5, {0, 1, 0})
-        }
 
+        if entity.physics.b3 == {} do fmt.println(entity.asset_name)
         // Get aabb and check visibility
         aabb := get_entity_aabb(entity)
         entity.in_frustum = aabb_intersects_frustum(frustum,  aabb)

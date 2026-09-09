@@ -22,7 +22,7 @@ Entity :: struct {
         roughness: f32,
         attributes: bit_set[MaterialAttribute; u32],
     },
-    physics:    Physics,
+    physics:    PhysicsComponent,
     in_frustum: bool
 }
 
@@ -54,17 +54,7 @@ AABB :: struct {
     max: vec3
 }
 
-Physics :: struct {
-    dyn: bool,
-    position,
-    scale,
-    speed: vec3,
-    rotation: quaternion128,
-    aabb: AABB,
-    b3: struct {
 
-    }
-}
 
 Mesh :: struct {
     tris: [][3]vec3
@@ -72,7 +62,7 @@ Mesh :: struct {
 
 used_ids: map[EntityID]bool
 
-spawn_entity :: proc(scene: ^Scene, asset: string, under_player: bool) -> (index: int) {
+spawn_entity :: proc(scene: ^Scene, asset: string, under_player: bool, shoot: bool) -> (index: int) {
     index = entity_from_asset(scene, asset)
     if index == -1 do return
     entity := &scene.entities[index]
@@ -81,10 +71,20 @@ spawn_entity :: proc(scene: ^Scene, asset: string, under_player: bool) -> (index
     } else {
         screen_size := rd.get_window_size()
         origin, dir := ray_from_screen(screen_size/2, screen_size)
-        entity.physics.position = origin + 10*dir
+        entity.physics.position = origin
+        if shoot {
+            entity.physics.speed = 20*dir
+        } else {
+            entity.physics.position += 10*dir
+        }
     }
+    spawned := entity^
+    add_dynamic_body(&spawned)
+    entity.physics.b3 = spawned.physics.b3
+    fmt.println("Spawned")
     return
 }
+
 
 remove_entity :: proc(scene: ^Scene, id: EntityID) -> bool {
     index := entity_index(scene, id)

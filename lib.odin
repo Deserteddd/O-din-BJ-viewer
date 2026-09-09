@@ -14,7 +14,7 @@ None :: struct{}
 
 to_radians :: math.to_radians_f32
 
-
+abs :: lg.abs
 
 Scene :: struct {
     assets:             []Asset,
