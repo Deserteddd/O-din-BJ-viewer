@@ -120,7 +120,8 @@ load_scene :: proc(path: string) -> Scene {
 			),
 			aabb     = serialized.physics.aabb,
 		}
-		add_dynamic_body(&entity)
+		add_physics_body(&entity)
+
 		for asset, index in scene.assets {
 			if asset.name == serialized.asset {
 				entity.asset_name = serialized.asset
@@ -131,6 +132,7 @@ load_scene :: proc(path: string) -> Scene {
 		}
 		return entity
 	}
+
 	scene: Scene
 	save_file := load_save_file(path)
 	defer free_save_file(save_file)
@@ -238,13 +240,3 @@ load_pixels_u16 :: proc(path: string) -> (pixels: []u16, size: [2]i32) {
 	return
 }
 
-@(private = "file")
-get_pixel_color :: proc(pixels: []byte, row, col: i32, width: i32) -> vec3 {
-	index := (row * width + col) * 4
-
-	r := f32(pixels[index + 0]) / 255.0
-	g := f32(pixels[index + 1]) / 255.0
-	b := f32(pixels[index + 2]) / 255.0
-
-	return vec3{r, g, b}
-}

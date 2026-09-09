@@ -65,23 +65,22 @@ used_ids: map[EntityID]bool
 spawn_entity :: proc(scene: ^Scene, asset: string, under_player: bool, shoot: bool) -> (index: int) {
     index = entity_from_asset(scene, asset)
     if index == -1 do return
-    entity := &scene.entities[index]
+    entity := scene.entities[index]
+    defer scene.entities[index] = entity
     if under_player {
-        entity.physics.position = get_player_translation().x - {0, get_entity_aabb(entity^).max.y, 0}
+        entity.physics.position = get_player_translation().x - {0, get_entity_aabb(entity).max.y, 0}
     } else {
         screen_size := rd.get_window_size()
         origin, dir := ray_from_screen(screen_size/2, screen_size)
         entity.physics.position = origin
         if shoot {
             entity.physics.speed = 20*dir
+            entity.physics.dyn = true
         } else {
             entity.physics.position += 10*dir
         }
     }
-    spawned := entity^
-    add_dynamic_body(&spawned)
-    entity.physics.b3 = spawned.physics.b3
-    fmt.println("Spawned")
+    add_physics_body(&entity)
     return
 }
 
@@ -93,8 +92,10 @@ remove_entity :: proc(scene: ^Scene, id: EntityID) -> bool {
 
 remove_entity_by_index :: proc(scene: ^Scene, index: int) -> bool {
     if index < 0 || index >= len(scene.entities) do return false
-    id := scene.entities[index].id
+    entity := scene.entities[index]
+    id := entity.id
     assert(used_ids[id] == true)
+    destroy_physics_body(&entity)
     ordered_remove_soa(&scene.entities, index)
     used_ids[id] = false
     return true
@@ -108,7 +109,7 @@ entity_index :: proc(scene: ^Scene, id: EntityID) -> int {
     return -1
 }
 
-// Returns -1 on failure
+// Returns: index in entities array, -1 on failure
 entity_from_asset :: proc(scene: ^Scene, asset_name: string, entity_name: string = "") -> (index: int) {
     entity: Entity
     for asset, i in scene.assets {

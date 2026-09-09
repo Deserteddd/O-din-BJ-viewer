@@ -119,16 +119,16 @@ materials_tab :: proc(scene: ^Scene, rect: Rect, selected_material_index: ^int) 
             }
 
             im.LabelText("##", "Params")
-            
+
             base_color := &s.materials.params[0].base_color_factor
             if im.ColorPicker4("Base color", base_color) {
                 update_params_buff = true
-            } 
+            }
 
             if update_params_buff {
                 rd.destroy(s.materials.params_buffer)
                 s.materials.params_buffer = rd.create_structured_buffer(s.materials.params, {.Pixel})
-            } 
+            }
         }
     }
 }
@@ -156,11 +156,18 @@ entities_tab :: proc(scene: ^Scene, rect: Rect, selected_entity_index: ^int) {
         }
         // Selected entity options
         if selected_entity_index^ != -1 && im.BeginChild("Lapsonen") {
-            defer im.EndChild()
+        	selected_index := selected_entity_index^
+	        s := scene.entities[selected_index]
+            defer {
+	            scene.entities[selected_index] = s // Dumb hack to work with soa pointers
+            	im.EndChild()
+             	for &axis in s.physics.scale do axis = max(0.01, axis)
+            }
             im.Separator()
-            s := &scene.entities[selected_entity_index^]
             im.LabelText("", "Physics")
-            im.DragFloat3("Position", &s.physics.position, 0.01)
+            if im.DragFloat3("Position", &s.physics.position, 0.01) {
+            	set_physics_position(&s)
+            }
             im.DragFloat3("Scale",    &s.physics.scale, 0.01)
             im.Separator()
             if im.Button("Delete") {
@@ -170,40 +177,48 @@ entities_tab :: proc(scene: ^Scene, rect: Rect, selected_entity_index: ^int) {
             if im.Button("Duplicate") {
                 index := entity_from_asset(scene, s.asset_name)
                 offset := s.physics.aabb.min * 2 * s.physics.scale
-                scene.entities[index].physics = s.physics				
+                scene.entities[index].physics = s.physics
                 scene.entities[index].physics.position += {offset.x, 0, 0}
                 scene.entities[index].in_frustum = true
-                    
+
 
                 g.selected_entity = scene.entities[index].id
             }
+
+            if im.Checkbox("Dynamic", &s.physics.dyn) do add_physics_body(&s)
+
             im.LabelText("##", "Material overrides")
+            // Color override
             {
                 enabled := .Color in s.material_overrides.attributes
                 if im.Checkbox("Color", &enabled) {
                     if enabled do s.material_overrides.attributes += {.Color}
                     else do s.material_overrides.attributes -= {.Color}
                 }
-                if enabled do im.ColorEdit4("##", &s.material_overrides.color) 
+                if enabled do im.ColorEdit4("##", &s.material_overrides.color)
             }
+
+            // Metal override
             {
                 enabled := .Metallic in s.material_overrides.attributes
                 if im.Checkbox("Metal", &enabled) {
                     if enabled do s.material_overrides.attributes += {.Metallic}
                     else do s.material_overrides.attributes -= {.Metallic}
                 }
-                if enabled do im.SliderFloat("##", &s.material_overrides.metallic, 0, 1); 
+                if enabled do im.SliderFloat("##", &s.material_overrides.metallic, 0, 1);
             }
+
+            // Rough override
             {
                 enabled := .Roughness in s.material_overrides.attributes
                 if im.Checkbox("Rough", &enabled) {
                     if enabled do s.material_overrides.attributes += {.Roughness}
                     else do s.material_overrides.attributes -= {.Roughness}
                 }
-                if enabled do im.SliderFloat("###", &s.material_overrides.roughness, 0, 1); 
+                if enabled do im.SliderFloat("###", &s.material_overrides.roughness, 0, 1);
             }
 
-            for &axis in s.physics.scale do axis = max(0.01, axis)
+
         }
     }
 }

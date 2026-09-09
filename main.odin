@@ -58,7 +58,7 @@ init :: proc() {
     init_physics()
 
     add_player()
-    add_ground()
+
     rd.set_vsync(g.vsync)
     g.player.fov = 90
     g.time = time.now()
@@ -122,8 +122,8 @@ run :: proc(scene: ^Scene) {
         update(scene)
         rd.clear()
         draw_scene(scene)
-        post_process()
         if g.draw_aabbs do draw_aabbs(scene)
+        post_process()
         draw_text(fmt.aprintf("%v", i32(fps)), 0, ._12, {0, 1, 0})
         if !g.running do draw_imgui(scene)
         else do draw_sprite(g.renderer.crosshair)
@@ -132,18 +132,48 @@ run :: proc(scene: ^Scene) {
 }
 
 update :: proc(scene: ^Scene) -> (exit: bool) {
-    fmt.println(g.dt)
-    b3.World_Step(g.world.world_id, g.dt, 4)
+
+	b3.World_Step(g.world.world_id, g.dt, 4)
 	for &entity, i in scene.entities {
-		assert(entity.physics.b3 != {})
-		assert(entity_index(scene, entity.id) == i)
-        old_pos := entity.physics.position
+		if entity.physics.b3 == {} {
+			fmt.println(entity.physics)
+		}
 		entity.physics.position = b3.Body_GetPosition(entity.physics.b3.body)
-	}
+		entity.physics.speed = b3.Body_GetLinearVelocity(entity.physics.b3.body)
+
+		// Remove long gone entities
+		if lg.distance(entity.physics.position, vec3{}) >= 500 {
+			remove_entity(scene, entity.id)
+		}
+    }
+
+    if !g.running {
+        if g.lmb_click {
+            mpos := rd.get_mouse_position()
+            win_size := rd.get_window_size()
+            if mpos.x < 300 || mpos.x > win_size.x - 300 do return // Check click in viewport
+            ray_origin, ray_dir := ray_from_screen(mpos, win_size)
+            closest_hit: f32 = max(f32)
+            closest_entity: EntityID
+            for &entity in scene.entities {
+                ensure(entity.id != 0)
+                intersection := ray_intersect_aabb(ray_origin, ray_dir, get_entity_aabb(entity))
+                if intersection != -1 && intersection < closest_hit {
+                    closest_hit = intersection
+                    closest_entity = entity.id
+                }
+            }
+            if closest_entity != 0 {
+                g.selected_entity = closest_entity
+            } else {
+                g.selected_entity = 0
+            }
+        }
+        return
+    }
 	update_camera()
-    update_player()
-    // selected_index := entity_index(scene, g.selected_entity)
-    // if selected_index >= 0 do fmt.println(scene.entities[selected_index].physics.position)
+   	update_player()
+
 	return
 }
 update_ :: proc(scene: ^Scene) -> (exit: bool) {

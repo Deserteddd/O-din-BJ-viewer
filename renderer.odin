@@ -116,7 +116,7 @@ compile_shaders :: proc() {
             log.errorf("Error reading shader file: %v", path, location = loc)
         }
         return data
-    } 
+    }
 
     shader_2D       := load_shader(resolve_project_path("shaders/2D.hlsl"))
     shader_text     := load_shader(resolve_project_path("shaders/text.hlsl"))
@@ -126,10 +126,10 @@ compile_shaders :: proc() {
     shader_ocean    := load_shader(resolve_project_path("shaders/ocean.hlsl"))
 
     compile_vs :: proc(
-        shader: ^rd.VertexShader, 
-        data: []byte, 
-        entry: string, 
-        $vertex_type: typeid) 
+        shader: ^rd.VertexShader,
+        data: []byte,
+        entry: string,
+        $vertex_type: typeid)
     {
         if shader.shader != nil do rd.destroy(shader)
         ok: bool
@@ -243,7 +243,7 @@ draw_scene :: proc(scene: ^Scene) {
 				rd.draw_indexed(primitive.index_start, primitive.index_count)
 			}
 
-			// Selected entity's 
+			// Selected entity's
 			if !g.running && g.selected_entity == entity.id {
 				rd.bind(&g.renderer.vs_aabb); defer rd.bind(&g.renderer.vs_gfx)
 				rd.bind(&g.renderer.ps_aabb); defer rd.bind(&g.renderer.ps_gfx)
@@ -265,23 +265,23 @@ draw_scene :: proc(scene: ^Scene) {
 	}
 
     // Ocean
-	// rd.bind(&g.renderer.ps_ocean)
-	// rd.bind(&g.renderer.vs_ocean)
-	// rd.bind(&g.renderer.plane.vbo)
-	// rd.bind(&g.renderer.plane.ibo)
+	rd.bind(&g.renderer.ps_ocean)
+	rd.bind(&g.renderer.vs_ocean)
+	rd.bind(&g.renderer.plane.vbo)
+	rd.bind(&g.renderer.plane.ibo)
 
-	// time := time.duration_seconds(time.since(g.time))
-	// rd.push_constant_data(.Vertex, &time, 1)
+	time := time.duration_seconds(time.since(g.time))
+	rd.push_constant_data(.Vertex, &time, 1)
 
-	// ocean_ubo := struct {
-	// 	vp: matrix[4,4]f32,
-	// 	position: vec2
-	// } {
-	// 	vp, g.player.position.xz
-	// }
+	ocean_ubo := struct {
+		vp: matrix[4,4]f32,
+		position: vec2
+	} {
+		vp, g.player.position.xz
+	}
 
-    // rd.push_constant_data(.Vertex, &ocean_ubo, 0)
-    // rd.draw_indexed(0, g.renderer.plane.num_indices)
+    rd.push_constant_data(.Vertex, &ocean_ubo, 0)
+    rd.draw_indexed(0, g.renderer.plane.num_indices)
 
 
     // Skybox
@@ -339,12 +339,12 @@ post_process :: proc() {
 
 	view_matrix := create_view_matrix()
 	proj_matrix := create_proj_matrix()
-	
+
 	inv_view_mat := lg.inverse(view_matrix)
 	inv_proj_mat := lg.inverse(proj_matrix)
 	b0: struct {_: mat4, _: mat4, _, _: f32} = {
-        inv_view_mat, 
-        inv_proj_mat, 
+        inv_view_mat,
+        inv_proj_mat,
         g.renderer.options.fog_start,
         g.renderer.options.fog_end
     }
@@ -503,7 +503,7 @@ draw_text :: proc(text: string, pos: vec2, size: FontSize, color: vec3) {
 		ubo := TextUBO {
 			win_size = win_size,
 			src      = {
-				atlas_slot.x*32+1, atlas_slot.y*32+1, 
+				atlas_slot.x*32+1, atlas_slot.y*32+1,
 				f32(sprite.width)/16-1, f32(sprite.height)/16-1
 			},
 			tex_size = {f32(sprite.width), f32(sprite.height)},
